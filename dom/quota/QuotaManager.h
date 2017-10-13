@@ -19,14 +19,17 @@
 #include "Client.h"
 #include "PersistenceType.h"
 
+#include "prenv.h"
+
 #define QUOTA_MANAGER_CONTRACTID "@mozilla.org/dom/quota/manager;1"
 
+class mozIStorageConnection;
 class nsIEventTarget;
 class nsIPrincipal;
 class nsIThread;
 class nsITimer;
 class nsIURI;
-class nsPIDOMWindow;
+class nsPIDOMWindowOuter;
 class nsIRunnable;
 
 BEGIN_QUOTA_NAMESPACE
@@ -99,13 +102,6 @@ class QuotaManager final
   friend class OriginInfo;
   friend class QuotaObject;
 
-  enum MozBrowserPatternFlag
-  {
-    MozBrowser = 0,
-    NotMozBrowser,
-    IgnoreMozBrowser
-  };
-
   typedef nsClassHashtable<nsCStringHashKey,
                            nsTArray<DirectoryLockImpl*>> DirectoryLockTable;
 
@@ -119,7 +115,11 @@ private:
 public:
   NS_INLINE_DECL_REFCOUNTING(QuotaManager)
 
-  static const bool kRunningXPCShellTests;
+  static bool IsRunningXPCShellTests()
+  {
+    static bool kRunningXPCShellTests = !!PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR");
+    return kRunningXPCShellTests;
+  }
 
   static const char kReplaceChars[];
 
@@ -202,6 +202,34 @@ public:
                         const nsACString& aASCIIOrigin,
                         nsIFile** aDirectory) const;
 
+  nsresult
+  RestoreDirectoryMetadata2(nsIFile* aDirectory, bool aPersistent);
+
+  nsresult
+  GetDirectoryMetadata2(nsIFile* aDirectory,
+                        int64_t* aTimestamp,
+                        nsACString& aSuffix,
+                        nsACString& aGroup,
+                        nsACString& aOrigin,
+                        bool* aIsApp);
+
+  nsresult
+  GetDirectoryMetadata2WithRestore(nsIFile* aDirectory,
+                                   bool aPersistent,
+                                   int64_t* aTimestamp,
+                                   nsACString& aSuffix,
+                                   nsACString& aGroup,
+                                   nsACString& aOrigin,
+                                   bool* aIsApp);
+
+  nsresult
+  GetDirectoryMetadata2(nsIFile* aDirectory, int64_t* aTimestamp);
+
+  nsresult
+  GetDirectoryMetadata2WithRestore(nsIFile* aDirectory,
+                                   bool aPersistent,
+                                   int64_t* aTimestamp);
+
   // This is the main entry point into the QuotaManager API.
   // Any storage API implementation (quota client) that participates in
   // centralized quota and storage handling should call this method to get
@@ -230,6 +258,7 @@ public:
   void
   OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
                         const OriginScope& aOriginScope,
+                        Nullable<Client::Type> aClientType,
                         bool aExclusive,
                         OpenDirectoryListener* aOpenListener);
 
@@ -239,7 +268,11 @@ public:
                             nsTArray<RefPtr<DirectoryLockImpl>>& aLocks);
 
   nsresult
+  EnsureStorageIsInitialized();
+
+  nsresult
   EnsureOriginIsInitialized(PersistenceType aPersistenceType,
+                            const nsACString& aSuffix,
                             const nsACString& aGroup,
                             const nsACString& aOrigin,
                             bool aIsApp,
@@ -290,6 +323,12 @@ public:
   GetClient(Client::Type aClientType);
 
   const nsString&
+  GetBasePath() const
+  {
+    return mBasePath;
+  }
+
+  const nsString&
   GetStoragePath() const
   {
     return mStoragePath;
@@ -314,6 +353,10 @@ public:
   uint64_t
   GetGroupLimit() const;
 
+  void
+  GetGroupUsageAndLimit(const nsACString& aGroup,
+                        UsageInfo* aUsageInfo);
+
   static void
   GetStorageId(PersistenceType aPersistenceType,
                const nsACString& aOrigin,
@@ -322,18 +365,21 @@ public:
 
   static nsresult
   GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
+                       nsACString* aSuffix,
                        nsACString* aGroup,
                        nsACString* aOrigin,
                        bool* aIsApp);
 
   static nsresult
-  GetInfoFromWindow(nsPIDOMWindow* aWindow,
+  GetInfoFromWindow(nsPIDOMWindowOuter* aWindow,
+                    nsACString* aSuffix,
                     nsACString* aGroup,
                     nsACString* aOrigin,
                     bool* aIsApp);
 
   static void
-  GetInfoForChrome(nsACString* aGroup,
+  GetInfoForChrome(nsACString* aSuffix,
+                   nsACString* aGroup,
                    nsACString* aOrigin,
                    bool* aIsApp);
 
@@ -352,31 +398,6 @@ public:
 
   static void
   ChromeOrigin(nsACString& aOrigin);
-
-  static void
-  GetOriginPatternString(uint32_t aAppId, bool aBrowserOnly,
-                         const nsACString& aOrigin, nsAutoCString& _retval)
-  {
-    return GetOriginPatternString(aAppId,
-                                  aBrowserOnly ? MozBrowser : NotMozBrowser,
-                                  aOrigin, _retval);
-  }
-
-  static void
-  GetOriginPatternStringMaybeIgnoreBrowser(uint32_t aAppId, bool aBrowserOnly,
-                                           nsAutoCString& _retval)
-  {
-    return GetOriginPatternString(aAppId,
-                                  aBrowserOnly ? MozBrowser : IgnoreMozBrowser,
-                                  EmptyCString(), _retval);
-  }
-
-  static nsresult
-  GetDirectoryMetadata(nsIFile* aDirectory,
-                       int64_t* aTimestamp,
-                       nsACString& aGroup,
-                       nsACString& aOrigin,
-                       bool* aIsApp);
 
 private:
   QuotaManager();
@@ -431,7 +452,15 @@ private:
   MaybeUpgradePersistentStorageDirectory();
 
   nsresult
-  MaybeUpgradeStorageArea();
+  MaybeRemoveOldDirectories();
+
+  nsresult
+  UpgradeStorageFrom0ToCurrent(mozIStorageConnection* aConnection);
+
+#if 0
+  nsresult
+  UpgradeStorageFrom1To2(mozIStorageConnection* aConnection);
+#endif
 
   nsresult
   InitializeRepository(PersistenceType aPersistenceType);
@@ -468,12 +497,6 @@ private:
   GetDirectoryLockTable(PersistenceType aPersistenceType);
 
   static void
-  GetOriginPatternString(uint32_t aAppId,
-                         MozBrowserPatternFlag aBrowserFlag,
-                         const nsACString& aOrigin,
-                         nsAutoCString& _retval);
-
-  static void
   ShutdownTimerCallback(nsITimer* aTimer, void* aClosure);
 
   mozilla::Mutex mQuotaMutex;
@@ -500,8 +523,11 @@ private:
   // by any mutex but it is only ever touched on the IO thread.
   nsTArray<nsCString> mInitializedOrigins;
 
-  nsAutoTArray<RefPtr<Client>, Client::TYPE_MAX> mClients;
+  // This array is populated at initialization time and then never modified, so
+  // it can be iterated on any thread.
+  AutoTArray<RefPtr<Client>, Client::TYPE_MAX> mClients;
 
+  nsString mBasePath;
   nsString mIndexedDBPath;
   nsString mStoragePath;
   nsString mPermanentStoragePath;
@@ -512,7 +538,7 @@ private:
   uint64_t mTemporaryStorageUsage;
   bool mTemporaryStorageInitialized;
 
-  bool mStorageAreaInitialized;
+  bool mStorageInitialized;
 };
 
 END_QUOTA_NAMESPACE

@@ -1,12 +1,14 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-// Tests that ViewHelpers.Prefs work properly.
+"use strict";
 
-var {ViewHelpers} = Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm", {});
+// Tests that the localization utils work properly.
+
+const { LocalizationHelper } = require("devtools/shared/l10n");
 
 function test() {
-  let l10n = new ViewHelpers.L10N();
+  let l10n = new LocalizationHelper();
 
   is(l10n.numberWithDecimals(1234.56789, 2), "1,234.57",
     "The first number was properly localized.");

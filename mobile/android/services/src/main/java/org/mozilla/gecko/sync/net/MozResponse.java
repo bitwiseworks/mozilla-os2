@@ -11,9 +11,12 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.Scanner;
 
+import org.json.simple.JSONArray;
+import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
+import org.mozilla.gecko.sync.NonArrayJSONException;
 import org.mozilla.gecko.sync.NonObjectJSONException;
 
 import ch.boye.httpclientandroidlib.Header;
@@ -89,14 +92,12 @@ public class MozResponse {
    *
    * @throws IllegalStateException
    * @throws IOException
-   * @throws ParseException
    * @throws NonObjectJSONException
    */
-  public ExtendedJSONObject jsonObjectBody() throws IllegalStateException, IOException,
-                                 ParseException, NonObjectJSONException {
+  public ExtendedJSONObject jsonObjectBody() throws IllegalStateException, IOException, NonObjectJSONException {
     if (body != null) {
       // Do it from the cached String.
-      return ExtendedJSONObject.parseJSONObject(body);
+      return new ExtendedJSONObject(body);
     }
 
     HttpEntity entity = this.response.getEntity();
@@ -107,9 +108,36 @@ public class MozResponse {
     InputStream content = entity.getContent();
     try {
       Reader in = new BufferedReader(new InputStreamReader(content, "UTF-8"));
-      return ExtendedJSONObject.parseJSONObject(in);
+      return new ExtendedJSONObject(in);
     } finally {
       content.close();
+    }
+  }
+
+  public JSONArray jsonArrayBody() throws NonArrayJSONException, IOException {
+    final JSONParser parser = new JSONParser();
+    try {
+      if (body != null) {
+        // Do it from the cached String.
+        return (JSONArray) parser.parse(body);
+      }
+
+      final HttpEntity entity = this.response.getEntity();
+      if (entity == null) {
+        throw new IOException("no entity");
+      }
+
+      final InputStream content = entity.getContent();
+      final Reader in = new BufferedReader(new InputStreamReader(content, "UTF-8"));
+      try {
+        return (JSONArray) parser.parse(in);
+      } finally {
+        in.close();
+      }
+    } catch (ClassCastException | ParseException e) {
+      NonArrayJSONException exception = new NonArrayJSONException("value must be a json array");
+      exception.initCause(e);
+      throw exception;
     }
   }
 
@@ -121,7 +149,7 @@ public class MozResponse {
     response = res;
   }
 
-  private String getNonMissingHeader(String h) {
+  protected String getNonMissingHeader(String h) {
     if (!this.hasHeader(h)) {
       return null;
     }

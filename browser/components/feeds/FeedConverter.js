@@ -1,4 +1,4 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */ 
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -224,10 +224,9 @@ FeedConverter.prototype = {
               try {
                 let title = feed.title ? feed.title.plainText() : "";
                 let desc = feed.subtitle ? feed.subtitle.plainText() : "";
-                let feedReader = safeGetCharPref(getPrefActionForType(feedType), "bookmarks");
-                feedService.addToClientReader(result.uri.spec, title, desc, feed.type, feedReader);
+                feedService.addToClientReader(result.uri.spec, title, desc, feed.type, handler);
                 return;
-              } catch(ex) { /* fallback to preview mode */ }
+              } catch (ex) { /* fallback to preview mode */ }
           }
         }
       }
@@ -255,8 +254,11 @@ FeedConverter.prototype = {
         let aboutFeedsURI = ios.newURI("about:feeds", null, null);
         chromeChannel = ios.newChannelFromURIWithLoadInfo(aboutFeedsURI, loadInfo);
         chromeChannel.originalURI = result.uri;
+
+        // carry the origin attributes from the channel that loaded the feed.
         chromeChannel.owner =
-          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI, {});
+          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI,
+                                                                 loadInfo.originAttributes);
       } else {
         chromeChannel = ios.newChannelFromURIWithLoadInfo(result.uri, loadInfo);
       }
@@ -296,7 +298,9 @@ FeedConverter.prototype = {
         request.cancel(Cr.NS_BINDING_ABORTED);
         return;
       }
-      let noSniff = httpChannel.getResponseHeader("X-Moz-Is-Feed");
+
+      // Note: this throws if the header is not set.
+      httpChannel.getResponseHeader("X-Moz-Is-Feed");
     }
     catch (ex) {
       this._sniffed = true;
@@ -488,7 +492,9 @@ GenericProtocolHandler.prototype = {
   },
 
   get protocolFlags() {
-    return this._http.protocolFlags;
+    let {URI_DANGEROUS_TO_LOAD, ALLOWS_PROXY_HTTP, ALLOWS_PROXY} =
+      Ci.nsIProtocolHandler;
+    return URI_DANGEROUS_TO_LOAD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP;
   },
 
   get defaultPort() {
@@ -509,16 +515,13 @@ GenericProtocolHandler.prototype = {
       throw Cr.NS_ERROR_MALFORMED_URI;
 
     let prefix = spec.substr(scheme.length, 2) == "//" ? "http:" : "";
-    let inner = Cc["@mozilla.org/network/io-service;1"].
-                getService(Ci.nsIIOService).newURI(spec.replace(scheme, prefix),
-                                                   originalCharset, baseURI);
-    let netutil = Cc["@mozilla.org/network/util;1"].getService(Ci.nsINetUtil);
-    const URI_INHERITS_SECURITY_CONTEXT = Ci.nsIProtocolHandler
-                                            .URI_INHERITS_SECURITY_CONTEXT;
-    if (netutil.URIChainHasFlags(inner, URI_INHERITS_SECURITY_CONTEXT))
+    let inner = Services.io.newURI(spec.replace(scheme, prefix),
+                                   originalCharset, baseURI);
+
+    if (!["http", "https"].includes(inner.scheme))
       throw Cr.NS_ERROR_MALFORMED_URI;
 
-    let uri = netutil.newSimpleNestedURI(inner);
+    let uri = Services.io.QueryInterface(Ci.nsINetUtil).newSimpleNestedURI(inner);
     uri.spec = inner.spec.replace(prefix, scheme);
     return uri;
   },

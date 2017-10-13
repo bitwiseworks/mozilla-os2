@@ -61,10 +61,11 @@ namespace webrtc {
 class MouseCursorMonitorX11 : public MouseCursorMonitor,
                               public SharedXDisplay::XEventHandler {
  public:
-  MouseCursorMonitorX11(const DesktopCaptureOptions& options, Window window);
+  MouseCursorMonitorX11(const DesktopCaptureOptions& options, Window window, Window inner_window);
   virtual ~MouseCursorMonitorX11();
 
-  void Init(Callback* callback, Mode mode) override;
+  void Start(Callback* callback, Mode mode) override;
+  void Stop() override;
   void Capture() override;
 
  private:
@@ -80,6 +81,7 @@ class MouseCursorMonitorX11 : public MouseCursorMonitor,
   Callback* callback_;
   Mode mode_;
   Window window_;
+  Window inner_window_;
 
   bool have_xfixes_;
   int xfixes_event_base_;
@@ -88,26 +90,25 @@ class MouseCursorMonitorX11 : public MouseCursorMonitor,
   rtc::scoped_ptr<MouseCursor> cursor_shape_;
 };
 
+// For screens, we pass the same windowid for window and inner_window
 MouseCursorMonitorX11::MouseCursorMonitorX11(
     const DesktopCaptureOptions& options,
-    Window window)
+    Window window, Window inner_window)
     : x_display_(options.x_display()),
       callback_(NULL),
       mode_(SHAPE_AND_POSITION),
       window_(window),
+      inner_window_(inner_window),
       have_xfixes_(false),
       xfixes_event_base_(-1),
       xfixes_error_base_(-1) {}
 
 MouseCursorMonitorX11::~MouseCursorMonitorX11() {
-  if (have_xfixes_) {
-    x_display_->RemoveEventHandler(xfixes_event_base_ + XFixesCursorNotify,
-                                   this);
-  }
+  Stop();
 }
 
-void MouseCursorMonitorX11::Init(Callback* callback, Mode mode) {
-  // Init can be called only once per instance of MouseCursorMonitor.
+void MouseCursorMonitorX11::Start(Callback* callback, Mode mode) {
+  // Start can be called only if not started
   assert(!callback_);
   assert(callback);
 
@@ -126,6 +127,14 @@ void MouseCursorMonitorX11::Init(Callback* callback, Mode mode) {
     CaptureCursor();
   } else {
     LOG(LS_INFO) << "X server does not support XFixes.";
+  }
+}
+
+void MouseCursorMonitorX11::Stop() {
+  callback_ = NULL;
+  if (have_xfixes_) {
+    x_display_->RemoveEventHandler(xfixes_event_base_ + XFixesCursorNotify,
+                                   this);
   }
 }
 
@@ -150,7 +159,7 @@ void MouseCursorMonitorX11::Capture() {
     unsigned int mask;
 
     XErrorTrap error_trap(display());
-    Bool result = XQueryPointer(display(), window_, &root_window, &child_window,
+    Bool result = XQueryPointer(display(), inner_window_, &root_window, &child_window,
                                 &root_x, &root_y, &win_x, &win_y, &mask);
     CursorState state;
     if (!result || error_trap.GetLastErrorAndDisable() != 0) {
@@ -216,10 +225,10 @@ MouseCursorMonitor* MouseCursorMonitor::CreateForWindow(
     const DesktopCaptureOptions& options, WindowId window) {
   if (!options.x_display())
     return NULL;
-  window = GetTopLevelWindow(options.x_display()->display(), window);
-  if (window == None)
+  WindowId outer_window = GetTopLevelWindow(options.x_display()->display(), window);
+  if (outer_window == None)
     return NULL;
-  return new MouseCursorMonitorX11(options, window);
+  return new MouseCursorMonitorX11(options, outer_window, window);
 }
 
 MouseCursorMonitor* MouseCursorMonitor::CreateForScreen(
@@ -227,8 +236,8 @@ MouseCursorMonitor* MouseCursorMonitor::CreateForScreen(
     ScreenId screen) {
   if (!options.x_display())
     return NULL;
-  return new MouseCursorMonitorX11(
-      options, DefaultRootWindow(options.x_display()->display()));
+  WindowId window = DefaultRootWindow(options.x_display()->display());
+  return new MouseCursorMonitorX11(options, window, window);
 }
 
 }  // namespace webrtc

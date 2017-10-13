@@ -45,10 +45,26 @@ add_task(function* () {
   is(details, "div,40,84", "synthesizeMouseAtCenter mouseup with complex selector");
   ok(!cancelled, "synthesizeMouseAtCenter mouseup with complex selector cancelled");
 
-  let one = browser.contentDocument.getElementById("one");
-  yield BrowserTestUtils.synthesizeMouseAtCenter(one, {}, browser);
-  details = yield getLastEventDetails(browser);
-  is(details, "button,31,34", "synthesizeMouseAtCenter with wrapper");
-
   gBrowser.removeTab(tab);
+});
+
+add_task(function* () {
+  yield BrowserTestUtils.registerAboutPage(
+    registerCleanupFunction, "about-pages-are-cool",
+    getRootDirectory(gTestPath) + "dummy.html", 0);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(
+    gBrowser, "about:about-pages-are-cool", true);
+  ok(tab, "Successfully created an about: page and loaded it.");
+  yield BrowserTestUtils.removeTab(tab);
+  try {
+    yield BrowserTestUtils.unregisterAboutPage("about-pages-are-cool");
+    ok(true, "Successfully unregistered the about page.");
+  } catch (ex) {
+    ok(false, "Should not throw unregistering a known about: page");
+  }
+  yield BrowserTestUtils.unregisterAboutPage("random-other-about-page").then(() => {
+    ok(false, "Should not have succeeded unregistering an unknown about: page.");
+  }, () => {
+    ok(true, "Should have returned a rejected promise trying to unregister an unknown about page");
+  });
 });

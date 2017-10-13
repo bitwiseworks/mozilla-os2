@@ -9,14 +9,14 @@ function createPrincipal(aOrigin, aOriginAttributes)
   return Services.scriptSecurityManager.createCodebasePrincipal(NetUtil.newURI(aOrigin), aOriginAttributes);
 }
 
-// Return the data required by 'clear-origin-data' notification.
+// Return the data required by 'clear-origin-attributes-data' notification.
 function getData(aPattern)
 {
   return JSON.stringify(aPattern);
 }
 
 // Use aEntries to create principals, add permissions to them and check that they have them.
-// Then, it is notifying 'clear-origin-data' with the given aData and check if the permissions
+// Then, it is notifying 'clear-origin-attributes-data' with the given aData and check if the permissions
 // of principals[i] matches the permission in aResults[i].
 function test(aEntries, aData, aResults)
 {
@@ -32,7 +32,7 @@ function test(aEntries, aData, aResults)
     do_check_eq(pm.testPermissionFromPrincipal(principal, "test/clear-origin"), pm.ALLOW_ACTION);
   }
 
-  Services.obs.notifyObservers(null, 'clear-origin-data', aData);
+  Services.obs.notifyObservers(null, 'clear-origin-attributes-data', aData);
 
   var length = aEntries.length;
   for (let i=0; i<length; ++i) {
@@ -54,7 +54,7 @@ function run_test()
 
   let entries = [
     { origin: 'http://example.com', originAttributes: { appId: 1 } },
-    { origin: 'http://example.com', originAttributes: { appId: 1, inBrowser: true } },
+    { origin: 'http://example.com', originAttributes: { appId: 1, inIsolatedMozBrowser: true } },
     { origin: 'http://example.com', originAttributes: {} },
     { origin: 'http://example.com', originAttributes: { appId: 2 } },
   ];
@@ -64,5 +64,5 @@ function run_test()
 
   // In that case, only the permissions of app 1 related to a browserElement should be removed.
   // All the other permissions should stay.
-  test(entries, getData({appId: 1, inBrowser: true}), [ pm.ALLOW_ACTION, pm.UNKNOWN_ACTION, pm.ALLOW_ACTION, pm.ALLOW_ACTION ]);
+  test(entries, getData({appId: 1, inIsolatedMozBrowser: true}), [ pm.ALLOW_ACTION, pm.UNKNOWN_ACTION, pm.ALLOW_ACTION, pm.ALLOW_ACTION ]);
 }

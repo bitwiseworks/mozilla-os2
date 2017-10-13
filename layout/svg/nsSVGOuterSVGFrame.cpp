@@ -9,7 +9,7 @@
 // Keep others in (case-insensitive) order:
 #include "nsDisplayList.h"
 #include "nsIDocument.h"
-#include "nsIDOMWindow.h"
+#include "nsIDOMHTMLIFrameElement.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsRenderingContext.h"
@@ -57,14 +57,14 @@ nsSVGOuterSVGFrame::UnregisterForeignObject(nsSVGForeignObjectFrame* aFrame)
 
 nsContainerFrame*
 NS_NewSVGOuterSVGFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
-{  
+{
   return new (aPresShell) nsSVGOuterSVGFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGOuterSVGFrame)
 
 nsSVGOuterSVGFrame::nsSVGOuterSVGFrame(nsStyleContext* aContext)
-    : nsSVGOuterSVGFrameBase(aContext)
+    : nsSVGDisplayContainerFrame(aContext)
     , mFullZoom(aContext->PresContext()->GetFullZoom())
     , mViewportInitialized(false)
     , mIsRootContent(false)
@@ -113,9 +113,9 @@ nsSVGOuterSVGFrame::Init(nsIContent*       aContent,
     AddStateBits(NS_FRAME_IS_NONDISPLAY);
   }
 
-  nsSVGOuterSVGFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
-  nsIDocument* doc = mContent->GetCurrentDoc();
+  nsIDocument* doc = mContent->GetUncomposedDoc();
   if (doc) {
     // we only care about our content's zoom and pan values if it's the root element
     if (doc->GetRootElement() == mContent) {
@@ -142,11 +142,10 @@ nsSVGOuterSVGFrame::Init(nsIContent*       aContent,
 
 NS_QUERYFRAME_HEAD(nsSVGOuterSVGFrame)
   NS_QUERYFRAME_ENTRY(nsISVGSVGFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGOuterSVGFrameBase)
+NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
 
 //----------------------------------------------------------------------
 // nsIFrame methods
-  
 //----------------------------------------------------------------------
 // reflowing
 
@@ -277,7 +276,7 @@ nsSVGOuterSVGFrame::GetIntrinsicRatio()
                   NSToCoordRoundWithClamp(viewBoxHeight));
   }
 
-  return nsSVGOuterSVGFrameBase::GetIntrinsicRatio();
+  return nsSVGDisplayContainerFrame::GetIntrinsicRatio();
 }
 
 /* virtual */
@@ -348,43 +347,40 @@ nsSVGOuterSVGFrame::ComputeSize(nsRenderingContext *aRenderingContext,
                "we lack an intrinsic height or width.");
   }
 
-  return nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(aWM,
-                            aRenderingContext, this,
-                            intrinsicSize, GetIntrinsicRatio(),
-                            cbSize,
-                            aMargin,
-                            aBorder,
-                            aPadding);
+  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+                                            intrinsicSize, GetIntrinsicRatio(),
+                                            cbSize, aMargin, aBorder, aPadding,
+                                            aFlags);
 }
 
 void
 nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
-                           nsHTMLReflowMetrics&     aDesiredSize,
-                           const nsHTMLReflowState& aReflowState,
+                           ReflowOutput&     aDesiredSize,
+                           const ReflowInput& aReflowInput,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsSVGOuterSVGFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsSVGOuterSVGFrame::Reflow: availSize=%d,%d",
-                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+                  aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
-  aDesiredSize.Width()  = aReflowState.ComputedWidth() +
-                          aReflowState.ComputedPhysicalBorderPadding().LeftRight();
-  aDesiredSize.Height() = aReflowState.ComputedHeight() +
-                          aReflowState.ComputedPhysicalBorderPadding().TopBottom();
+  aDesiredSize.Width()  = aReflowInput.ComputedWidth() +
+                          aReflowInput.ComputedPhysicalBorderPadding().LeftRight();
+  aDesiredSize.Height() = aReflowInput.ComputedHeight() +
+                          aReflowInput.ComputedPhysicalBorderPadding().TopBottom();
 
   NS_ASSERTION(!GetPrevInFlow(), "SVG can't currently be broken across pages.");
 
   SVGSVGElement *svgElem = static_cast<SVGSVGElement*>(mContent);
 
   nsSVGOuterSVGAnonChildFrame *anonKid =
-    static_cast<nsSVGOuterSVGAnonChildFrame*>(GetFirstPrincipalChild());
+    static_cast<nsSVGOuterSVGAnonChildFrame*>(PrincipalChildList().FirstChild());
 
   if (mState & NS_FRAME_FIRST_REFLOW) {
     // Initialize
@@ -395,8 +391,8 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
   // http://www.w3.org/TR/SVG11/coords.html#ViewportSpace
 
   svgFloatSize newViewportSize(
-    nsPresContext::AppUnitsToFloatCSSPixels(aReflowState.ComputedWidth()),
-    nsPresContext::AppUnitsToFloatCSSPixels(aReflowState.ComputedHeight()));
+    nsPresContext::AppUnitsToFloatCSSPixels(aReflowInput.ComputedWidth()),
+    nsPresContext::AppUnitsToFloatCSSPixels(aReflowInput.ComputedHeight()));
 
   svgFloatSize oldViewportSize = svgElem->GetViewportSize();
 
@@ -423,10 +419,9 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
     // handled in SVGSVGElement::FlushImageTransformInvalidation.
     //
     if (svgElem->HasViewBoxOrSyntheticViewBox()) {
-      nsIFrame* anonChild = GetFirstPrincipalChild();
+      nsIFrame* anonChild = PrincipalChildList().FirstChild();
       anonChild->AddStateBits(NS_FRAME_IS_DIRTY);
-      for (nsIFrame* child = anonChild->GetFirstPrincipalChild(); child;
-           child = child->GetNextSibling()) {
+      for (nsIFrame* child : anonChild->PrincipalChildList()) {
         child->AddStateBits(NS_FRAME_IS_DIRTY);
       }
     }
@@ -502,39 +497,34 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsSVGOuterSVGFrame::Reflow: size=%d,%d",
                   aDesiredSize.Width(), aDesiredSize.Height()));
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 void
 nsSVGOuterSVGFrame::DidReflow(nsPresContext*   aPresContext,
-                              const nsHTMLReflowState*  aReflowState,
+                              const ReflowInput*  aReflowInput,
                               nsDidReflowStatus aStatus)
 {
-  nsSVGOuterSVGFrameBase::DidReflow(aPresContext,aReflowState,aStatus);
+  nsSVGDisplayContainerFrame::DidReflow(aPresContext,aReflowInput,aStatus);
 
   // Make sure elements styled by :hover get updated if script/animation moves
   // them under or out from under the pointer:
   PresContext()->PresShell()->SynthesizeMouseMove(false);
 }
 
-/* virtual */ bool
-nsSVGOuterSVGFrame::UpdateOverflow()
+/* virtual */ void
+nsSVGOuterSVGFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas)
 {
   // See the comments in Reflow above.
 
   // WARNING!! Keep this in sync with Reflow above!
 
-  nsRect rect(nsPoint(0, 0), GetSize());
-  nsOverflowAreas overflowAreas(rect, rect);
-
   if (!mIsRootContent) {
-    nsIFrame *anonKid = GetFirstPrincipalChild();
-    overflowAreas.VisualOverflow().UnionRect(
-      overflowAreas.VisualOverflow(),
+    nsIFrame *anonKid = PrincipalChildList().FirstChild();
+    aOverflowAreas.VisualOverflow().UnionRect(
+      aOverflowAreas.VisualOverflow(),
       anonKid->GetVisualOverflowRect() + anonKid->GetPosition());
   }
-
-  return FinishAndStoreOverflow(overflowAreas, GetSize());
 }
 
 
@@ -567,6 +557,11 @@ public:
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion* aInvalidRegion) override;
 
+  nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplayItemGenericImageGeometry(this, aBuilder);
+  }
+
   NS_DISPLAY_DECL_NAME("SVGOuterSVG", TYPE_SVG_OUTER_SVG)
 };
 
@@ -589,7 +584,7 @@ nsDisplayOuterSVG::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
 
   nsSVGOuterSVGAnonChildFrame *anonKid =
     static_cast<nsSVGOuterSVGAnonChildFrame*>(
-      outerSVGFrame->GetFirstPrincipalChild());
+      outerSVGFrame->PrincipalChildList().FirstChild());
 
   nsIFrame* frame =
     nsSVGUtils::HitTestChildren(anonKid, svgViewportRelativePoint);
@@ -632,7 +627,10 @@ nsDisplayOuterSVG::Paint(nsDisplayListBuilder* aBuilder,
   // units (i.e. CSS px) in the matrix that we pass to our children):
   gfxMatrix tm = nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(mFrame) *
                    gfxMatrix::Translation(devPixelOffset);
-  nsSVGUtils::PaintFrameWithEffects(mFrame, *aContext->ThebesContext(), tm, &contentAreaDirtyRect);
+  DrawResult result =
+    nsSVGUtils::PaintFrameWithEffects(mFrame, *aContext->ThebesContext(), tm,
+                                      &contentAreaDirtyRect);
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
   aContext->ThebesContext()->Restore();
 
 #if defined(DEBUG) && defined(SVG_DEBUG_PAINT_TIMING)
@@ -667,6 +665,15 @@ nsDisplayOuterSVG::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
 
   nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
   aInvalidRegion->Or(*aInvalidRegion, result);
+
+  auto geometry =
+    static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
+
+  if (aBuilder->ShouldSyncDecodeImages() &&
+    geometry->ShouldInvalidateToSyncDecodeImages()) {
+    bool snap;
+    aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+  }
 }
 
 nsresult
@@ -683,7 +690,7 @@ nsSVGOuterSVGFrame::AttributeChanged(int32_t  aNameSpaceID,
       // make sure our cached transform matrix gets (lazily) updated
       mCanvasTM = nullptr;
 
-      nsSVGUtils::NotifyChildrenOfSVGChange(GetFirstPrincipalChild(),
+      nsSVGUtils::NotifyChildrenOfSVGChange(PrincipalChildList().FirstChild(),
                 aAttribute == nsGkAtoms::viewBox ?
                   TRANSFORM_CHANGED | COORD_CONTEXT_CHANGED : TRANSFORM_CHANGED);
 
@@ -748,7 +755,7 @@ nsSVGOuterSVGFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     nsDisplayListSet set(contentList, contentList, contentList,
                          contentList, contentList, contentList);
     BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, set);
-  } else {
+  } else if (IsVisibleForPainting(aBuilder) || !aBuilder->IsForPainting()) {
     aLists.Content()->AppendNewToTop(
       new (aBuilder) nsDisplayOuterSVG(aBuilder, this));
   }
@@ -825,23 +832,23 @@ nsSVGOuterSVGFrame::NotifyViewportOrTransformChanged(uint32_t aFlags)
     }
   }
 
-  nsSVGUtils::NotifyChildrenOfSVGChange(GetFirstPrincipalChild(), aFlags);
+  nsSVGUtils::NotifyChildrenOfSVGChange(PrincipalChildList().FirstChild(), aFlags);
 }
 
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods:
 
-nsresult
+DrawResult
 nsSVGOuterSVGFrame::PaintSVG(gfxContext& aContext,
                              const gfxMatrix& aTransform,
                              const nsIntRect* aDirtyRect)
 {
-  NS_ASSERTION(GetFirstPrincipalChild()->GetType() ==
+  NS_ASSERTION(PrincipalChildList().FirstChild()->GetType() ==
                  nsGkAtoms::svgOuterSVGAnonChildFrame &&
-               !GetFirstPrincipalChild()->GetNextSibling(),
+               !PrincipalChildList().FirstChild()->GetNextSibling(),
                "We should have a single, anonymous, child");
   nsSVGOuterSVGAnonChildFrame *anonKid =
-    static_cast<nsSVGOuterSVGAnonChildFrame*>(GetFirstPrincipalChild());
+    static_cast<nsSVGOuterSVGAnonChildFrame*>(PrincipalChildList().FirstChild());
   return anonKid->PaintSVG(aContext, aTransform, aDirtyRect);
 }
 
@@ -849,14 +856,14 @@ SVGBBox
 nsSVGOuterSVGFrame::GetBBoxContribution(const gfx::Matrix &aToBBoxUserspace,
                                         uint32_t aFlags)
 {
-  NS_ASSERTION(GetFirstPrincipalChild()->GetType() ==
+  NS_ASSERTION(PrincipalChildList().FirstChild()->GetType() ==
                  nsGkAtoms::svgOuterSVGAnonChildFrame &&
-               !GetFirstPrincipalChild()->GetNextSibling(),
+               !PrincipalChildList().FirstChild()->GetNextSibling(),
                "We should have a single, anonymous, child");
   // We must defer to our child so that we don't include our
   // content->PrependLocalTransformsTo() transforms.
   nsSVGOuterSVGAnonChildFrame *anonKid =
-    static_cast<nsSVGOuterSVGAnonChildFrame*>(GetFirstPrincipalChild());
+    static_cast<nsSVGOuterSVGAnonChildFrame*>(PrincipalChildList().FirstChild());
   return anonKid->GetBBoxContribution(aToBBoxUserspace, aFlags);
 }
 
@@ -889,7 +896,7 @@ nsSVGOuterSVGFrame::IsRootOfReplacedElementSubDoc(nsIFrame **aEmbeddingFrame)
   if (!mContent->GetParent()) {
     // Our content is the document element
     nsCOMPtr<nsIDocShell> docShell = PresContext()->GetDocShell();
-    nsCOMPtr<nsPIDOMWindow> window;
+    nsCOMPtr<nsPIDOMWindowOuter> window;
     if (docShell) {
       window = docShell->GetWindow();
     }
@@ -897,8 +904,11 @@ nsSVGOuterSVGFrame::IsRootOfReplacedElementSubDoc(nsIFrame **aEmbeddingFrame)
     if (window) {
       nsCOMPtr<nsIDOMElement> frameElement = window->GetFrameElement();
       nsCOMPtr<nsIObjectLoadingContent> olc = do_QueryInterface(frameElement);
-      if (olc) {
-        // Our document is inside an HTML 'object', 'embed' or 'applet' element
+      nsCOMPtr<nsIDOMHTMLIFrameElement> iframeElement =
+        do_QueryInterface(frameElement);
+      if (olc || iframeElement) {
+        // Our document is inside an HTML 'object', 'embed', 'applet'
+        // or 'iframe' element
         if (aEmbeddingFrame) {
           nsCOMPtr<nsIContent> element = do_QueryInterface(frameElement);
           *aEmbeddingFrame = element->GetPrimaryFrame();
@@ -919,7 +929,7 @@ nsSVGOuterSVGFrame::IsRootOfImage()
 {
   if (!mContent->GetParent()) {
     // Our content is the document element
-    nsIDocument* doc = mContent->GetCurrentDoc();
+    nsIDocument* doc = mContent->GetUncomposedDoc();
     if (doc && doc->IsBeingUsedAsImage()) {
       // Our document is being used as an image
       return true;
@@ -958,7 +968,7 @@ nsSVGOuterSVGAnonChildFrame::Init(nsIContent*       aContent,
 {
   MOZ_ASSERT(aParent->GetType() == nsGkAtoms::svgOuterSVGFrame,
              "Unexpected parent");
-  nsSVGOuterSVGAnonChildFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif
 

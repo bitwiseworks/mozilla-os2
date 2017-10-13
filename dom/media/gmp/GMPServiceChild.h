@@ -11,11 +11,10 @@
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/gmp/PGMPServiceChild.h"
 #include "nsRefPtrHashtable.h"
+#include "mozilla/dom/ContentChild.h"
 
 namespace mozilla {
 namespace gmp {
-
-#define GMP_DEFAULT_ASYNC_SHUTDONW_TIMEOUT 3000
 
 class GMPContentParent;
 class GMPServiceChild;
@@ -41,17 +40,14 @@ class GeckoMediaPluginServiceChild : public GeckoMediaPluginService
 public:
   static already_AddRefed<GeckoMediaPluginServiceChild> GetSingleton();
 
-  NS_IMETHOD GetPluginVersionForAPI(const nsACString& aAPI,
-                                    nsTArray<nsCString>* aTags,
-                                    bool* aHasPlugin,
-                                    nsACString& aOutVersion) override;
+  NS_IMETHOD HasPluginForAPI(const nsACString& aAPI,
+                             nsTArray<nsCString>* aTags,
+                             bool *aRetVal) override;
   NS_IMETHOD GetNodeId(const nsAString& aOrigin,
                        const nsAString& aTopLevelOrigin,
                        const nsAString& aGMPName,
                        bool aInPrivateBrowsingMode,
                        UniquePtr<GetNodeIdCallback>&& aCallback) override;
-  NS_IMETHOD UpdateTrialCreateState(const nsAString& aKeySystem,
-                                    uint32_t aState) override;
 
   NS_DECL_NSIOBSERVER
 
@@ -59,15 +55,18 @@ public:
 
   void RemoveGMPContentParent(GMPContentParent* aGMPContentParent);
 
+  static void UpdateGMPCapabilities(nsTArray<mozilla::dom::GMPCapabilityData>&& aCapabilities);
+
 protected:
-  virtual void InitializePlugins() override
+  void InitializePlugins(AbstractThread*) override
   {
     // Nothing to do here.
   }
-  virtual bool GetContentParentFrom(const nsACString& aNodeId,
-                                    const nsCString& aAPI,
-                                    const nsTArray<nsCString>& aTags,
-                                    UniquePtr<GetGMPContentParentCallback>&& aCallback)
+  bool GetContentParentFrom(GMPCrashHelper* aHelper,
+                            const nsACString& aNodeId,
+                            const nsCString& aAPI,
+                            const nsTArray<nsCString>& aTags,
+                            UniquePtr<GetGMPContentParentCallback>&& aCallback)
     override;
 
 private:
@@ -85,9 +84,8 @@ public:
   explicit GMPServiceChild();
   virtual ~GMPServiceChild();
 
-  virtual PGMPContentParent* AllocPGMPContentParent(Transport* aTransport,
-                                                    ProcessId aOtherPid)
-    override;
+  PGMPContentParent* AllocPGMPContentParent(Transport* aTransport,
+                                            ProcessId aOtherPid) override;
 
   void GetBridgedGMPContentParent(ProcessId aOtherPid,
                                   GMPContentParent** aGMPContentParent);

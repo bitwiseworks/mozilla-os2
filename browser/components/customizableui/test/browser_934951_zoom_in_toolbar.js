@@ -7,7 +7,7 @@
 const kTimeoutInMS = 20000;
 
 // Bug 934951 - Zoom controls percentage label doesn't update when it's in the toolbar and you navigate.
-add_task(function() {
+add_task(function*() {
   CustomizableUI.addWidgetToArea("zoom-controls", CustomizableUI.AREA_NAVBAR);
   let tab1 = gBrowser.addTab("about:mozilla");
   yield BrowserTestUtils.browserLoaded(tab1.linkedBrowser);
@@ -63,7 +63,7 @@ function promiseObserverNotification(aObserver) {
     Services.obs.removeObserver(notificationCallback, aObserver, false);
     clearTimeout(timeoutId);
     deferred.resolve();
-  };
+  }
   let timeoutId = setTimeout(() => {
     Services.obs.removeObserver(notificationCallback, aObserver, false);
     deferred.reject("Notification '" + aObserver + "' did not happen within 20 seconds.");
@@ -83,7 +83,7 @@ function promiseTabSelect() {
     container.removeEventListener("TabSelect", callback);
     clearTimeout(timeoutId);
     executeSoon(deferred.resolve);
-  };
+  }
   container.addEventListener("TabSelect", callback);
   return deferred.promise;
 }

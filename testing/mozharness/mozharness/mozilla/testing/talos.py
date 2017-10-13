@@ -14,16 +14,22 @@ import copy
 import re
 import json
 
+import mozharness
 from mozharness.base.config import parse_config_file
 from mozharness.base.errors import PythonErrorList
-from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL, FATAL
+from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL
 from mozharness.base.log import INFO, WARNING
 from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
-from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options, INSTALLER_SUFFIXES
+from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.buildbot import TBPL_SUCCESS, TBPL_WORST_LEVEL_TUPLE
 from mozharness.mozilla.buildbot import TBPL_RETRY, TBPL_FAILURE, TBPL_WARNING
+
+external_tools_path = os.path.join(
+    os.path.abspath(os.path.dirname(os.path.dirname(mozharness.__file__))),
+    'external_tools',
+)
 
 TalosErrorList = PythonErrorList + [
     {'regex': re.compile(r'''run-as: Package '.*' is unknown'''), 'level': DEBUG},
@@ -170,16 +176,24 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         if self.buildbot_config:
             # this is inside automation
             # now let's see if we added spsProfile specs in the commit message
-            junk, junk, opts = self.buildbot_config['sourcestamp']['changes'][-1]['comments'].partition('mozharness:')
+            try:
+                junk, junk, opts = self.buildbot_config['sourcestamp']['changes'][-1]['comments'].partition('mozharness:')
+            except IndexError:
+                # when we don't have comments on changes (bug 1255187)
+                opts = None
+
             if opts:
+              # In the case of a multi-line commit message, only examine
+              # the first line for mozharness options
+              opts = opts.split('\n')[0]
               opts = re.sub(r'\w+:.*', '', opts).strip().split(' ')
               if "--spsProfile" in opts:
                   # overwrite whatever was set here.
                   self.sps_profile = True
               try:
-                    idx = opts.index('--spsProfileInterval')
-                    if len(opts) > idx + 1:
-                        self.sps_profile_interval = opts[idx + 1]
+                  idx = opts.index('--spsProfileInterval')
+                  if len(opts) > idx + 1:
+                      self.sps_profile_interval = opts[idx + 1]
               except ValueError:
                   pass
         # finally, if sps_profile is set, we add that to the talos options
@@ -192,7 +206,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         return sps_results
 
     def query_abs_dirs(self):
-        c = self.config
         if self.abs_dirs:
             return self.abs_dirs
         abs_dirs = super(Talos, self).query_abs_dirs()
@@ -272,15 +285,19 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         src_talos_webdir = os.path.join(self.talos_path, 'talos')
 
         if self.query_pagesets_url():
-            self.info("Downloading pageset...")
+            self.info('Downloading pageset...')
+            dirs = self.query_abs_dirs()
             src_talos_pageset = os.path.join(src_talos_webdir, 'tests')
-            self.download_unzip(self.pagesets_url, src_talos_pageset)
+            archive = self.download_file(self.pagesets_url, parent_dir=dirs['abs_work_dir'])
+            unzip = self.query_exe('unzip')
+            unzip_cmd = [unzip, '-q', '-o', archive, '-d', src_talos_pageset]
+            self.run_command(unzip_cmd, halt_on_failure=True)
 
     # Action methods. {{{1
     # clobber defined in BaseScript
     # read_buildbot_config defined in BuildbotMixin
 
-    def download_and_extract(self, target_unzip_dirs=None, suite_categories=None):
+    def download_and_extract(self, extract_dirs=None, suite_categories=None):
         return super(Talos, self).download_and_extract(
             suite_categories=['common', 'talos']
         )
@@ -320,8 +337,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         )
         # install jsonschema for perfherder validation
         self.install_module(module="jsonschema")
-        # install flake8 for static code validation
-        self.install_module(module="flake8")
 
     def _validate_treeherder_data(self, parser):
         # late import is required, because install is done in create_virtualenv
@@ -333,8 +348,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
             return
 
-        schema_path = os.path.join(self.talos_path, 'treeherder-schemas',
-                                   'performance-artifact.json')
+        schema_path = os.path.join(external_tools_path,
+                                   'performance-artifact-schema.json')
         self.info("Validating PERFHERDER_DATA against %s" % schema_path)
         try:
             with open(schema_path) as f:
@@ -343,12 +358,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             jsonschema.validate(data, schema)
         except:
             self.exception("Error while validating PERFHERDER_DATA")
-            parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
-
-    def _flake8_check(self, parser):
-        if self.run_command([self.query_python_path('flake8'),
-                             os.path.join(self.talos_path, 'talos')]) != 0:
-            self.critical('flake8 check failed.')
             parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
 
     def run_tests(self, args=None, **kw):
@@ -376,13 +385,22 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         else:
             env['PYTHONPATH'] = self.talos_path
 
-        self._flake8_check(parser)
-
         # sets a timeout for how long talos should run without output
         output_timeout = self.config.get('talos_output_timeout', 3600)
         # run talos tests
         run_tests = os.path.join(self.talos_path, 'talos', 'run_tests.py')
-        command = [python, run_tests, '--debug'] + options
+
+        mozlog_opts = ['--log-tbpl-level=debug']
+        if not self.run_local and 'suite' in self.config:
+            fname_pattern = '%s_%%s.log' % self.config['suite']
+            mozlog_opts.append('--log-errorsummary=%s'
+                               % os.path.join(env['MOZ_UPLOAD_DIR'],
+                                              fname_pattern % 'errorsummary'))
+            mozlog_opts.append('--log-raw=%s'
+                               % os.path.join(env['MOZ_UPLOAD_DIR'],
+                                              fname_pattern % 'raw'))
+
+        command = [python, run_tests] + options + mozlog_opts
         self.return_code = self.run_command(command, cwd=self.workdir,
                                             output_timeout=output_timeout,
                                             output_parser=parser,
@@ -405,7 +423,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
 
             parser.update_worst_log_and_tbpl_levels(log_level, tbpl_level)
         else:
-            self._validate_treeherder_data(parser)
+            if not self.sps_profile:
+                self._validate_treeherder_data(parser)
 
         self.buildbot_status(parser.worst_tbpl_status,
                              level=parser.worst_log_level)

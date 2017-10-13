@@ -131,6 +131,11 @@ setting[type="menulist"] {
   display: none;
 }
 
+#show-disabled-unsigned-extensions .button-text {
+  margin-inline-start: 3px !important;
+  margin-inline-end: 2px !important;
+}
+
 #header-searching:not([active]) {
   visibility: hidden;
 }
@@ -193,7 +198,7 @@ setting[type="menulist"] {
   display: none;
 }
 
-#addons-page .view-pane:not([type="plugin"]) .plugin-info-container {
+#addons-page .view-pane:not([type="plugin"]) #plugindeprecation-notice {
   display: none;
 }
 

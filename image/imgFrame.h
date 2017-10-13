@@ -7,6 +7,7 @@
 #ifndef mozilla_image_imgFrame_h
 #define mozilla_image_imgFrame_h
 
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Move.h"
@@ -41,8 +42,108 @@ enum class DisposalMethod : int8_t {
 };
 
 enum class Opacity : uint8_t {
-  OPAQUE,
+  FULLY_OPAQUE,
   SOME_TRANSPARENCY
+};
+
+/**
+ * FrameTimeout wraps a frame timeout value (measured in milliseconds) after
+ * first normalizing it. This normalization is necessary because some tools
+ * generate incorrect frame timeout values which we nevertheless have to
+ * support. For this reason, code that deals with frame timeouts should always
+ * use a FrameTimeout value rather than the raw value from the image header.
+ */
+struct FrameTimeout
+{
+  /**
+   * @return a FrameTimeout of zero. This should be used only for math
+   * involving FrameTimeout values. You can't obtain a zero FrameTimeout from
+   * FromRawMilliseconds().
+   */
+  static FrameTimeout Zero() { return FrameTimeout(0); }
+
+  /// @return an infinite FrameTimeout.
+  static FrameTimeout Forever() { return FrameTimeout(-1); }
+
+  /// @return a FrameTimeout obtained by normalizing a raw timeout value.
+  static FrameTimeout FromRawMilliseconds(int32_t aRawMilliseconds)
+  {
+    // Normalize all infinite timeouts to the same value.
+    if (aRawMilliseconds < 0) {
+      return FrameTimeout::Forever();
+    }
+
+    // Very small timeout values are problematic for two reasons: we don't want
+    // to burn energy redrawing animated images extremely fast, and broken tools
+    // generate these values when they actually want a "default" value, so such
+    // images won't play back right without normalization. For some context,
+    // see bug 890743, bug 125137, bug 139677, and bug 207059. The historical
+    // behavior of IE and Opera was:
+    //   IE 6/Win:
+    //     10 - 50ms is normalized to 100ms.
+    //     >50ms is used unnormalized.
+    //   Opera 7 final/Win:
+    //     10ms is normalized to 100ms.
+    //     >10ms is used unnormalized.
+    if (aRawMilliseconds >= 0 && aRawMilliseconds <= 10 ) {
+      return FrameTimeout(100);
+    }
+
+    // The provided timeout value is OK as-is.
+    return FrameTimeout(aRawMilliseconds);
+  }
+
+  bool operator==(const FrameTimeout& aOther) const
+  {
+    return mTimeout == aOther.mTimeout;
+  }
+
+  bool operator!=(const FrameTimeout& aOther) const { return !(*this == aOther); }
+
+  FrameTimeout operator+(const FrameTimeout& aOther)
+  {
+    if (*this == Forever() || aOther == Forever()) {
+      return Forever();
+    }
+
+    return FrameTimeout(mTimeout + aOther.mTimeout);
+  }
+
+  FrameTimeout& operator+=(const FrameTimeout& aOther)
+  {
+    *this = *this + aOther;
+    return *this;
+  }
+
+  /**
+   * @return this FrameTimeout's value in milliseconds. Illegal to call on a
+   * an infinite FrameTimeout value.
+   */
+  uint32_t AsMilliseconds() const
+  {
+    if (*this == Forever()) {
+      MOZ_ASSERT_UNREACHABLE("Calling AsMilliseconds() on an infinite FrameTimeout");
+      return 100;  // Fail to something sane.
+    }
+
+    return uint32_t(mTimeout);
+  }
+
+  /**
+   * @return this FrameTimeout value encoded so that non-negative values
+   * represent a timeout in milliseconds, and -1 represents an infinite
+   * timeout.
+   *
+   * XXX(seth): This is a backwards compatibility hack that should be removed.
+   */
+  int32_t AsEncodedValueDeprecated() const { return mTimeout; }
+
+private:
+  explicit FrameTimeout(int32_t aTimeout)
+    : mTimeout(aTimeout)
+  { }
+
+  int32_t mTimeout;
 };
 
 /**
@@ -56,51 +157,27 @@ enum class Opacity : uint8_t {
 struct AnimationData
 {
   AnimationData(uint8_t* aRawData, uint32_t aPaletteDataLength,
-                int32_t aRawTimeout, const nsIntRect& aRect,
-                BlendMethod aBlendMethod, DisposalMethod aDisposalMethod,
-                bool aHasAlpha)
+                FrameTimeout aTimeout, const nsIntRect& aRect,
+                BlendMethod aBlendMethod, const Maybe<gfx::IntRect>& aBlendRect,
+                DisposalMethod aDisposalMethod, bool aHasAlpha)
     : mRawData(aRawData)
     , mPaletteDataLength(aPaletteDataLength)
-    , mRawTimeout(aRawTimeout)
+    , mTimeout(aTimeout)
     , mRect(aRect)
     , mBlendMethod(aBlendMethod)
+    , mBlendRect(aBlendRect)
     , mDisposalMethod(aDisposalMethod)
     , mHasAlpha(aHasAlpha)
   { }
 
   uint8_t* mRawData;
   uint32_t mPaletteDataLength;
-  int32_t mRawTimeout;
+  FrameTimeout mTimeout;
   nsIntRect mRect;
   BlendMethod mBlendMethod;
+  Maybe<gfx::IntRect> mBlendRect;
   DisposalMethod mDisposalMethod;
   bool mHasAlpha;
-};
-
-/**
- * ScalingData contains all of the information necessary for performing
- * high-quality (CPU-based) scaling an imgFrame.
- *
- * It includes pointers to the raw image data of the underlying imgFrame, but
- * does not own that data. A RawAccessFrameRef for the underlying imgFrame must
- * outlive the ScalingData for it to remain valid.
- */
-struct ScalingData
-{
-  ScalingData(uint8_t* aRawData,
-              gfx::IntSize aSize,
-              uint32_t aBytesPerRow,
-              gfx::SurfaceFormat aFormat)
-    : mRawData(aRawData)
-    , mSize(aSize)
-    , mBytesPerRow(aBytesPerRow)
-    , mFormat(aFormat)
-  { }
-
-  uint8_t* mRawData;
-  gfx::IntSize mSize;
-  uint32_t mBytesPerRow;
-  gfx::SurfaceFormat mFormat;
 };
 
 class imgFrame
@@ -108,7 +185,9 @@ class imgFrame
   typedef gfx::Color Color;
   typedef gfx::DataSourceSurface DataSourceSurface;
   typedef gfx::DrawTarget DrawTarget;
-  typedef gfx::Filter Filter;
+  typedef gfx::SamplingFilter SamplingFilter;
+  typedef gfx::IntPoint IntPoint;
+  typedef gfx::IntRect IntRect;
   typedef gfx::IntSize IntSize;
   typedef gfx::SourceSurface SourceSurface;
   typedef gfx::SurfaceFormat SurfaceFormat;
@@ -151,12 +230,16 @@ public:
    * that the underlying surface may not be stored in a volatile buffer on all
    * platforms, and raw access to the surface (using RawAccessRef()) may be much
    * more expensive than in the InitForDecoder() case.
+   *
+   * aBackend specifies the DrawTarget backend type this imgFrame is supposed
+   *          to be drawn to.
    */
   nsresult InitWithDrawable(gfxDrawable* aDrawable,
                             const nsIntSize& aSize,
                             const SurfaceFormat aFormat,
-                            Filter aFilter,
-                            uint32_t aImageFlags);
+                            SamplingFilter aSamplingFilter,
+                            uint32_t aImageFlags,
+                            gfx::BackendType aBackend);
 
   DrawableFrameRef DrawableRef();
   RawAccessFrameRef RawAccessRef();
@@ -174,7 +257,7 @@ public:
   void SetRawAccessOnly();
 
   bool Draw(gfxContext* aContext, const ImageRegion& aRegion,
-            Filter aFilter, uint32_t aImageFlags);
+            SamplingFilter aSamplingFilter, uint32_t aImageFlags);
 
   nsresult ImageUpdated(const nsIntRect& aUpdateRect);
 
@@ -188,17 +271,19 @@ public:
    * @param aDisposalMethod  For animation frames, how this imgFrame is cleared
    *                         from the compositing frame before the next frame is
    *                         displayed.
-   * @param aRawTimeout      For animation frames, the timeout in milliseconds
-   *                         before the next frame is displayed. This timeout is
-   *                         not necessarily the timeout that will actually be
-   *                         used; see FrameAnimator::GetTimeoutForFrame.
+   * @param aTimeout         For animation frames, the timeout before the next
+   *                         frame is displayed.
    * @param aBlendMethod     For animation frames, a blending method to be used
    *                         when compositing this frame.
+   * @param aBlendRect       For animation frames, if present, the subrect in
+   *                         which @aBlendMethod applies. Outside of this
+   *                         subrect, BlendMethod::OVER is always used.
    */
   void Finish(Opacity aFrameOpacity = Opacity::SOME_TRANSPARENCY,
               DisposalMethod aDisposalMethod = DisposalMethod::KEEP,
-              int32_t aRawTimeout = 0,
-              BlendMethod aBlendMethod = BlendMethod::OVER);
+              FrameTimeout aTimeout = FrameTimeout::FromRawMilliseconds(0),
+              BlendMethod aBlendMethod = BlendMethod::OVER,
+              const Maybe<IntRect>& aBlendRect = Nothing());
 
   /**
    * Mark this imgFrame as aborted. This informs the imgFrame that if it isn't
@@ -210,9 +295,14 @@ public:
   void Abort();
 
   /**
+   * Returns true if this imgFrame has been aborted.
+   */
+  bool IsAborted() const;
+
+  /**
    * Returns true if this imgFrame is completely decoded.
    */
-  bool IsImageComplete() const;
+  bool IsFinished() const;
 
   /**
    * Blocks until this imgFrame is either completely decoded, or is marked as
@@ -222,7 +312,7 @@ public:
    * careful in your use of this method to avoid excessive main thread jank or
    * deadlock.
    */
-  void WaitUntilComplete() const;
+  void WaitUntilFinished() const;
 
   /**
    * Returns the number of bytes per pixel this imgFrame requires.  This is a
@@ -233,9 +323,8 @@ public:
   uint32_t GetBytesPerPixel() const { return GetIsPaletted() ? 1 : 4; }
 
   IntSize GetImageSize() const { return mImageSize; }
-  nsIntRect GetRect() const;
-  IntSize GetSize() const { return mSize; }
-  bool NeedsPadding() const { return mOffset != nsIntPoint(0, 0); }
+  IntRect GetRect() const { return mFrameRect; }
+  IntSize GetSize() const { return mFrameRect.Size(); }
   void GetImageData(uint8_t** aData, uint32_t* length) const;
   uint8_t* GetImageData() const;
 
@@ -244,26 +333,14 @@ public:
   uint32_t* GetPaletteData() const;
   uint8_t GetPaletteDepth() const { return mPaletteDepth; }
 
-  /**
-   * Get the SurfaceFormat for this imgFrame.
-   *
-   * This should only be used for assertions.
-   */
-  SurfaceFormat GetFormat() const;
-
   AnimationData GetAnimationData() const;
-  ScalingData GetScalingData() const;
 
   bool GetCompositingFailed() const;
   void SetCompositingFailed(bool val);
 
   void SetOptimizable();
 
-  Color SinglePixelColor() const;
-  bool IsSinglePixel() const;
-
-  already_AddRefed<SourceSurface> GetSurface();
-  already_AddRefed<DrawTarget> GetDrawTarget();
+  already_AddRefed<SourceSurface> GetSourceSurface();
 
   void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf, size_t& aHeapSizeOut,
                               size_t& aNonHeapSizeOut) const;
@@ -274,17 +351,17 @@ private: // methods
 
   nsresult LockImageData();
   nsresult UnlockImageData();
-  nsresult Optimize();
+  bool     CanOptimizeOpaqueImage();
+  nsresult Optimize(gfx::DrawTarget* aTarget);
 
   void AssertImageDataLocked() const;
 
-  bool IsImageCompleteInternal() const;
+  bool AreAllPixelsWritten() const;
   nsresult ImageUpdatedInternal(const nsIntRect& aUpdateRect);
   void GetImageDataInternal(uint8_t** aData, uint32_t* length) const;
   uint32_t GetImageBytesPerRow() const;
   uint32_t GetImageDataLength() const;
-  int32_t GetStride() const;
-  already_AddRefed<SourceSurface> GetSurfaceInternal();
+  already_AddRefed<SourceSurface> GetSourceSurfaceInternal();
 
   uint32_t PaletteDataLength() const
   {
@@ -302,12 +379,8 @@ private: // methods
     bool IsValid() { return !!mDrawable; }
   };
 
-  SurfaceWithFormat SurfaceForDrawing(bool               aDoPadding,
-                                      bool               aDoPartialDecode,
+  SurfaceWithFormat SurfaceForDrawing(bool               aDoPartialDecode,
                                       bool               aDoTile,
-                                      gfxContext*        aContext,
-                                      const nsIntMargin& aPadding,
-                                      gfxRect&           aImageRect,
                                       ImageRegion&       aRegion,
                                       SourceSurface*     aSurface);
 
@@ -333,15 +406,17 @@ private: // data
   //! Number of RawAccessFrameRefs currently alive for this imgFrame.
   int32_t mLockCount;
 
-  //! Raw timeout for this frame. (See FrameAnimator::GetTimeoutForFrame.)
-  int32_t mTimeout; // -1 means display forever.
+  //! The timeout for this frame.
+  FrameTimeout mTimeout;
 
   DisposalMethod mDisposalMethod;
   BlendMethod    mBlendMethod;
+  Maybe<IntRect> mBlendRect;
   SurfaceFormat  mFormat;
 
   bool mHasNoAlpha;
   bool mAborted;
+  bool mFinished;
   bool mOptimizable;
 
 
@@ -350,8 +425,7 @@ private: // data
   //////////////////////////////////////////////////////////////////////////////
 
   IntSize      mImageSize;
-  IntSize      mSize;
-  nsIntPoint   mOffset;
+  IntRect      mFrameRect;
 
   // The palette and image data for images that are paletted, since Cairo
   // doesn't support these images.
@@ -367,17 +441,13 @@ private: // data
   // Main-thread-only mutable data.
   //////////////////////////////////////////////////////////////////////////////
 
-  // Note that the data stored in gfx::Color is *non-alpha-premultiplied*.
-  Color        mSinglePixelColor;
-
-  bool mSinglePixel;
   bool mCompositingFailed;
 };
 
 /**
  * A reference to an imgFrame that holds the imgFrame's surface in memory,
  * allowing drawing. If you have a DrawableFrameRef |ref| and |if (ref)| returns
- * true, then calls to Draw() and GetSurface() are guaranteed to succeed.
+ * true, then calls to Draw() and GetSourceSurface() are guaranteed to succeed.
  */
 class DrawableFrameRef final
 {
@@ -440,10 +510,10 @@ private:
 /**
  * A reference to an imgFrame that holds the imgFrame's surface in memory in a
  * format appropriate for access as raw data. If you have a RawAccessFrameRef
- * |ref| and |if (ref)| is true, then calls to GetImageData(), GetPaletteData(),
- * and GetDrawTarget() are guaranteed to succeed. This guarantee is stronger
- * than DrawableFrameRef, so everything that a valid DrawableFrameRef guarantees
- * is also guaranteed by a valid RawAccessFrameRef.
+ * |ref| and |if (ref)| is true, then calls to GetImageData() and
+ * GetPaletteData() are guaranteed to succeed. This guarantee is stronger than
+ * DrawableFrameRef, so everything that a valid DrawableFrameRef guarantees is
+ * also guaranteed by a valid RawAccessFrameRef.
  *
  * This may be considerably more expensive than is necessary just for drawing,
  * so only use this when you need to read or write the raw underlying image data

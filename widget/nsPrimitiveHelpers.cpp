@@ -21,6 +21,8 @@
 
 
 #include "nsPrimitiveHelpers.h"
+
+#include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
@@ -46,7 +48,7 @@ nsPrimitiveHelpers :: CreatePrimitiveForData ( const char* aFlavor, const void* 
     return;
 
   if ( strcmp(aFlavor,kTextMime) == 0 || strcmp(aFlavor,kNativeHTMLMime) == 0 ||
-       strcmp(aFlavor,kRTFMime) == 0) {
+       strcmp(aFlavor,kRTFMime) == 0 || strcmp(aFlavor,kCustomTypesMime) == 0) {
     nsCOMPtr<nsISupportsCString> primitive =
         do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID);
     if ( primitive ) {
@@ -60,7 +62,7 @@ nsPrimitiveHelpers :: CreatePrimitiveForData ( const char* aFlavor, const void* 
         do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID);
     if (primitive ) {
       if (aDataLen % 2) {
-        auto buffer = MakeUnique<char[]>(aDataLen + 1);
+        auto buffer = mozilla::MakeUnique<char[]>(aDataLen + 1);
         if (!MOZ_LIKELY(buffer))
           return;
 
@@ -131,7 +133,7 @@ nsPrimitiveHelpers :: CreateDataFromPrimitive ( const char* aFlavor, nsISupports
 
   *aDataBuff = nullptr;
 
-  if ( strcmp(aFlavor,kTextMime) == 0 ) {
+  if ( strcmp(aFlavor,kTextMime) == 0 || strcmp(aFlavor,kCustomTypesMime) == 0) {
     nsCOMPtr<nsISupportsCString> plainText ( do_QueryInterface(aPrimitive) );
     if ( plainText ) {
       nsAutoCString data;

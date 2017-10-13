@@ -144,7 +144,22 @@ this.NetUtil = {
         }
 
         try {
-            channel.asyncOpen(listener, null);
+            // Open the channel using asyncOpen2() if the loadinfo contains one
+            // of the security mode flags, otherwise fall back to use asyncOpen().
+            if (channel.loadInfo &&
+                channel.loadInfo.securityMode != 0) {
+                channel.asyncOpen2(listener);
+            }
+            else {
+                // Log deprecation warning to console to make sure all channels
+                // are created providing the correct security flags in the loadinfo.
+                // See nsILoadInfo for all available security flags and also the API
+                // of NetUtil.newChannel() for details above.
+                Cu.reportError("NetUtil.jsm: asyncFetch() requires the channel to have " +
+                    "one of the security flags set in the loadinfo (see nsILoadInfo). " +
+                    "Please create channel using NetUtil.newChannel()");
+                channel.asyncOpen(listener, null);
+            }
         }
         catch (e) {
             let exception = new Components.Exception(
@@ -203,68 +218,23 @@ this.NetUtil = {
      *        the following properties:
      *        {
      *          uri:
-     *            The full URI spec string or nsIURI to create the channel for.
-     *            Note that this cannot be an nsIFile and you cannot specify a
+     *            The full URI spec string, nsIURI or nsIFile to create the
+     *            channel for.
+     *            Note that this cannot be an nsIFile if you have to specify a
      *            non-default charset or base URI.  Call NetUtil.newURI first if
      *            you need to construct an URI using those options.
      *          loadingNode:
-     *            The loadingDocument of the channel.
-     *            The element or document where the result of this request will
-     *            be used.  This is the document/element that will get access to
-     *            the result of this request.  For example for an image load,
-     *            it's the document in which the image will be loaded.  And for
-     *            a CSS stylesheet it's the document whose rendering will be
-     *            affected by the stylesheet.
-     *            If possible, pass in the element which is performing the load.
-     *            But if the load is coming from a JS API (such as
-     *            XMLHttpRequest) or if the load might be coalesced across
-     *            multiple elements (such as for <img>) then pass in the
-     *            Document node instead.
-     *            For loads that are not related to any document, such as loads
-     *            coming from addons or internal browser features, omit this
-     *            property and specify a loadingPrincipal or
-     *            loadUsingSystemPrincipal instead.
      *          loadingPrincipal:
-     *            The loadingPrincipal of the channel.
-     *            The principal of the document where the result of this request
-     *            will be used.
-     *            This defaults to the principal of aLoadingNode, so when
-     *            aLoadingNode is passed this can be left as null. However for
-     *            loads where aLoadingNode is null this argument must be passed.
-     *            For example for loads from a WebWorker, pass the principal of
-     *            that worker.  For loads from an addon or from internal browser
-     *            features, pass the system principal.
-     *            This principal should almost always be the system principal if
-     *            loadingNode is omitted, in which case you can use the
-     *            useSystemPrincipal property.  The only exception to this is
-     *            for loads from WebWorkers since they don't have any nodes to
-     *            be passed as loadingNode.
-     *            Please note, loadingPrincipal is *not* the principal of the
-     *            resource being loaded, but rather the principal of the context
-     *            where the resource will be used.
+     *          triggeringPrincipal:
+     *          securityFlags:
+     *          contentPolicyType:
+     *            These will be used as values for the nsILoadInfo object on the
+     *            created channel. For details, see nsILoadInfo in nsILoadInfo.idl
      *          loadUsingSystemPrincipal:
      *            Set this to true to use the system principal as
      *            loadingPrincipal.  This must be omitted if loadingPrincipal or
      *            loadingNode are present.
      *            This should be used with care as it skips security checks.
-     *          triggeringPrincipal:
-     *            The triggeringPrincipal of the load.
-     *            The triggeringPrincipal is the principal of the resource that
-     *            caused this particular URL to be loaded.
-     *            Most likely the triggeringPrincipal and the loadingPrincipal
-     *            are identical, in which case the triggeringPrincipal can be
-     *            left out.  In some cases the loadingPrincipal and the
-     *            triggeringPrincipal are different however, e.g. a stylesheet
-     *            may import a subresource.  In that case the principal of the
-     *            stylesheet which contains the import command is the
-     *            triggeringPrincipal, and the principal of the document whose
-     *            rendering is affected is the loadingPrincipal.
-     *          securityFlags:
-     *            The securityFlags of the channel.
-     *            Any of the securityflags defined in nsILoadInfo.idl.
-     *          contentPolicyType:
-     *            The contentPolicyType of the channel.
-     *            Any of the content types defined in nsIContentPolicy.idl.
      *        }
      * @param aOriginCharset [deprecated]
      *        The character set for the URI.  Only used if aWhatToLoad is a
@@ -274,11 +244,9 @@ this.NetUtil = {
      *        The base URI for the spec.  Only used if aWhatToLoad is a string,
      *        which is a deprecated API.  Must be undefined otherwise.  Use
      *        NetUtil.newURI if you need to use this option.
-     *
      * @return an nsIChannel object.
      */
-    newChannel: function NetUtil_newChannel(aWhatToLoad, aOriginCharset,
-                                            aBaseURI)
+    newChannel: function NetUtil_newChannel(aWhatToLoad, aOriginCharset, aBaseURI)
     {
         // Check for the deprecated API first.
         if (typeof aWhatToLoad == "string" ||
@@ -289,14 +257,27 @@ this.NetUtil = {
                       ? aWhatToLoad
                       : this.newURI(aWhatToLoad, aOriginCharset, aBaseURI);
 
-            return this.ioService.newChannelFromURI(uri);
+            // log deprecation warning for developers.
+            Services.console.logStringMessage(
+              "Warning: NetUtil.newChannel(uri) deprecated, please provide argument 'aWhatToLoad'");
+
+            // Provide default loadinfo arguments and call the new API.
+            let systemPrincipal =
+              Services.scriptSecurityManager.getSystemPrincipal();
+
+            return this.ioService.newChannelFromURI2(
+                     uri,
+                     null, // loadingNode
+                     systemPrincipal, // loadingPrincipal
+                     null, // triggeringPrincipal
+                     Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                     Ci.nsIContentPolicy.TYPE_OTHER);
         }
 
         // We are using the updated API, that requires only the options object.
         if (typeof aWhatToLoad != "object" ||
-            aOriginCharset !== undefined ||
-            aBaseURI !== undefined) {
-
+             aOriginCharset !== undefined ||
+             aBaseURI !== undefined) {
             throw new Components.Exception(
                 "newChannel requires a single object argument",
                 Cr.NS_ERROR_INVALID_ARG,
@@ -320,7 +301,7 @@ this.NetUtil = {
             );
         }
 
-        if (typeof uri == "string") {
+        if (typeof uri == "string" || uri instanceof Ci.nsIFile) {
             uri = this.newURI(uri);
         }
 

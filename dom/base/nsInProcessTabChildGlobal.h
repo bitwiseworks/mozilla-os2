@@ -37,6 +37,8 @@ class nsInProcessTabChildGlobal : public mozilla::DOMEventTargetHelper,
 {
   typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
 
+  using mozilla::dom::ipc::MessageManagerCallback::GetProcessMessageManager;
+
 public:
   nsInProcessTabChildGlobal(nsIDocShell* aShell, nsIContent* aOwner,
                             nsFrameMessageManager* aChrome);
@@ -73,7 +75,7 @@ public:
                                         aPrincipal, aCx, aArgc, aRetval)
       : NS_ERROR_NULL_POINTER;
   }
-  NS_IMETHOD GetContent(nsIDOMWindow** aContent) override;
+  NS_IMETHOD GetContent(mozIDOMWindowProxy** aContent) override;
   NS_IMETHOD GetDocShell(nsIDocShell** aDocShell) override;
 
   NS_DECL_NSIINPROCESSCONTENTFRAMEMESSAGEMANAGER
@@ -117,7 +119,6 @@ public:
   }
   using mozilla::DOMEventTargetHelper::AddEventListener;
 
-  virtual JSContext* GetJSContextForEventHandlers() override { return nsContentUtils::GetSafeJSContext(); }
   virtual nsIPrincipal* GetPrincipal() override { return mPrincipal; }
   void LoadFrameScript(const nsAString& aURL, bool aRunInGlobalScope);
   void FireUnloadEvent();

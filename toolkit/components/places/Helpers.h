@@ -23,11 +23,20 @@ namespace places {
 ////////////////////////////////////////////////////////////////////////////////
 //// Asynchronous Statement Callback Helper
 
-class AsyncStatementCallback : public mozIStorageStatementCallback
+class WeakAsyncStatementCallback : public mozIStorageStatementCallback
+{
+public:
+  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
+  WeakAsyncStatementCallback() {}
+
+protected:
+  virtual ~WeakAsyncStatementCallback() {}
+};
+
+class AsyncStatementCallback : public WeakAsyncStatementCallback
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
   AsyncStatementCallback() {}
 
 protected:
@@ -169,7 +178,7 @@ PRTime RoundedPRNow();
  * Used to finalize a statementCache on a specified thread.
  */
 template<typename StatementType>
-class FinalizeStatementCacheProxy : public nsRunnable
+class FinalizeStatementCacheProxy : public Runnable
 {
 public:
   /**
@@ -192,11 +201,11 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mStatementCache.FinalizeStatements();
     // Release the owner back on the calling thread.
-    (void)NS_ProxyRelease(mCallingThread, mOwner);
+    NS_ProxyRelease(mCallingThread, mOwner.forget());
     return NS_OK;
   }
 
@@ -230,7 +239,7 @@ bool GetHiddenState(bool aIsRedirect,
 /**
  * Notifies a specified topic via the observer service.
  */
-class PlacesEvent : public nsRunnable
+class PlacesEvent : public Runnable
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED

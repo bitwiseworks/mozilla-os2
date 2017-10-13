@@ -9,66 +9,124 @@
 
 #pragma GCC visibility push(default)
 
-#include "OmxPlatformLayer.h"
-#include "OMX_Component.h"
+#include <bitset>
+
 #include <utils/RefBase.h>
 #include <media/stagefright/OMXClient.h>
+#include "nsAutoPtr.h"
+
+#include "OMX_Component.h"
+
+#include "OmxPlatformLayer.h"
+
+class nsACString;
 
 namespace android {
-class MemoryDealer;
 class IMemory;
+class MemoryDealer;
 }
 
 namespace mozilla {
 
 class GonkOmxObserver;
+class GonkOmxPlatformLayer;
+class GonkTextureClientRecycleHandler;
 
 /*
  * Due to Android's omx node could live in local process (client) or remote
- * process (mediaserver).
+ * process (mediaserver). And there are 3 kinds of buffer in Android OMX.
  *
- * When it is in local process, the IOMX::buffer_id is OMX_BUFFERHEADERTYPE
+ * 1.
+ * When buffer is in local process, the IOMX::buffer_id is OMX_BUFFERHEADERTYPE
  * pointer actually, it is safe to use it directly.
  *
- * When it is in remote process, the OMX_BUFFERHEADERTYPE pointer is 'IN' the
+ * 2.
+ * When buffer is in remote process, the OMX_BUFFERHEADERTYPE pointer is 'IN' the
  * remote process. It can't be used in local process, so here it allocates a
- * local OMX_BUFFERHEADERTYPE.
+ * local OMX_BUFFERHEADERTYPE. The raw/decoded data is in the android shared
+ * memory, IMemory.
+ *
+ * 3.
+ * When buffer is in remote process for the display output port. It uses
+ * GraphicBuffer to accelerate the decoding and display.
+ *
  */
 class GonkBufferData : public OmxPromiseLayer::BufferData {
 protected:
   virtual ~GonkBufferData() {}
 
 public:
-  // aMemory is an IPC based memory which will be used as the pBuffer in
-  // mLocalBuffer.
-  GonkBufferData(android::IOMX::buffer_id aId, bool aLiveInLocal, android::IMemory* aMemory);
+  GonkBufferData(bool aLiveInLocal,
+                 GonkOmxPlatformLayer* aLayer);
 
   BufferID ID() override
   {
     return mId;
   }
 
+  already_AddRefed<MediaData> GetPlatformMediaData() override;
+
   bool IsLocalBuffer()
   {
-    return !!mLocalBuffer.get();
+    return !!mMirrorBuffer.get();
   }
+
+  void ReleaseBuffer();
+
+  nsresult SetBufferId(android::IOMX::buffer_id aId)
+  {
+    mId = aId;
+    return NS_OK;
+  }
+
+  // The mBuffer is in local process. And aId is actually the OMX_BUFFERHEADERTYPE
+  // pointer. It doesn't need a mirror buffer.
+  nsresult InitLocalBuffer(android::IOMX::buffer_id aId);
+
+  // aMemory is an IPC based memory which will be used as the pBuffer in
+  // mBuffer. And the mBuffer will be the mirror OMX_BUFFERHEADERTYPE
+  // of the one in the remote process.
+  nsresult InitSharedMemory(android::IMemory* aMemory);
+
+  // GraphicBuffer is for video decoding acceleration on output port.
+  // Then mBuffer is the mirror OMX_BUFFERHEADERTYPE of the one in the remote
+  // process.
+  nsresult InitGraphicBuffer(OMX_VIDEO_PORTDEFINITIONTYPE& aDef);
 
   // Android OMX uses this id to pass the buffer between OMX component and
   // client.
   android::IOMX::buffer_id mId;
 
-  // mLocalBuffer are used only when the omx node is in mediaserver.
+  // mMirrorBuffer are used only when the omx node is in mediaserver.
   // Due to IPC problem, the mId is the OMX_BUFFERHEADERTYPE address in mediaserver.
   // It can't mapping to client process, so we need a local OMX_BUFFERHEADERTYPE
-  // here.
-  nsAutoPtr<OMX_BUFFERHEADERTYPE> mLocalBuffer;
+  // here to mirror the remote OMX_BUFFERHEADERTYPE in mediaserver.
+  nsAutoPtr<OMX_BUFFERHEADERTYPE> mMirrorBuffer;
+
+  // It creates GraphicBuffer and manages TextureClient.
+  RefPtr<GonkTextureClientRecycleHandler> mTextureClientRecycleHandler;
+
+  GonkOmxPlatformLayer* mGonkPlatformLayer;
 };
 
 class GonkOmxPlatformLayer : public OmxPlatformLayer {
 public:
+  enum {
+    kRequiresAllocateBufferOnInputPorts = 0,
+    kRequiresAllocateBufferOnOutputPorts,
+    QUIRKS,
+  };
+  typedef std::bitset<QUIRKS> Quirks;
+
+  struct ComponentInfo {
+    const char* mName;
+    Quirks mQuirks;
+  };
+
   GonkOmxPlatformLayer(OmxDataDecoder* aDataDecoder,
                        OmxPromiseLayer* aPromiseLayer,
-                       TaskQueue* aTaskQueue);
+                       TaskQueue* aTaskQueue,
+                       layers::ImageContainer* aImageContainer);
 
   nsresult AllocateOmxBuffer(OMX_DIRTYPE aType, BUFFERLIST* aBufferList) override;
 
@@ -96,17 +154,35 @@ public:
 
   nsresult Shutdown() override;
 
-  // TODO:
-  // There is another InitOmxParameter in OmxDataDecoder. They need to combinate
-  // to one function.
-  template<class T> void InitOmxParameter(T* aParam);
+  static bool FindComponents(const nsACString& aMimeType,
+                             nsTArray<ComponentInfo>* aComponents = nullptr);
+
+  // Android/QCOM decoder uses its own OMX_VIDEO_CodingVP8 definition in
+  // frameworks/native/media/include/openmax/OMX_Video.h, not the one defined
+  // in OpenMAX v1.1.2 OMX_VideoExt.h
+  OMX_VIDEO_CODINGTYPE CompressionFormat() override;
 
 protected:
-  bool LoadComponent(const char* aName);
+  friend GonkBufferData;
+
+  layers::ImageContainer* GetImageContainer();
+
+  const TrackInfo* GetTrackInfo();
+
+  TaskQueue* GetTaskQueue()
+  {
+    return mTaskQueue;
+  }
+
+  nsresult EnableOmxGraphicBufferPort(OMX_PARAM_PORTDEFINITIONTYPE& aDef);
+
+  bool LoadComponent(const ComponentInfo& aComponent);
 
   friend class GonkOmxObserver;
 
   RefPtr<TaskQueue> mTaskQueue;
+
+  RefPtr<layers::ImageContainer> mImageContainer;
 
   // OMX_DirInput is 0, OMX_DirOutput is 1.
   android::sp<android::MemoryDealer> mMemoryDealer[2];
@@ -119,9 +195,7 @@ protected:
 
   android::OMXClient mOmxClient;
 
-  uint32_t mQuirks;
-
-  bool mUsingHardwareCodec;
+  Quirks mQuirks;
 };
 
 }

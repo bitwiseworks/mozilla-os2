@@ -1,10 +1,17 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint no-unused-vars: [2, {"vars": "local"}] */
 
-// This shared-head.js file is used for multiple directories in devtools.
+"use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+// This shared-head.js file is used for multiple mochitest test directories in
+// devtools.
+// It contains various common helper functions.
+
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr, Constructor: CC}
+  = Components;
 
 function scopedCuImport(path) {
   const scope = {};
@@ -12,25 +19,66 @@ function scopedCuImport(path) {
   return scope;
 }
 
-const {Services} = scopedCuImport("resource://gre/modules/Services.jsm");
-const {gDevTools} = scopedCuImport("resource://devtools/client/framework/gDevTools.jsm");
 const {console} = scopedCuImport("resource://gre/modules/Console.jsm");
 const {ScratchpadManager} = scopedCuImport("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
-const {require} = scopedCuImport("resource://devtools/shared/Loader.jsm");
+const {loader, require} = scopedCuImport("resource://devtools/shared/Loader.jsm");
 
+const {gDevTools} = require("devtools/client/framework/devtools");
 const {TargetFactory} = require("devtools/client/framework/target");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const flags = require("devtools/shared/flags");
 let promise = require("promise");
+let defer = require("devtools/shared/defer");
+const Services = require("Services");
+const {Task} = require("devtools/shared/task");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 
 const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 const CHROME_URL_ROOT = TEST_DIR + "/";
-const URL_ROOT = CHROME_URL_ROOT.replace("chrome://mochitests/content/", "http://example.com/");
+const URL_ROOT = CHROME_URL_ROOT.replace("chrome://mochitests/content/",
+                                         "http://example.com/");
+const URL_ROOT_SSL = CHROME_URL_ROOT.replace("chrome://mochitests/content/",
+                                             "https://example.com/");
 
 // All test are asynchronous
 waitForExplicitFinish();
 
+var EXPECTED_DTU_ASSERT_FAILURE_COUNT = 0;
+
+registerCleanupFunction(function () {
+  if (DevToolsUtils.assertionFailureCount !==
+      EXPECTED_DTU_ASSERT_FAILURE_COUNT) {
+    ok(false,
+      "Should have had the expected number of DevToolsUtils.assert() failures."
+      + " Expected " + EXPECTED_DTU_ASSERT_FAILURE_COUNT
+      + ", got " + DevToolsUtils.assertionFailureCount);
+  }
+});
+
 // Uncomment this pref to dump all devtools emitted events to the console.
 // Services.prefs.setBoolPref("devtools.dump.emit", true);
+
+/**
+ * Watch console messages for failed propType definitions in React components.
+ */
+const ConsoleObserver = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+
+  observe: function (subject, topic, data) {
+    let message = subject.wrappedJSObject.arguments[0];
+
+    if (/Failed propType/.test(message)) {
+      ok(false, message);
+    }
+  }
+};
+
+Services.obs.addObserver(ConsoleObserver, "console-api-log-event", false);
+registerCleanupFunction(() => {
+  Services.obs.removeObserver(ConsoleObserver, "console-api-log-event");
+});
+
+var waitForTime = DevToolsUtils.waitForTime;
 
 function getFrameScript() {
   let mm = gBrowser.selectedBrowser.messageManager;
@@ -42,61 +90,79 @@ function getFrameScript() {
   return mm;
 }
 
-DevToolsUtils.testing = true;
+flags.testing = true;
 registerCleanupFunction(() => {
-  DevToolsUtils.testing = false;
+  flags.testing = false;
   Services.prefs.clearUserPref("devtools.dump.emit");
   Services.prefs.clearUserPref("devtools.toolbox.host");
   Services.prefs.clearUserPref("devtools.toolbox.previousHost");
+  Services.prefs.clearUserPref("devtools.toolbox.splitconsoleEnabled");
 });
 
 registerCleanupFunction(function* cleanup() {
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  yield gDevTools.closeToolbox(target);
-
   while (gBrowser.tabs.length > 1) {
-    gBrowser.removeCurrentTab();
+    yield closeTabAndToolbox(gBrowser.selectedTab);
   }
 });
 
 /**
  * Add a new test tab in the browser and load the given url.
  * @param {String} url The url to be loaded in the new tab
+ * @param {Object} options Object with various optional fields:
+ *   - {Boolean} background If true, open the tab in background
+ *   - {ChromeWindow} window Firefox top level window we should use to open the tab
  * @return a promise that resolves to the tab object when the url is loaded
  */
-function addTab(url) {
-  info("Adding a new tab with URL: '" + url + "'");
-  let def = promise.defer();
+var addTab = Task.async(function* (url, options = { background: false, window: window }) {
+  info("Adding a new tab with URL: " + url);
 
-  let tab = gBrowser.selectedTab = gBrowser.addTab(url);
-  gBrowser.selectedBrowser.addEventListener("load", function onload() {
-    gBrowser.selectedBrowser.removeEventListener("load", onload, true);
-    info("URL '" + url + "' loading complete");
-    def.resolve(tab);
-  }, true);
+  let { background } = options;
+  let { gBrowser } = options.window ? options.window : window;
 
-  return def.promise;
-}
+  let tab = gBrowser.addTab(url);
+  if (!background) {
+    gBrowser.selectedTab = tab;
+  }
+  yield BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+
+  info("Tab added and finished loading");
+
+  return tab;
+});
 
 /**
  * Remove the given tab.
  * @param {Object} tab The tab to be removed.
  * @return Promise<undefined> resolved when the tab is successfully removed.
  */
-function removeTab(tab) {
+var removeTab = Task.async(function* (tab) {
   info("Removing tab.");
-  return new Promise(resolve => {
-    let tabContainer = gBrowser.tabContainer;
-    tabContainer.addEventListener("TabClose", function onClose(aEvent) {
-      tabContainer.removeEventListener("TabClose", onClose, false);
-      info("Tab removed and finished closing.");
-      resolve();
-    }, false);
 
-    gBrowser.removeTab(tab);
-  });
-}
+  let { gBrowser } = tab.ownerDocument.defaultView;
+  let onClose = once(gBrowser.tabContainer, "TabClose");
+  gBrowser.removeTab(tab);
+  yield onClose;
 
+  info("Tab removed and finished closing");
+});
+
+/**
+ * Refresh the given tab.
+ * @param {Object} tab The tab to be refreshed.
+ * @return Promise<undefined> resolved when the tab is successfully refreshed.
+ */
+var refreshTab = Task.async(function*(tab) {
+  info("Refreshing tab.");
+  const finished = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
+  gBrowser.reloadTab(gBrowser.selectedTab);
+  yield finished;
+  info("Tab finished refreshing.");
+});
+
+/**
+ * Simulate a key event from a <key> element.
+ * @param {DOMNode} key
+ */
 function synthesizeKeyFromKeyTag(key) {
   is(key && key.tagName, "key", "Successfully retrieved the <key> node");
 
@@ -104,10 +170,11 @@ function synthesizeKeyFromKeyTag(key) {
 
   let name = null;
 
-  if (key.getAttribute("keycode"))
+  if (key.getAttribute("keycode")) {
     name = key.getAttribute("keycode");
-  else if (key.getAttribute("key"))
+  } else if (key.getAttribute("key")) {
     name = key.getAttribute("key");
+  }
 
   isnot(name, null, "Successfully retrieved keycode/key");
 
@@ -124,17 +191,49 @@ function synthesizeKeyFromKeyTag(key) {
 }
 
 /**
- * Wait for eventName on target.
- * @param {Object} target An observable object that either supports on/off or
- * addEventListener/removeEventListener
+ * Simulate a key event from an electron key shortcut string:
+ * https://github.com/electron/electron/blob/master/docs/api/accelerator.md
+ *
+ * @param {String} key
+ * @param {DOMWindow} target
+ *        Optional window where to fire the key event
+ */
+function synthesizeKeyShortcut(key, target) {
+  // parseElectronKey requires any window, just to access `KeyboardEvent`
+  let window = Services.appShell.hiddenDOMWindow;
+  let shortcut = KeyShortcuts.parseElectronKey(window, key);
+  let keyEvent = {
+    altKey: shortcut.alt,
+    ctrlKey: shortcut.ctrl,
+    metaKey: shortcut.meta,
+    shiftKey: shortcut.shift
+  };
+  if (shortcut.keyCode) {
+    keyEvent.keyCode = shortcut.keyCode;
+  }
+
+  info("Synthesizing key shortcut: " + key);
+  EventUtils.synthesizeKey(shortcut.key || "", keyEvent, target);
+}
+
+/**
+ * Wait for eventName on target to be delivered a number of times.
+ *
+ * @param {Object} target
+ *        An observable object that either supports on/off or
+ *        addEventListener/removeEventListener
  * @param {String} eventName
- * @param {Boolean} useCapture Optional, for addEventListener/removeEventListener
+ * @param {Number} numTimes
+ *        Number of deliveries to wait for.
+ * @param {Boolean} useCapture
+ *        Optional, for addEventListener/removeEventListener
  * @return A promise that resolves when the event has been handled
  */
-function once(target, eventName, useCapture=false) {
+function waitForNEvents(target, eventName, numTimes, useCapture = false) {
   info("Waiting for event: '" + eventName + "' on " + target + ".");
 
-  let deferred = promise.defer();
+  let deferred = defer();
+  let count = 0;
 
   for (let [add, remove] of [
     ["addEventListener", "removeEventListener"],
@@ -144,8 +243,10 @@ function once(target, eventName, useCapture=false) {
     if ((add in target) && (remove in target)) {
       target[add](eventName, function onEvent(...aArgs) {
         info("Got event: '" + eventName + "' on " + target + ".");
-        target[remove](eventName, onEvent, useCapture);
-        deferred.resolve.apply(deferred, aArgs);
+        if (++count == numTimes) {
+          target[remove](eventName, onEvent, useCapture);
+          deferred.resolve.apply(deferred, aArgs);
+        }
       }, useCapture);
       break;
     }
@@ -155,10 +256,25 @@ function once(target, eventName, useCapture=false) {
 }
 
 /**
+ * Wait for eventName on target.
+ *
+ * @param {Object} target
+ *        An observable object that either supports on/off or
+ *        addEventListener/removeEventListener
+ * @param {String} eventName
+ * @param {Boolean} useCapture
+ *        Optional, for addEventListener/removeEventListener
+ * @return A promise that resolves when the event has been handled
+ */
+function once(target, eventName, useCapture = false) {
+  return waitForNEvents(target, eventName, 1, useCapture);
+}
+
+/**
  * Some tests may need to import one or more of the test helper scripts.
  * A test helper script is simply a js file that contains common test code that
- * is either not common-enough to be in head.js, or that is located in a separate
- * directory.
+ * is either not common-enough to be in head.js, or that is located in a
+ * separate directory.
  * The script will be loaded synchronously and in the test's scope.
  * @param {String} filePath The file path, relative to the current directory.
  *                 Examples:
@@ -170,28 +286,311 @@ function loadHelperScript(filePath) {
   Services.scriptloader.loadSubScript(testDir + "/" + filePath, this);
 }
 
+/**
+ * Wait for a tick.
+ * @return {Promise}
+ */
 function waitForTick() {
-  let deferred = promise.defer();
+  let deferred = defer();
   executeSoon(deferred.resolve);
   return deferred.promise;
 }
 
-function loadToolbox (url) {
-  let { promise: p, resolve } = promise.defer();
-  gBrowser.selectedTab = gBrowser.addTab();
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    gDevTools.showToolbox(target).then(resolve);
-  }, true);
-
-  content.location = url;
-  return p;
+/**
+ * This shouldn't be used in the tests, but is useful when writing new tests or
+ * debugging existing tests in order to introduce delays in the test steps
+ *
+ * @param {Number} ms
+ *        The time to wait
+ * @return A promise that resolves when the time is passed
+ */
+function wait(ms) {
+  return new promise(resolve => setTimeout(resolve, ms));
 }
 
-function unloadToolbox (toolbox) {
-  return toolbox.destroy().then(function() {
-    gBrowser.removeCurrentTab();
+/**
+ * Open the toolbox in a given tab.
+ * @param {XULNode} tab The tab the toolbox should be opened in.
+ * @param {String} toolId Optional. The ID of the tool to be selected.
+ * @param {String} hostType Optional. The type of toolbox host to be used.
+ * @return {Promise} Resolves with the toolbox, when it has been opened.
+ */
+var openToolboxForTab = Task.async(function* (tab, toolId, hostType) {
+  info("Opening the toolbox");
+
+  let toolbox;
+  let target = TargetFactory.forTab(tab);
+  yield target.makeRemote();
+
+  // Check if the toolbox is already loaded.
+  toolbox = gDevTools.getToolbox(target);
+  if (toolbox) {
+    if (!toolId || (toolId && toolbox.getPanel(toolId))) {
+      info("Toolbox is already opened");
+      return toolbox;
+    }
+  }
+
+  // If not, load it now.
+  toolbox = yield gDevTools.showToolbox(target, toolId, hostType);
+
+  // Make sure that the toolbox frame is focused.
+  yield new Promise(resolve => waitForFocus(resolve, toolbox.win));
+
+  info("Toolbox opened and focused");
+
+  return toolbox;
+});
+
+/**
+ * Add a new tab and open the toolbox in it.
+ * @param {String} url The URL for the tab to be opened.
+ * @param {String} toolId Optional. The ID of the tool to be selected.
+ * @param {String} hostType Optional. The type of toolbox host to be used.
+ * @return {Promise} Resolves when the tab has been added, loaded and the
+ * toolbox has been opened. Resolves to the toolbox.
+ */
+var openNewTabAndToolbox = Task.async(function* (url, toolId, hostType) {
+  let tab = yield addTab(url);
+  return openToolboxForTab(tab, toolId, hostType);
+});
+
+/**
+ * Close a tab and if necessary, the toolbox that belongs to it
+ * @param {Tab} tab The tab to close.
+ * @return {Promise} Resolves when the toolbox and tab have been destroyed and
+ * closed.
+ */
+var closeTabAndToolbox = Task.async(function* (tab = gBrowser.selectedTab) {
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  if (target) {
+    yield gDevTools.closeToolbox(target);
+  }
+
+  yield removeTab(gBrowser.selectedTab);
+});
+
+/**
+ * Close a toolbox and the current tab.
+ * @param {Toolbox} toolbox The toolbox to close.
+ * @return {Promise} Resolves when the toolbox and tab have been destroyed and
+ * closed.
+ */
+var closeToolboxAndTab = Task.async(function* (toolbox) {
+  yield toolbox.destroy();
+  yield removeTab(gBrowser.selectedTab);
+});
+
+/**
+ * Waits until a predicate returns true.
+ *
+ * @param function predicate
+ *        Invoked once in a while until it returns true.
+ * @param number interval [optional]
+ *        How often the predicate is invoked, in milliseconds.
+ */
+function waitUntil(predicate, interval = 10) {
+  if (predicate()) {
+    return Promise.resolve(true);
+  }
+  return new Promise(resolve => {
+    setTimeout(function () {
+      waitUntil(predicate, interval).then(() => resolve(true));
+    }, interval);
   });
+}
+
+/**
+ * Takes a string `script` and evaluates it directly in the content
+ * in potentially a different process.
+ */
+let MM_INC_ID = 0;
+function evalInDebuggee(mm, script) {
+  return new Promise(function (resolve, reject) {
+    let id = MM_INC_ID++;
+    mm.sendAsyncMessage("devtools:test:eval", { script, id });
+    mm.addMessageListener("devtools:test:eval:response", handler);
+
+    function handler({ data }) {
+      if (id !== data.id) {
+        return;
+      }
+
+      info(`Successfully evaled in debuggee: ${script}`);
+      mm.removeMessageListener("devtools:test:eval:response", handler);
+      resolve(data.value);
+    }
+  });
+}
+
+/**
+ * Wait for a context menu popup to open.
+ *
+ * @param nsIDOMElement popup
+ *        The XUL popup you expect to open.
+ * @param nsIDOMElement button
+ *        The button/element that receives the contextmenu event. This is
+ *        expected to open the popup.
+ * @param function onShown
+ *        Function to invoke on popupshown event.
+ * @param function onHidden
+ *        Function to invoke on popuphidden event.
+ * @return object
+ *         A Promise object that is resolved after the popuphidden event
+ *         callback is invoked.
+ */
+function waitForContextMenu(popup, button, onShown, onHidden) {
+  let deferred = defer();
+
+  function onPopupShown() {
+    info("onPopupShown");
+    popup.removeEventListener("popupshown", onPopupShown);
+
+    onShown && onShown();
+
+    // Use executeSoon() to get out of the popupshown event.
+    popup.addEventListener("popuphidden", onPopupHidden);
+    executeSoon(() => popup.hidePopup());
+  }
+  function onPopupHidden() {
+    info("onPopupHidden");
+    popup.removeEventListener("popuphidden", onPopupHidden);
+
+    onHidden && onHidden();
+
+    deferred.resolve(popup);
+  }
+
+  popup.addEventListener("popupshown", onPopupShown);
+
+  info("wait for the context menu to open");
+  button.scrollIntoView();
+  let eventDetails = {type: "contextmenu", button: 2};
+  EventUtils.synthesizeMouse(button, 5, 2, eventDetails,
+                             button.ownerDocument.defaultView);
+  return deferred.promise;
+}
+
+/**
+ * Promise wrapper around SimpleTest.waitForClipboard
+ */
+function waitForClipboardPromise(setup, expected) {
+  return new Promise((resolve, reject) => {
+    SimpleTest.waitForClipboard(expected, setup, resolve, reject);
+  });
+}
+
+/**
+ * Simple helper to push a temporary preference. Wrapper on SpecialPowers
+ * pushPrefEnv that returns a promise resolving when the preferences have been
+ * updated.
+ *
+ * @param {String} preferenceName
+ *        The name of the preference to updated
+ * @param {} value
+ *        The preference value, type can vary
+ * @return {Promise} resolves when the preferences have been updated
+ */
+function pushPref(preferenceName, value) {
+  return new Promise(resolve => {
+    let options = {"set": [[preferenceName, value]]};
+    SpecialPowers.pushPrefEnv(options, resolve);
+  });
+}
+
+/**
+ * Lookup the provided dotted path ("prop1.subprop2.myProp") in the provided object.
+ *
+ * @param {Object} obj
+ *        Object to expand.
+ * @param {String} path
+ *        Dotted path to use to expand the object.
+ * @return {?} anything that is found at the provided path in the object.
+ */
+function lookupPath(obj, path) {
+  let segments = path.split(".");
+  return segments.reduce((prev, current) => prev[current], obj);
+}
+
+var closeToolbox = Task.async(function* () {
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  yield gDevTools.closeToolbox(target);
+});
+
+/**
+ * Load the Telemetry utils, then stub Telemetry.prototype.log and
+ * Telemetry.prototype.logKeyed in order to record everything that's logged in
+ * it.
+ * Store all recordings in Telemetry.telemetryInfo.
+ * @return {Telemetry}
+ */
+function loadTelemetryAndRecordLogs() {
+  info("Mock the Telemetry log function to record logged information");
+
+  let Telemetry = require("devtools/client/shared/telemetry");
+  Telemetry.prototype.telemetryInfo = {};
+  Telemetry.prototype._oldlog = Telemetry.prototype.log;
+  Telemetry.prototype.log = function (histogramId, value) {
+    if (!this.telemetryInfo) {
+      // Telemetry instance still in use after stopRecordingTelemetryLogs
+      return;
+    }
+    if (histogramId) {
+      if (!this.telemetryInfo[histogramId]) {
+        this.telemetryInfo[histogramId] = [];
+      }
+      this.telemetryInfo[histogramId].push(value);
+    }
+  };
+  Telemetry.prototype._oldlogKeyed = Telemetry.prototype.logKeyed;
+  Telemetry.prototype.logKeyed = function (histogramId, key, value) {
+    this.log(`${histogramId}|${key}`, value);
+  };
+
+  return Telemetry;
+}
+
+/**
+ * Stop recording the Telemetry logs and put back the utils as it was before.
+ * @param {Telemetry} Required Telemetry
+ *        Telemetry object that needs to be stopped.
+ */
+function stopRecordingTelemetryLogs(Telemetry) {
+  info("Stopping Telemetry");
+  Telemetry.prototype.log = Telemetry.prototype._oldlog;
+  Telemetry.prototype.logKeyed = Telemetry.prototype._oldlogKeyed;
+  delete Telemetry.prototype._oldlog;
+  delete Telemetry.prototype._oldlogKeyed;
+  delete Telemetry.prototype.telemetryInfo;
+}
+
+/**
+ * Clean the logical clipboard content. This method only clears the OS clipboard on
+ * Windows (see Bug 666254).
+ */
+function emptyClipboard() {
+  let clipboard = Cc["@mozilla.org/widget/clipboard;1"]
+    .getService(SpecialPowers.Ci.nsIClipboard);
+  clipboard.emptyClipboard(clipboard.kGlobalClipboard);
+}
+
+/**
+ * Check if the current operating system is Windows.
+ */
+function isWindows() {
+  return Services.appinfo.OS === "WINNT";
+}
+
+/**
+ * Wait for a given toolbox to get its title updated.
+ */
+function waitForTitleChange(toolbox) {
+  let deferred = defer();
+  toolbox.win.parent.addEventListener("message", function onmessage(event) {
+    if (event.data.name == "set-host-title") {
+      toolbox.win.parent.removeEventListener("message", onmessage);
+      deferred.resolve();
+    }
+  });
+  return deferred.promise;
 }

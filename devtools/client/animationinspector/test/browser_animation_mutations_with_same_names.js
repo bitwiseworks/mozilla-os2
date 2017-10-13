@@ -9,8 +9,8 @@
 // displayed (which should be true as long as these animations apply to
 // different nodes).
 
-add_task(function*() {
-  yield addTab(TEST_URL_ROOT + "doc_negative_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_negative_animation.html");
   let {controller, panel} = yield openAnimationInspector();
 
   info("Wait until all animations have been added " +
@@ -25,7 +25,7 @@ add_task(function*() {
 
   // Reduce the known nodeFronts to a set to make them unique.
   let nodeFronts = new Set(panel.animationsTimelineComponent
-                                .targetNodes.map(n => n.nodeFront));
+                                .targetNodes.map(n => n.previewer.nodeFront));
   is(nodeFronts.size, 3,
      "The animations are applied to 3 different node fronts");
 });

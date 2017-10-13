@@ -5,7 +5,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import mozversion
-import logging
 import os
 import sys
 import time
@@ -14,13 +13,16 @@ import urllib
 import utils
 import mozhttpd
 
+from mozlog import get_proxy_logger
+
 from talos.results import TalosResults
 from talos.ttest import TTest
-from talos.utils import TalosError, TalosCrash, TalosRegression
+from talos.utils import TalosError, TalosRegression
 from talos.config import get_configs, ConfigurationError
 
 # directory of this file
 here = os.path.dirname(os.path.realpath(__file__))
+LOG = get_proxy_logger()
 
 
 def useBaseTestDefaults(base, tests):
@@ -45,6 +47,14 @@ def buildCommandLine(test):
     if 'tpmanifest' not in test:
         raise TalosError("tpmanifest not found in test: %s" % test)
 
+    # if profiling is on, override tppagecycles to prevent test hanging
+    if test['sps_profile']:
+        LOG.info("sps profiling is enabled so talos is reducing the number "
+                 "of cycles, please disregard reported numbers")
+        for cycle_var in ['tppagecycles', 'tpcycles', 'cycles']:
+            if test[cycle_var] > 2:
+                test[cycle_var] = 2
+
     # build pageloader command from options
     url = ['-tp', test['tpmanifest']]
     CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tpdisable_e10s',
@@ -67,7 +77,7 @@ def buildCommandLine(test):
 
 def setup_webserver(webserver):
     """use mozhttpd to setup a webserver"""
-    logging.info("starting webserver on %r" % webserver)
+    LOG.info("starting webserver on %r" % webserver)
 
     host, port = webserver.split(':')
     return mozhttpd.MozHttpd(host=host, port=int(port), docroot=here)
@@ -106,13 +116,12 @@ def run_tests(config, browser_config):
     if browser_config['develop']:
         browser_config['extra_args'] = '--no-remote'
 
-    # set defaults
-    title = config.get('title', '')
-    testdate = config.get('testdate', '')
+    # with addon signing for production talos, we want to develop without it
+    if browser_config['develop'] or browser_config['branch_name'] == 'Try':
+        browser_config['preferences']['xpinstall.signatures.required'] = False
 
-    if browser_config['e10s'] and not title.endswith(".e"):
-        # we are running in e10s mode
-        title = "%s.e" % (title,)
+    # set defaults
+    testdate = config.get('testdate', '')
 
     # get the process name from the path to the browser
     if not browser_config['process']:
@@ -141,7 +150,7 @@ def run_tests(config, browser_config):
         browser_config['sourcestamp'] = version_info['application_changeset']
     except KeyError:
         if not browser_config['develop']:
-            print "unable to find changeset or repository: %s" % version_info
+            print("unable to find changeset or repository: %s" % version_info)
             sys.exit()
         else:
             browser_config['repository'] = 'develop'
@@ -153,75 +162,74 @@ def run_tests(config, browser_config):
                                              '%a, %d %b %Y %H:%M:%S GMT')))
     else:
         date = int(time.time())
-    logging.debug("using testdate: %d", date)
-    logging.debug("actual date: %d", int(time.time()))
+    LOG.debug("using testdate: %d" % date)
+    LOG.debug("actual date: %d" % int(time.time()))
 
     # results container
-    talos_results = TalosResults(title=title,
-                                 date=date,
-                                 browser_config=browser_config)
+    talos_results = TalosResults()
 
     # results links
-    if not browser_config['develop']:
+    if not browser_config['develop'] and not config['sps_profile']:
         results_urls = dict(
-            # hardcoded, this will be removed soon anyway.
-            results_urls=['http://graphs.mozilla.org/server/collect.cgi'],
             # another hack; datazilla stands for Perfherder
             # and do not require url, but a non empty dict is required...
-            datazilla_urls=['local.json'],
+            output_urls=['local.json'],
         )
     else:
         # local mode, output to files
-        results_urls = dict(
-            results_urls=[os.path.abspath('local.out')],
-            datazilla_urls=[os.path.abspath('local.json')]
-        )
-    talos_results.check_output_formats(results_urls)
+        results_urls = dict(output_urls=[os.path.abspath('local.json')])
 
     httpd = setup_webserver(browser_config['webserver'])
     httpd.start()
 
+    # if e10s add as extra results option
+    if config['e10s']:
+        talos_results.add_extra_option('e10s')
+
+    if config['sps_profile']:
+        talos_results.add_extra_option('spsProfile')
+
     testname = None
+    # run the tests
+    timer = utils.Timer()
+    LOG.suite_start(tests=[test['name'] for test in tests])
     try:
-        # run the tests
-        timer = utils.Timer()
-        logging.info("Starting test suite %s", title)
         for test in tests:
             testname = test['name']
-            testtimer = utils.Timer()
-            logging.info("Starting test %s", testname)
+            LOG.test_start(testname)
 
             mytest = TTest()
             talos_results.add(mytest.runTest(browser_config, test))
 
-            logging.info("Completed test %s (%s)", testname,
-                         testtimer.elapsed())
+            LOG.test_end(testname, status='OK')
 
-    except TalosRegression:
-        logging.error("Detected a regression for %s", testname)
+    except TalosRegression as exc:
+        LOG.error("Detected a regression for %s" % testname)
         # by returning 1, we report an orange to buildbot
         # http://docs.buildbot.net/latest/developer/results.html
+        LOG.test_end(testname, status='FAIL', message=str(exc),
+                     stack=traceback.format_exc())
         return 1
-    except (TalosCrash, TalosError):
+    except Exception as exc:
         # NOTE: if we get into this condition, talos has an internal
         # problem and cannot continue
         #       this will prevent future tests from running
-        traceback.print_exception(*sys.exc_info())
+        LOG.test_end(testname, status='ERROR', message=str(exc),
+                     stack=traceback.format_exc())
         # indicate a failure to buildbot, turn the job red
         return 2
     finally:
+        LOG.suite_end()
         httpd.stop()
 
-    logging.info("Completed test suite (%s)", timer.elapsed())
+    LOG.info("Completed test suite (%s)" % timer.elapsed())
 
     # output results
     if results_urls:
         talos_results.output(results_urls)
-        if browser_config['develop']:
-            print
-            print ("Thanks for running Talos locally. Results are in"
-                   " %s and %s" % (results_urls['results_urls'],
-                                   results_urls['datazilla_urls']))
+        if browser_config['develop'] or config['sps_profile']:
+            print("Thanks for running Talos locally. Results are in %s"
+                  % (results_urls['output_urls']))
 
     # we will stop running tests on a failed test, or we will return 0 for
     # green
@@ -231,9 +239,8 @@ def run_tests(config, browser_config):
 def main(args=sys.argv[1:]):
     try:
         config, browser_config = get_configs()
-    except ConfigurationError, exc:
+    except ConfigurationError as exc:
         sys.exit("ERROR: %s" % exc)
-    utils.startLogger('debug' if config['debug'] else 'info')
     sys.exit(run_tests(config, browser_config))
 
 

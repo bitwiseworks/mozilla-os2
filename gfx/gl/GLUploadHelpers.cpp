@@ -7,8 +7,11 @@
 
 #include "GLContext.h"
 #include "mozilla/gfx/2D.h"
+#include "gfxUtils.h"
 #include "mozilla/gfx/Tools.h"  // For BytesPerPixel
 #include "nsRegion.h"
+#include "GfxTexturesReporter.h"
+#include "mozilla/gfx/Logging.h"
 
 namespace mozilla {
 
@@ -16,41 +19,8 @@ using namespace gfx;
 
 namespace gl {
 
-/* These two techniques are suggested by "Bit Twiddling Hacks"
- */
-
-/**
- * Returns true if |aNumber| is a power of two
- * 0 is incorreclty considered a power of two
- */
-static bool
-IsPowerOfTwo(int aNumber)
-{
-    return (aNumber & (aNumber - 1)) == 0;
-}
-
-/**
- * Returns the first integer greater than |aNumber| which is a power of two
- * Undefined for |aNumber| < 0
- */
-static int
-NextPowerOfTwo(int aNumber)
-{
-#if defined(__arm__)
-    return 1 << (32 - __builtin_clz(aNumber - 1));
-#else
-    --aNumber;
-    aNumber |= aNumber >> 1;
-    aNumber |= aNumber >> 2;
-    aNumber |= aNumber >> 4;
-    aNumber |= aNumber >> 8;
-    aNumber |= aNumber >> 16;
-    return ++aNumber;
-#endif
-}
-
 static unsigned int
-DataOffset(const IntPoint &aPoint, int32_t aStride, SurfaceFormat aFormat)
+DataOffset(const IntPoint& aPoint, int32_t aStride, SurfaceFormat aFormat)
 {
   unsigned int data = aPoint.y * aStride;
   data += aPoint.x * BytesPerPixel(aFormat);
@@ -79,8 +49,8 @@ CopyAndPadTextureData(const GLvoid* srcBuffer,
                       GLsizei dstWidth, GLsizei dstHeight,
                       GLsizei stride, GLint pixelsize)
 {
-    unsigned char *rowDest = static_cast<unsigned char*>(dstBuffer);
-    const unsigned char *source = static_cast<const unsigned char*>(srcBuffer);
+    unsigned char* rowDest = static_cast<unsigned char*>(dstBuffer);
+    const unsigned char* source = static_cast<const unsigned char*>(srcBuffer);
 
     for (GLsizei h = 0; h < srcHeight; ++h) {
         memcpy(rowDest, source, srcWidth * pixelsize);
@@ -174,7 +144,7 @@ TexSubImage2DWithUnpackSubimageGLES(GLContext* gl,
                        1,
                        format,
                        type,
-                       (const unsigned char *)pixels+(height-1)*stride);
+                       (const unsigned char*)pixels+(height-1)*stride);
     gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
 }
 
@@ -191,34 +161,56 @@ TexSubImage2DWithoutUnpackSubimage(GLContext* gl,
     // isn't supported. We make a copy of the texture data we're using,
     // such that we're using the whole row of data in the copy. This turns
     // out to be more efficient than uploading row-by-row; see bug 698197.
-    unsigned char *newPixels = new unsigned char[width*height*pixelsize];
-    unsigned char *rowDest = newPixels;
-    const unsigned char *rowSource = (const unsigned char *)pixels;
-    for (int h = 0; h < height; h++) {
+    unsigned char* newPixels = new (fallible) unsigned char[width*height*pixelsize];
+
+    if (newPixels) {
+        unsigned char* rowDest = newPixels;
+        const unsigned char* rowSource = (const unsigned char*)pixels;
+        for (int h = 0; h < height; h++) {
             memcpy(rowDest, rowSource, width*pixelsize);
             rowDest += width*pixelsize;
             rowSource += stride;
-    }
+        }
 
-    stride = width*pixelsize;
-    gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT,
-                     std::min(GetAddressAlignment((ptrdiff_t)newPixels),
-                              GetAddressAlignment((ptrdiff_t)stride)));
-    gl->fTexSubImage2D(target,
-                       level,
-                       xoffset,
-                       yoffset,
-                       width,
-                       height,
-                       format,
-                       type,
-                       newPixels);
-    delete [] newPixels;
-    gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
+        stride = width*pixelsize;
+        gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT,
+                         std::min(GetAddressAlignment((ptrdiff_t)newPixels),
+                                  GetAddressAlignment((ptrdiff_t)stride)));
+        gl->fTexSubImage2D(target,
+                           level,
+                           xoffset,
+                           yoffset,
+                           width,
+                           height,
+                           format,
+                           type,
+                           newPixels);
+        delete [] newPixels;
+        gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
+
+    } else {
+        // If we did not have sufficient memory for the required
+        // temporary buffer, then fall back to uploading row-by-row.
+        const unsigned char* rowSource = (const unsigned char*)pixels;
+
+        gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT,
+                         std::min(GetAddressAlignment((ptrdiff_t)pixels),
+                                  GetAddressAlignment((ptrdiff_t)stride)));
+
+        for (int i = 0; i < height; i++) {
+            gl->fTexSubImage2D(target, level,
+                               xoffset, yoffset + i,
+                               width, 1,
+                               format, type, rowSource);
+            rowSource += stride;
+        }
+
+        gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
+    }
 }
 
 static void
-TexSubImage2DHelper(GLContext *gl,
+TexSubImage2DHelper(GLContext* gl,
                     GLenum target, GLint level,
                     GLint xoffset, GLint yoffset,
                     GLsizei width, GLsizei height, GLsizei stride,
@@ -272,26 +264,27 @@ TexSubImage2DHelper(GLContext *gl,
 }
 
 static void
-TexImage2DHelper(GLContext *gl,
+TexImage2DHelper(GLContext* gl,
                  GLenum target, GLint level, GLint internalformat,
                  GLsizei width, GLsizei height, GLsizei stride,
                  GLint pixelsize, GLint border, GLenum format,
-                 GLenum type, const GLvoid *pixels)
+                 GLenum type, const GLvoid* pixels)
 {
     if (gl->IsGLES()) {
 
         NS_ASSERTION(format == (GLenum)internalformat,
                     "format and internalformat not the same for glTexImage2D on GLES2");
 
+        MOZ_ASSERT(width >= 0 && height >= 0);
         if (!CanUploadNonPowerOfTwo(gl)
             && (stride != width * pixelsize
-            || !IsPowerOfTwo(width)
-            || !IsPowerOfTwo(height))) {
+            || !IsPowerOfTwo((uint32_t)width)
+            || !IsPowerOfTwo((uint32_t)height))) {
 
             // Pad out texture width and height to the next power of two
             // as we don't support/want non power of two texture uploads
-            GLsizei paddedWidth = NextPowerOfTwo(width);
-            GLsizei paddedHeight = NextPowerOfTwo(height);
+            GLsizei paddedWidth = RoundUpPow2((uint32_t)width);
+            GLsizei paddedHeight = RoundUpPow2((uint32_t)height);
 
             GLvoid* paddedPixels = new unsigned char[paddedWidth * paddedHeight * pixelsize];
 
@@ -385,42 +378,16 @@ UploadImageDataToTexture(GLContext* gl,
                          int32_t aStride,
                          SurfaceFormat aFormat,
                          const nsIntRegion& aDstRegion,
-                         GLuint& aTexture,
-                         bool aOverwrite,
-                         bool aPixelBuffer,
+                         GLuint aTexture,
+                         const gfx::IntSize& aSize,
+                         size_t* aOutUploadSize,
+                         bool aNeedInit,
                          GLenum aTextureUnit,
                          GLenum aTextureTarget)
 {
-    bool textureInited = aOverwrite ? false : true;
     gl->MakeCurrent();
     gl->fActiveTexture(aTextureUnit);
-
-    if (!aTexture) {
-        gl->fGenTextures(1, &aTexture);
-        gl->fBindTexture(aTextureTarget, aTexture);
-        gl->fTexParameteri(aTextureTarget,
-                           LOCAL_GL_TEXTURE_MIN_FILTER,
-                           LOCAL_GL_LINEAR);
-        gl->fTexParameteri(aTextureTarget,
-                           LOCAL_GL_TEXTURE_MAG_FILTER,
-                           LOCAL_GL_LINEAR);
-        gl->fTexParameteri(aTextureTarget,
-                           LOCAL_GL_TEXTURE_WRAP_S,
-                           LOCAL_GL_CLAMP_TO_EDGE);
-        gl->fTexParameteri(aTextureTarget,
-                           LOCAL_GL_TEXTURE_WRAP_T,
-                           LOCAL_GL_CLAMP_TO_EDGE);
-        textureInited = false;
-    } else {
-        gl->fBindTexture(aTextureTarget, aTexture);
-    }
-
-    nsIntRegion paintRegion;
-    if (!textureInited) {
-        paintRegion = nsIntRegion(aDstRegion.GetBounds());
-    } else {
-        paintRegion = aDstRegion;
-    }
+    gl->fBindTexture(aTextureTarget, aTexture);
 
     GLenum format = 0;
     GLenum internalFormat = 0;
@@ -501,50 +468,52 @@ UploadImageDataToTexture(GLContext* gl,
             NS_ASSERTION(false, "Unhandled image surface format!");
     }
 
-    nsIntRegionRectIterator iter(paintRegion);
-    const IntRect *iterRect;
+    if (aOutUploadSize) {
+        *aOutUploadSize = 0;
+    }
 
-    // Top left point of the region's bounding rectangle.
-    IntPoint topLeft = paintRegion.GetBounds().TopLeft();
+    if (aNeedInit || !CanUploadSubTextures(gl)) {
+        // If the texture needs initialized, or we are unable to
+        // upload sub textures, then initialize and upload the entire
+        // texture.
+        TexImage2DHelper(gl,
+                         aTextureTarget,
+                         0,
+                         internalFormat,
+                         aSize.width,
+                         aSize.height,
+                         aStride,
+                         pixelSize,
+                         0,
+                         format,
+                         type,
+                         aData);
 
-    while ((iterRect = iter.Next())) {
-        // The inital data pointer is at the top left point of the region's
-        // bounding rectangle. We need to find the offset of this rect
-        // within the region and adjust the data pointer accordingly.
-        unsigned char *rectData =
-            aData + DataOffset(iterRect->TopLeft() - topLeft, aStride, aFormat);
+        if (aOutUploadSize && aNeedInit) {
+            uint32_t texelSize = GetBytesPerTexel(internalFormat, type);
+            size_t numTexels = size_t(aSize.width) * size_t(aSize.height);
+            *aOutUploadSize += texelSize * numTexels;
+        }
+    } else {
+        // Upload each rect in the region to the texture
+        for (auto iter = aDstRegion.RectIter(); !iter.Done(); iter.Next()) {
+            const IntRect& rect = iter.Get();
+            const unsigned char* rectData =
+                aData + DataOffset(rect.TopLeft(), aStride, aFormat);
 
-        NS_ASSERTION(textureInited || (iterRect->x == 0 && iterRect->y == 0),
-                     "Must be uploading to the origin when we don't have an existing texture");
-
-        if (textureInited && CanUploadSubTextures(gl)) {
             TexSubImage2DHelper(gl,
                                 aTextureTarget,
                                 0,
-                                iterRect->x,
-                                iterRect->y,
-                                iterRect->width,
-                                iterRect->height,
+                                rect.x,
+                                rect.y,
+                                rect.width,
+                                rect.height,
                                 aStride,
                                 pixelSize,
                                 format,
                                 type,
                                 rectData);
-        } else {
-            TexImage2DHelper(gl,
-                             aTextureTarget,
-                             0,
-                             internalFormat,
-                             iterRect->width,
-                             iterRect->height,
-                             aStride,
-                             pixelSize,
-                             0,
-                             format,
-                             type,
-                             rectData);
         }
-
     }
 
     return surfaceFormat;
@@ -552,23 +521,26 @@ UploadImageDataToTexture(GLContext* gl,
 
 SurfaceFormat
 UploadSurfaceToTexture(GLContext* gl,
-                       DataSourceSurface *aSurface,
+                       DataSourceSurface* aSurface,
                        const nsIntRegion& aDstRegion,
-                       GLuint& aTexture,
-                       bool aOverwrite,
+                       GLuint aTexture,
+                       const gfx::IntSize& aSize,
+                       size_t* aOutUploadSize,
+                       bool aNeedInit,
                        const gfx::IntPoint& aSrcPoint,
-                       bool aPixelBuffer,
                        GLenum aTextureUnit,
                        GLenum aTextureTarget)
 {
-    unsigned char* data = aPixelBuffer ? nullptr : aSurface->GetData();
+
     int32_t stride = aSurface->Stride();
     SurfaceFormat format = aSurface->GetFormat();
-    data += DataOffset(aSrcPoint, stride, format);
+    unsigned char* data = aSurface->GetData() +
+        DataOffset(aSrcPoint, stride, format);
+
     return UploadImageDataToTexture(gl, data, stride, format,
-                                    aDstRegion, aTexture, aOverwrite,
-                                    aPixelBuffer, aTextureUnit,
-                                    aTextureTarget);
+                                    aDstRegion, aTexture, aSize,
+                                    aOutUploadSize, aNeedInit,
+                                    aTextureUnit, aTextureTarget);
 }
 
 bool

@@ -30,12 +30,12 @@ protected:
   ~SharedPlanarYCbCrImage();
 
 public:
-  virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
+  virtual TextureClient* GetTextureClient(KnowsCompositor* aForwarder) override;
   virtual uint8_t* GetBuffer() override;
 
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
-  virtual bool SetData(const PlanarYCbCrData& aData) override;
-  virtual bool SetDataNoCopy(const Data &aData) override;
+  virtual bool CopyData(const PlanarYCbCrData& aData) override;
+  virtual bool AdoptData(const Data &aData) override;
 
   virtual bool Allocate(PlanarYCbCrData& aData);
   virtual uint8_t* AllocateAndGetNewBuffer(uint32_t aSize) override;

@@ -9,12 +9,12 @@
 
 #include "HttpBaseChannel.h"
 #include "nsTArray.h"
-#include "nsIPackagedAppChannelListener.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntry.h"
 #include "nsICacheEntryOpenCallback.h"
 #include "nsIDNSListener.h"
 #include "nsIApplicationCacheChannel.h"
+#include "nsIChannelWithDivertableParentListener.h"
 #include "nsIProtocolProxyCallback.h"
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -22,10 +22,13 @@
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsWeakReference.h"
 #include "TimingStruct.h"
+#include "ADivertableParentChannel.h"
 #include "AutoClose.h"
 #include "nsIStreamListener.h"
 #include "nsISupportsPrimitives.h"
 #include "nsICorsPreflightCallback.h"
+#include "AlternateServices.h"
+#include "nsIHstsPrimingCallback.h"
 
 class nsDNSPrefetch;
 class nsICancelable;
@@ -60,7 +63,6 @@ public:
 class nsHttpChannel final : public HttpBaseChannel
                           , public HttpAsyncAborter<nsHttpChannel>
                           , public nsIStreamListener
-                          , public nsIPackagedAppChannelListener
                           , public nsICachingChannel
                           , public nsICacheEntryOpenCallback
                           , public nsITransportEventSink
@@ -73,12 +75,13 @@ class nsHttpChannel final : public HttpBaseChannel
                           , public nsIDNSListener
                           , public nsSupportsWeakReference
                           , public nsICorsPreflightCallback
+                          , public nsIChannelWithDivertableParentListener
+                          , public nsIHstsPrimingCallback
 {
 public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
-    NS_DECL_NSIPACKAGEDAPPCHANNELLISTENER
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
     NS_DECL_NSICACHEINFOCHANNEL
     NS_DECL_NSICACHINGCHANNEL
@@ -89,8 +92,10 @@ public:
     NS_DECL_NSIAPPLICATIONCACHECONTAINER
     NS_DECL_NSIAPPLICATIONCACHECHANNEL
     NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
+    NS_DECL_NSIHSTSPRIMINGCALLBACK
     NS_DECL_NSITHREADRETARGETABLEREQUEST
     NS_DECL_NSIDNSLISTENER
+    NS_DECL_NSICHANNELWITHDIVERTABLEPARENTLISTENER
     NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTPCHANNEL_IID)
 
     // nsIHttpAuthenticableChannel. We can't use
@@ -105,6 +110,8 @@ public:
     NS_IMETHOD SetWWWCredentials(const nsACString & aCredentials) override;
     NS_IMETHOD OnAuthAvailable() override;
     NS_IMETHOD OnAuthCancelled(bool userCancel) override;
+    NS_IMETHOD CloseStickyConnection() override;
+    NS_IMETHOD ConnectionRestartable(bool) override;
     // Functions we implement from nsIHttpAuthenticableChannel but are
     // declared in HttpBaseChannel must be implemented in this class. We
     // just call the HttpBaseChannel:: impls.
@@ -118,7 +125,8 @@ public:
 
     virtual nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
                           uint32_t aProxyResolveFlags,
-                          nsIURI *aProxyURI) override;
+                          nsIURI *aProxyURI,
+                          const nsID& aChannelId) override;
 
     nsresult OnPush(const nsACString &uri, Http2PushedStream *pushedStream);
 
@@ -140,6 +148,7 @@ public:
     // nsIHttpChannelInternal
     NS_IMETHOD SetupFallbackChannel(const char *aFallbackKey) override;
     NS_IMETHOD ForceIntercepted(uint64_t aInterceptionID) override;
+    virtual mozilla::net::nsHttpChannel * QueryHttpChannelImpl(void) override;
     // nsISupportsPriority
     NS_IMETHOD SetPriority(int32_t value) override;
     // nsIClassOfService
@@ -201,6 +210,9 @@ public: /* internal necko use only */
     nsresult OpenCacheEntry(bool usingSSL);
     nsresult ContinueConnect();
 
+    // If the load is mixed-content, build and send an HSTS priming request.
+    nsresult TryHSTSPriming();
+
     nsresult StartRedirectChannelToURI(nsIURI *, uint32_t);
 
     // This allows cache entry to be marked as foreign even after channel itself
@@ -256,6 +268,13 @@ public: /* internal necko use only */
     bool AwaitingCacheCallbacks();
     void SetCouldBeSynthesized();
 
+private: // used for alternate service validation
+    RefPtr<TransactionObserver> mTransactionObserver;
+public:
+    void SetConnectionInfo(nsHttpConnectionInfo *); // clones the argument
+    void SetTransactionObserver(TransactionObserver *arg) { mTransactionObserver = arg; }
+    TransactionObserver *GetTransactionObserver() { return mTransactionObserver; }
+
 protected:
     virtual ~nsHttpChannel();
 
@@ -264,18 +283,24 @@ private:
 
     bool     RequestIsConditional();
     nsresult BeginConnect();
+    void     HandleBeginConnectContinue();
+    MOZ_MUST_USE nsresult BeginConnectContinue();
     nsresult ContinueBeginConnectWithResult();
     void     ContinueBeginConnect();
     nsresult Connect();
     void     SpeculativeConnect();
     nsresult SetupTransaction();
-    void     SetupTransactionSchedulingContext();
+    void     SetupTransactionRequestContext();
     nsresult CallOnStartRequest();
     nsresult ProcessResponse();
-    nsresult ContinueProcessResponse(nsresult);
+    void     AsyncContinueProcessResponse();
+    nsresult ContinueProcessResponse1();
+    nsresult ContinueProcessResponse2(nsresult);
+    nsresult ContinueProcessResponse3(nsresult);
     nsresult ProcessNormal();
     nsresult ContinueProcessNormal(nsresult);
     void     ProcessAltService();
+    bool     ShouldBypassProcessNotModified();
     nsresult ProcessNotModified();
     nsresult AsyncProcessRedirection(uint32_t httpStatus);
     nsresult ContinueProcessRedirection(nsresult);
@@ -366,6 +391,22 @@ private:
     nsresult ProcessSecurityHeaders();
 
     /**
+     * Taking care of the Content-Signature header and fail the channel if
+     * the signature verification fails or is required but the header is not
+     * present.
+     * This sets mListener to ContentVerifier, which buffers the entire response
+     * before verifying the Content-Signature header. If the verification is
+     * successful, the load proceeds as usual. If the verification fails, a
+     * NS_ERROR_INVALID_SIGNATURE is thrown and a fallback loaded in nsDocShell
+     */
+    nsresult ProcessContentSignatureHeader(nsHttpResponseHead *aResponseHead);
+
+    /**
+     * A function that will, if the feature is enabled, send security reports.
+     */
+    void ProcessSecurityReport(nsresult status);
+
+    /**
      * A function to process a single security header (STS or PKP), assumes
      * some basic sanity checks have been applied to the channel. Called
      * from ProcessSecurityHeaders.
@@ -395,12 +436,15 @@ private:
                rv == NS_ERROR_MALFORMED_URI;
     }
 
+    // Report net vs cache time telemetry
+    void ReportNetVSCacheTelemetry();
+
     // Create a aggregate set of the current notification callbacks
     // and ensure the transaction is updated to use it.
     void UpdateAggregateCallbacks();
 
     static bool HasQueryString(nsHttpRequestHead::ParsedMethodType method, nsIURI * uri);
-    bool ResponseWouldVary(nsICacheEntry* entry) const;
+    bool ResponseWouldVary(nsICacheEntry* entry);
     bool IsResumable(int64_t partialLen, int64_t contentLength,
                      bool ignoreMissingPartialLen = false) const;
     nsresult MaybeSetupByteRangeRequest(int64_t partialLen, int64_t contentLength,
@@ -415,6 +459,10 @@ private:
 
     void MaybeWarnAboutAppCache();
 
+    void SetLoadGroupUserAgentOverride();
+
+    void SetDoNotTrack();
+
 private:
     nsCOMPtr<nsICancelable>           mProxyRequest;
 
@@ -425,6 +473,12 @@ private:
 
     // cache specific data
     nsCOMPtr<nsICacheEntry>           mCacheEntry;
+    // This will be set during OnStopRequest() before calling CloseCacheEntry(),
+    // but only if the listener wants to use alt-data (signaled by
+    // HttpBaseChannel::mPreferredCachedAltDataType being not empty)
+    // Needed because calling openAlternativeOutputStream needs a reference
+    // to the cache entry.
+    nsCOMPtr<nsICacheEntry>           mAltDataCacheEntry;
     // We must close mCacheInputStream explicitly to avoid leaks.
     AutoClose<nsIInputStream>         mCacheInputStream;
     RefPtr<nsInputStreamPump>       mCachePump;
@@ -439,6 +493,8 @@ private:
 
     // auth specific data
     nsCOMPtr<nsIHttpChannelAuthProvider> mAuthProvider;
+
+    mozilla::TimeStamp                mOnStartRequestTimestamp;
 
     // States of channel interception
     enum {
@@ -469,6 +525,9 @@ private:
     static const uint32_t WAIT_FOR_CACHE_ENTRY = 1;
     static const uint32_t WAIT_FOR_OFFLINE_CACHE_ENTRY = 2;
 
+    bool                              mCacheOpenWithPriority;
+    uint32_t                          mCacheQueueSizeWhenOpen;
+
     // state flags
     uint32_t                          mCachedContentIsValid     : 1;
     uint32_t                          mCachedContentIsPartial   : 1;
@@ -476,6 +535,10 @@ private:
     uint32_t                          mTransactionReplaced      : 1;
     uint32_t                          mAuthRetryPending         : 1;
     uint32_t                          mProxyAuthPending         : 1;
+    // Set if before the first authentication attempt a custom authorization
+    // header has been set on the channel.  This will make that custom header
+    // go to the server instead of any cached credentials.
+    uint32_t                          mCustomAuthHeader         : 1;
     uint32_t                          mResuming                 : 1;
     uint32_t                          mInitedCacheEntry         : 1;
     // True if we are loading a fallback cache entry from the
@@ -499,7 +562,7 @@ private:
     // when true, after we finish read from cache we must check all data
     // had been loaded from cache. If not, then an error has to be propagated
     // to the consumer.
-    uint32_t                          mConcurentCacheAccess : 1;
+    uint32_t                          mConcurrentCacheAccess : 1;
     // whether the request is setup be byte-range
     uint32_t                          mIsPartialRequest : 1;
     // true iff there is AutoRedirectVetoNotifier on the stack
@@ -507,13 +570,19 @@ private:
     // consumers set this to true to use cache pinning, this has effect
     // only when the channel is in an app context (load context has an appid)
     uint32_t                          mPinCacheContent : 1;
-    // Whether fetching the content is meant to be handled by the
-    // packaged app service, which behaves like a caching layer.
-    // Upon successfully fetching the package, the resource will be placed in
-    // the cache, and served by calling OnCacheEntryAvailable.
-    uint32_t                          mIsPackagedAppResource : 1;
     // True if CORS preflight has been performed
     uint32_t                          mIsCorsPreflightDone : 1;
+
+    // if the http transaction was performed (i.e. not cached) and
+    // the result in OnStopRequest was known to be correctly delimited
+    // by chunking, content-length, or h2 end-stream framing
+    uint32_t                          mStronglyFramed : 1;
+
+    // true if an HTTP transaction is created for the socket thread
+    uint32_t                          mUsedNetwork : 1;
+
+    // the next authentication request can be sent on a whole new connection
+    uint32_t                          mAuthConnectionRestartable : 1;
 
     nsCOMPtr<nsIChannel>              mPreflightChannel;
 
@@ -535,6 +604,8 @@ private:
 
     // If non-null, warnings should be reported to this object.
     HttpChannelSecurityWarningReporter* mWarningReporter;
+
+    RefPtr<ADivertableParentChannel> mParentChannel;
 protected:
     virtual void DoNotifyListenerCleanup() override;
 

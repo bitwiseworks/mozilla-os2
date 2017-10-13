@@ -4,6 +4,9 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #endif
 
+const THUMBNAIL_PLACEHOLDER_ENABLED =
+  Services.prefs.getBoolPref("browser.newtabpage.thumbnailPlaceholder");
+
 /**
  * This class represents a site that is contained in a cell and can be pinned,
  * moved around or deleted.
@@ -125,7 +128,7 @@ Site.prototype = {
   _newTabString: function(str, substrArr) {
     let regExp = /%[0-9]\$S/g;
     let matches;
-    while (matches = regExp.exec(str)) {
+    while ((matches = regExp.exec(str))) {
       let match = matches[0];
       let index = match.charAt(1); // Get the digit in the regExp.
       str = str.replace(match, substrArr[index - 1]);
@@ -244,13 +247,26 @@ Site.prototype = {
     let link = gAllPages.enhanced && DirectoryLinksProvider.getEnhancedLink(this.link) ||
                this.link;
 
-    let thumbnail = this._querySelector(".newtab-thumbnail");
+    let thumbnail = this._querySelector(".newtab-thumbnail.thumbnail");
     if (link.bgColor) {
       thumbnail.style.backgroundColor = link.bgColor;
     }
-
     let uri = link.imageURI || PageThumbs.getThumbnailURL(this.url);
     thumbnail.style.backgroundImage = 'url("' + uri + '")';
+
+    if (THUMBNAIL_PLACEHOLDER_ENABLED &&
+        link.type == "history" &&
+        link.baseDomain) {
+      let placeholder = this._querySelector(".newtab-thumbnail.placeholder");
+      let charCodeSum = 0;
+      for (let c of link.baseDomain) {
+        charCodeSum += c.charCodeAt(0);
+      }
+      const COLORS = 16;
+      let hue = Math.round((charCodeSum % COLORS) / COLORS * 360);
+      placeholder.style.backgroundColor = "hsl(" + hue + ",80%,40%)";
+      placeholder.textContent = link.baseDomain.substr(0,1).toUpperCase();
+    }
 
     if (link.enhancedImageURI) {
       let enhanced = this._querySelector(".enhanced-content");
@@ -295,7 +311,11 @@ Site.prototype = {
   _speculativeConnect: function Site_speculativeConnect() {
     let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
     let uri = Services.io.newURI(this.url, null, null);
-    sc.speculativeConnect(uri, null);
+    try {
+      // This can throw for certain internal URLs, when they wind up in
+      // about:newtab. Be sure not to propagate the error.
+      sc.speculativeConnect(uri, null);
+    } catch (e) {}
   },
 
   /**

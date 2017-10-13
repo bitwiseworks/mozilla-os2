@@ -12,14 +12,13 @@ registerCleanupFunction(function() {
 
 // Right-click on an item within the overflow panel should
 // show a context menu with options to move it.
-add_task(function() {
+add_task(function*() {
 
   overflowPanel.setAttribute("animate", "false");
 
   originalWindowWidth = window.outerWidth;
   let navbar = document.getElementById(CustomizableUI.AREA_NAVBAR);
   ok(!navbar.hasAttribute("overflowing"), "Should start with a non-overflowing toolbar.");
-  let oldChildCount = navbar.customizationTarget.childElementCount;
   window.resizeTo(400, window.outerHeight);
 
   yield waitForCondition(() => navbar.hasAttribute("overflowing"));

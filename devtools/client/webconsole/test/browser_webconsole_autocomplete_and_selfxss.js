@@ -1,6 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -9,9 +10,9 @@ const TEST_URI = "data:text/html;charset=utf-8,<p>test for bug 642615";
 XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
                                    "@mozilla.org/widget/clipboardhelper;1",
                                    "nsIClipboardHelper");
-var WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
+var WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   let hud = yield openConsole();
@@ -40,7 +41,7 @@ function consoleOpened(HUD) {
     // Arguments: expected, setup, success, failure.
     waitForClipboard(
       stringToCopy,
-      function() {
+      function () {
         clipboardHelper.copyString(stringToCopy);
       },
       onClipboardCopy,
@@ -71,23 +72,23 @@ function consoleOpened(HUD) {
     WebConsoleUtils.usageCount = 0;
     updateEditUIVisibility();
 
-    let oldVal = jsterm.inputNode.value;
+    let oldVal = jsterm.getInputValue();
     goDoCommand("cmd_paste");
     let notificationbox = jsterm.hud.document.getElementById("webconsole-notificationbox");
     let notification = notificationbox.getNotificationWithValue("selfxss-notification");
     ok(notification, "Self-xss notification shown");
-    is(oldVal, jsterm.inputNode.value, "Paste blocked by self-xss prevention");
+    is(oldVal, jsterm.getInputValue(), "Paste blocked by self-xss prevention");
 
     // Allow pasting
-    jsterm.inputNode.value = "allow pasting";
+    jsterm.setInputValue("allow pasting");
     let evt = document.createEvent("KeyboardEvent");
     evt.initKeyEvent("keyup", true, true, window,
                      0, 0, 0, 0,
                      0, " ".charCodeAt(0));
     jsterm.inputNode.dispatchEvent(evt);
-    jsterm.inputNode.value = "";
+    jsterm.setInputValue("");
     goDoCommand("cmd_paste");
-    isnot("", jsterm.inputNode.value, "Paste works");
+    isnot("", jsterm.getInputValue(), "Paste works");
   }
   function onClipboardPaste() {
     ok(!jsterm.completeNode.value, "no completion value after paste");

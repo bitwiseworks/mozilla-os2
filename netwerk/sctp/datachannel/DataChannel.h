@@ -21,7 +21,6 @@
 #include "nsTArray.h"
 #include "nsDeque.h"
 #include "nsIInputStream.h"
-#include "nsITimer.h"
 #include "mozilla/Mutex.h"
 #include "DataChannelProtocol.h"
 #include "DataChannelListener.h"
@@ -92,16 +91,15 @@ public:
 };
 
 // One per PeerConnection
-class DataChannelConnection: public nsITimerCallback
+class DataChannelConnection
 #ifdef SCTP_DTLS_SUPPORTED
-                             , public sigslot::has_slots<>
+  : public sigslot::has_slots<>
 #endif
 {
   virtual ~DataChannelConnection();
 
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSITIMERCALLBACK
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DataChannelConnection)
 
   class DataConnectionListener : public SupportsWeakPtr<DataConnectionListener>
   {
@@ -143,7 +141,7 @@ public:
     PARTIAL_RELIABLE_TIMED = 2
   } Type;
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   already_AddRefed<DataChannel> Open(const nsACString& label,
                                      const nsACString& protocol,
                                      Type type, bool inOrder,
@@ -189,6 +187,8 @@ public:
 
   void GetStreamIds(std::vector<uint16_t>* aStreamList);
 
+  bool SendDeferredMessages();
+
 protected:
   friend class DataChannelOnMessageAvailable;
   // Avoid cycles with PeerConnectionImpl
@@ -222,8 +222,6 @@ private:
 
   already_AddRefed<DataChannel> OpenFinish(already_AddRefed<DataChannel>&& aChannel);
 
-  void StartDefer();
-  bool SendDeferredMessages();
   void ProcessQueuedOpens();
   void ClearResets();
   void SendOutgoingStreamReset();
@@ -263,13 +261,13 @@ private:
   // NOTE: while this array will auto-expand, increases in the number of
   // channels available from the stack must be negotiated!
   bool mAllocateEven;
-  nsAutoTArray<RefPtr<DataChannel>,16> mStreams;
+  AutoTArray<RefPtr<DataChannel>,16> mStreams;
   nsDeque mPending; // Holds addref'ed DataChannel's -- careful!
   // holds data that's come in before a channel is open
-  nsTArray<nsAutoPtr<QueuedDataMessage> > mQueuedData;
+  nsTArray<nsAutoPtr<QueuedDataMessage>> mQueuedData;
 
   // Streams pending reset
-  nsAutoTArray<uint16_t,4> mStreamsResetting;
+  AutoTArray<uint16_t,4> mStreamsResetting;
 
   struct socket *mMasterSocket; // accessed from STS thread
   struct socket *mSocket; // cloned from mMasterSocket on successful Connect on STS thread
@@ -283,18 +281,14 @@ private:
   uint16_t mRemotePort;
   bool mUsingDtls;
 
-  // Timer to control when we try to resend blocked messages
-  nsCOMPtr<nsITimer> mDeferredTimer;
-  uint32_t mDeferTimeout; // in ms
-  bool mTimerRunning;
   nsCOMPtr<nsIThread> mInternalIOThread;
 };
 
 #define ENSURE_DATACONNECTION \
-  do { if (!mConnection) { DATACHANNEL_LOG(("%s: %p no connection!",__FUNCTION__, this)); return; } } while (0)
+  do { MOZ_ASSERT(mConnection); if (!mConnection) { return; } } while (0)
 
 #define ENSURE_DATACONNECTION_RET(x) \
-  do { if (!mConnection) { DATACHANNEL_LOG(("%s: %p no connection!",__FUNCTION__, this)); return (x); } } while (0)
+  do { MOZ_ASSERT(mConnection); if (!mConnection) { return (x); } } while (0)
 
 class DataChannel {
 public:
@@ -340,7 +334,12 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DataChannel)
 
   // when we disconnect from the connection after stream RESET
-  void DestroyLocked();
+  void StreamClosedLocked();
+
+  // Complete dropping of the link between DataChannel and the connection.
+  // After this, except for a few methods below listed to be safe, you can't
+  // call into DataChannel.
+  void ReleaseConnection();
 
   // Close this DataChannel.  Can be called multiple times.  MUST be called
   // before destroying the DataChannel (state must be CLOSED or CLOSING).
@@ -355,7 +354,7 @@ public:
       ENSURE_DATACONNECTION_RET(false);
 
       if (mStream != INVALID_STREAM)
-        return (mConnection->SendMsg(mStream, aMsg) > 0);
+        return (mConnection->SendMsg(mStream, aMsg) >= 0);
       else
         return false;
     }
@@ -366,7 +365,7 @@ public:
       ENSURE_DATACONNECTION_RET(false);
 
       if (mStream != INVALID_STREAM)
-        return (mConnection->SendBinaryMsg(mStream, aMsg) > 0);
+        return (mConnection->SendBinaryMsg(mStream, aMsg) >= 0);
       else
         return false;
     }
@@ -377,7 +376,7 @@ public:
       ENSURE_DATACONNECTION_RET(false);
 
       if (mStream != INVALID_STREAM)
-        return (mConnection->SendBlob(mStream, aBlob) > 0);
+        return (mConnection->SendBlob(mStream, aBlob) == 0);
       else
         return false;
     }
@@ -387,7 +386,16 @@ public:
   bool GetOrdered() { return !(mFlags & DATA_CHANNEL_FLAGS_OUT_OF_ORDER_ALLOWED); }
 
   // Amount of data buffered to send
-  uint32_t GetBufferedAmount();
+  uint32_t GetBufferedAmount()
+  {
+    if (!mConnection) {
+      return 0;
+    }
+
+    MutexAutoLock lock(mConnection->mLock);
+    return GetBufferedAmountLocked();
+  }
+
 
   // Trigger amount for generating BufferedAmountLow events
   uint32_t GetBufferedAmountLowThreshold();
@@ -423,6 +431,7 @@ private:
   friend class DataChannelConnection;
 
   nsresult AddDataToBinaryMsg(const char *data, uint32_t size);
+  uint32_t GetBufferedAmountLocked() const;
 
   RefPtr<DataChannelConnection> mConnection;
   nsCString mLabel;
@@ -437,14 +446,14 @@ private:
   bool mIsRecvBinary;
   size_t mBufferedThreshold;
   nsCString mRecvBuffer;
-  nsTArray<nsAutoPtr<BufferedMsg> > mBufferedData;
-  nsTArray<nsCOMPtr<nsIRunnable> > mQueuedMessages;
+  nsTArray<nsAutoPtr<BufferedMsg>> mBufferedData; // GUARDED_BY(mConnection->mLock)
+  nsTArray<nsCOMPtr<nsIRunnable>> mQueuedMessages;
 };
 
 // used to dispatch notifications of incoming data to the main thread
 // Patterned on CallOnMessageAvailable in WebSockets
 // Also used to proxy other items to MainThread
-class DataChannelOnMessageAvailable : public nsRunnable
+class DataChannelOnMessageAvailable : public Runnable
 {
 public:
   enum {
@@ -454,8 +463,8 @@ public:
     ON_CHANNEL_OPEN,
     ON_CHANNEL_CLOSED,
     ON_DATA,
-    START_DEFER,
     BUFFER_LOW_THRESHOLD,
+    NO_LONGER_BUFFERED,
   };  /* types */
 
   DataChannelOnMessageAvailable(int32_t     aType,
@@ -490,14 +499,20 @@ public:
     : mType(aType),
       mConnection(aConnection) {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
+
+    // Note: calling the listeners can indirectly cause the listeners to be
+    // made available for GC (by removing event listeners), especially for
+    // OnChannelClosed().  We hold a ref to the Channel and the listener
+    // while calling this.
     switch (mType) {
       case ON_DATA:
       case ON_CHANNEL_OPEN:
       case ON_CHANNEL_CLOSED:
       case BUFFER_LOW_THRESHOLD:
+      case NO_LONGER_BUFFERED:
         {
           MutexAutoLock lock(mChannel->mListenerLock);
           if (!mChannel->mListener) {
@@ -522,6 +537,9 @@ public:
             case BUFFER_LOW_THRESHOLD:
               mChannel->mListener->OnBufferLow(mChannel->mContext);
               break;
+            case NO_LONGER_BUFFERED:
+              mChannel->mListener->NotBuffered(mChannel->mContext);
+              break;
           }
           break;
         }
@@ -544,9 +562,6 @@ public:
           default:
             break;
         }
-        break;
-      case START_DEFER:
-        mConnection->StartDefer();
         break;
     }
     return NS_OK;

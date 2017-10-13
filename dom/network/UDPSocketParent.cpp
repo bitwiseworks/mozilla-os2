@@ -10,24 +10,15 @@
 #include "nsIUDPSocket.h"
 #include "nsINetAddr.h"
 #include "mozilla/AppProcessChecker.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/net/DNS.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/PNeckoParent.h"
-#include "nsNetUtil.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/TabParent.h"
 #include "nsIPermissionManager.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/ipc/PBackgroundParent.h"
-
-//
-// set NSPR_LOG_MODULES=UDPSocket:5
-//
-extern mozilla::LazyLogModule gUDPSocketLog;
-#define UDPSOCKET_LOG(args)     MOZ_LOG(gUDPSocketLog, mozilla::LogLevel::Debug, args)
-#define UDPSOCKET_LOG_ENABLED() MOZ_LOG_TEST(gUDPSocketLog, mozilla::LogLevel::Debug)
+#include "mtransport/runnable_utils.h"
 
 namespace mozilla {
 namespace dom {
@@ -39,7 +30,6 @@ UDPSocketParent::UDPSocketParent(PBackgroundParent* aManager)
   , mNeckoManager(nullptr)
   , mIPCOpen(true)
 {
-  mObserver = new mozilla::net::OfflineObserver(this);
 }
 
 UDPSocketParent::UDPSocketParent(PNeckoParent* aManager)
@@ -47,49 +37,10 @@ UDPSocketParent::UDPSocketParent(PNeckoParent* aManager)
   , mNeckoManager(aManager)
   , mIPCOpen(true)
 {
-  mObserver = new mozilla::net::OfflineObserver(this);
 }
 
 UDPSocketParent::~UDPSocketParent()
 {
-  if (mObserver) {
-    mObserver->RemoveObserver();
-  }
-}
-
-nsresult
-UDPSocketParent::OfflineNotification(nsISupports *aSubject)
-{
-  nsCOMPtr<nsIAppOfflineInfo> info(do_QueryInterface(aSubject));
-  if (!info) {
-    return NS_OK;
-  }
-
-  uint32_t targetAppId = nsIScriptSecurityManager::UNKNOWN_APP_ID;
-  info->GetAppId(&targetAppId);
-
-  // Obtain App ID
-  uint32_t appId = GetAppId();
-  if (appId != targetAppId) {
-    return NS_OK;
-  }
-
-  // If the app is offline, close the socket
-  if (mSocket && NS_IsAppOffline(appId)) {
-    mSocket->Close();
-  }
-
-  return NS_OK;
-}
-
-uint32_t
-UDPSocketParent::GetAppId()
-{
-  uint32_t appId;
-  if (!mPrincipal || NS_FAILED(mPrincipal->GetAppId(&appId))) {
-    return nsIScriptSecurityManager::UNKNOWN_APP_ID;
-  }
-  return appId;
 }
 
 bool
@@ -100,7 +51,7 @@ UDPSocketParent::Init(const IPC::Principal& aPrincipal,
   // will be used once we move all UDPSocket to PBackground, or
   // if we add in Principal checking for mtransport
   Unused << mBackgroundManager;
-  
+
   mPrincipal = aPrincipal;
   if (net::UsingNeckoIPCSecurity() &&
       mPrincipal &&
@@ -132,7 +83,7 @@ UDPSocketParent::Init(const IPC::Principal& aPrincipal,
   if (!aFilter.IsEmpty()) {
     nsAutoCString contractId(NS_NETWORK_UDP_SOCKET_FILTER_HANDLER_PREFIX);
     contractId.Append(aFilter);
-    nsCOMPtr<nsIUDPSocketFilterHandler> filterHandler =
+    nsCOMPtr<nsISocketFilterHandler> filterHandler =
       do_GetService(contractId.get());
     if (filterHandler) {
       nsresult rv = filterHandler->NewFilter(getter_AddRefs(mFilter));
@@ -160,11 +111,15 @@ UDPSocketParent::Init(const IPC::Principal& aPrincipal,
 
 bool
 UDPSocketParent::RecvBind(const UDPAddressInfo& aAddressInfo,
-                          const bool& aAddressReuse, const bool& aLoopback)
+                          const bool& aAddressReuse, const bool& aLoopback,
+                          const uint32_t& recvBufferSize,
+                          const uint32_t& sendBufferSize)
 {
   UDPSOCKET_LOG(("%s: %s:%u", __FUNCTION__, aAddressInfo.addr().get(), aAddressInfo.port()));
 
-  if (NS_FAILED(BindInternal(aAddressInfo.addr(), aAddressInfo.port(), aAddressReuse, aLoopback))) {
+  if (NS_FAILED(BindInternal(aAddressInfo.addr(), aAddressInfo.port(),
+                             aAddressReuse, aLoopback, recvBufferSize,
+                             sendBufferSize))) {
     FireInternalError(__LINE__);
     return true;
   }
@@ -192,11 +147,15 @@ UDPSocketParent::RecvBind(const UDPAddressInfo& aAddressInfo,
 
 nsresult
 UDPSocketParent::BindInternal(const nsCString& aHost, const uint16_t& aPort,
-                              const bool& aAddressReuse, const bool& aLoopback)
+                              const bool& aAddressReuse, const bool& aLoopback,
+                              const uint32_t& recvBufferSize,
+                              const uint32_t& sendBufferSize)
 {
   nsresult rv;
 
-  UDPSOCKET_LOG(("%s: %s:%u", __FUNCTION__, nsCString(aHost).get(), aPort));
+  UDPSOCKET_LOG(("%s: [this=%p] %s:%u addressReuse: %d loopback: %d recvBufferSize: %lu, sendBufferSize: %lu",
+                __FUNCTION__, this, nsCString(aHost).get(), aPort,
+                aAddressReuse, aLoopback, recvBufferSize, sendBufferSize));
 
   nsCOMPtr<nsIUDPSocket> sock =
       do_CreateInstance("@mozilla.org/network/udp-socket;1", &rv);
@@ -226,9 +185,34 @@ UDPSocketParent::BindInternal(const nsCString& aHost, const uint16_t& aPort,
     return rv;
   }
 
-  rv = sock->SetMulticastLoopback(aLoopback);
+  nsCOMPtr<nsINetAddr> laddr;
+  rv = sock->GetLocalAddr(getter_AddRefs(laddr));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
+  uint16_t family;
+  rv = laddr->GetFamily(&family);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  if (family == nsINetAddr::FAMILY_INET) {
+    rv = sock->SetMulticastLoopback(aLoopback);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+  // TODO: once bug 1252759 is fixed query buffer first and only increase
+  if (recvBufferSize != 0) {
+    rv = sock->SetRecvBufferSize(recvBufferSize);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      UDPSOCKET_LOG(("%s: [this=%p] %s:%u failed to set recv buffer size to: %lu", __FUNCTION__, this, nsCString(aHost).get(), aPort, recvBufferSize));
+    }
+  }
+  if (sendBufferSize != 0) {
+    rv = sock->SetSendBufferSize(sendBufferSize);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      UDPSOCKET_LOG(("%s: [this=%p] %s:%u failed to set send buffer size to: %lu", __FUNCTION__, this, nsCString(aHost).get(), aPort, sendBufferSize));
+    }
   }
 
   // register listener
@@ -242,16 +226,136 @@ UDPSocketParent::BindInternal(const nsCString& aHost, const uint16_t& aPort,
   return NS_OK;
 }
 
+
+static nsCOMPtr<nsIEventTarget> GetSTSThread()
+{
+  nsresult rv;
+
+  nsCOMPtr<nsIEventTarget> sts_thread;
+
+  sts_thread = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+  return sts_thread;
+}
+
+static void CheckSTSThread()
+{
+  DebugOnly<nsCOMPtr<nsIEventTarget>> sts_thread = GetSTSThread();
+
+  ASSERT_ON_THREAD(sts_thread.value);
+}
+
+
+// Proxy the Connect() request to the STS thread, since it may block and
+// should be done there.
+bool
+UDPSocketParent::RecvConnect(const UDPAddressInfo& aAddressInfo)
+{
+  nsCOMPtr<nsIEventTarget> thread(NS_GetCurrentThread());
+  Unused <<
+    NS_WARN_IF(NS_FAILED(GetSTSThread()->Dispatch(WrapRunnable(
+                                                    RefPtr<UDPSocketParent>(this),
+                                                    &UDPSocketParent::DoConnect,
+                                                    mSocket,
+                                                    thread,
+                                                    aAddressInfo),
+                                                  NS_DISPATCH_NORMAL)));
+  return true;
+}
+
+void
+UDPSocketParent::DoSendConnectResponse(const UDPAddressInfo& aAddressInfo)
+{
+  // can't use directly with WrapRunnable due to warnings
+  mozilla::Unused << SendCallbackConnected(aAddressInfo);
+}
+
+void
+UDPSocketParent::SendConnectResponse(nsIEventTarget *aThread,
+                                     const UDPAddressInfo& aAddressInfo)
+{
+  Unused <<
+    NS_WARN_IF(NS_FAILED(aThread->Dispatch(WrapRunnable(
+                                             RefPtr<UDPSocketParent>(this),
+                                             &UDPSocketParent::DoSendConnectResponse,
+                                             aAddressInfo),
+                                           NS_DISPATCH_NORMAL)));
+}
+
+// Runs on STS thread
+void
+UDPSocketParent::DoConnect(nsCOMPtr<nsIUDPSocket>& aSocket,
+                           nsCOMPtr<nsIEventTarget>& aReturnThread,
+                           const UDPAddressInfo& aAddressInfo)
+{
+  UDPSOCKET_LOG(("%s: %s:%u", __FUNCTION__, aAddressInfo.addr().get(), aAddressInfo.port()));
+  if (NS_FAILED(ConnectInternal(aAddressInfo.addr(), aAddressInfo.port()))) {
+    SendInternalError(aReturnThread, __LINE__);
+    return;
+  }
+  CheckSTSThread();
+
+  nsCOMPtr<nsINetAddr> localAddr;
+  aSocket->GetLocalAddr(getter_AddRefs(localAddr));
+
+  nsCString addr;
+  if (NS_FAILED(localAddr->GetAddress(addr))) {
+    SendInternalError(aReturnThread, __LINE__);
+    return;
+  }
+
+  uint16_t port;
+  if (NS_FAILED(localAddr->GetPort(&port))) {
+    SendInternalError(aReturnThread, __LINE__);
+    return;
+  }
+
+  UDPSOCKET_LOG(("%s: SendConnectResponse: %s:%u", __FUNCTION__, addr.get(), port));
+  SendConnectResponse(aReturnThread, UDPAddressInfo(addr, port));
+}
+
+nsresult
+UDPSocketParent::ConnectInternal(const nsCString& aHost, const uint16_t& aPort)
+{
+  nsresult rv;
+
+  UDPSOCKET_LOG(("%s: %s:%u", __FUNCTION__, nsCString(aHost).get(), aPort));
+
+  if (!mSocket) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  PRNetAddr prAddr;
+  PR_InitializeNetAddr(PR_IpAddrAny, aPort, &prAddr);
+  PRStatus status = PR_StringToNetAddr(aHost.BeginReading(), &prAddr);
+  if (status != PR_SUCCESS) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mozilla::net::NetAddr addr;
+  PRNetAddrToNetAddr(&prAddr, &addr);
+
+  rv = mSocket->Connect(&addr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
 bool
 UDPSocketParent::RecvOutgoingData(const UDPData& aData,
                                   const UDPSocketAddr& aAddr)
 {
-  MOZ_ASSERT(mSocket);
+  if (!mSocket) {
+    NS_WARNING("sending socket is closed");
+    FireInternalError(__LINE__);
+    return true;
+  }
 
   nsresult rv;
   if (mFilter) {
-    // TODO, Bug 933102, filter packets that are sent with hostname.
-    // Until then we simply throw away packets that are sent to a hostname.
     if (aAddr.type() != UDPSocketAddr::TNetAddr) {
       return true;
     }
@@ -264,7 +368,7 @@ UDPSocketParent::RecvOutgoingData(const UDPData& aData,
     bool allowed;
     const InfallibleTArray<uint8_t>& data(aData.get_ArrayOfuint8_t());
     rv = mFilter->FilterPacket(&aAddr.get_NetAddr(), data.Elements(),
-                               data.Length(), nsIUDPSocketFilter::SF_OUTGOING,
+                               data.Length(), nsISocketFilter::SF_OUTGOING,
                                &allowed);
 
     // Sending unallowed data, kill content.
@@ -439,7 +543,7 @@ UDPSocketParent::OnPacketReceived(nsIUDPSocket* aSocket, nsIUDPMessage* aMessage
     fromAddr->GetNetAddr(&addr);
     nsresult rv = mFilter->FilterPacket(&addr,
                                         (const uint8_t*)buffer, len,
-                                        nsIUDPSocketFilter::SF_INCOMING,
+                                        nsISocketFilter::SF_INCOMING,
                                         &allowed);
     // Receiving unallowed data, drop.
     if (NS_WARN_IF(NS_FAILED(rv)) || !allowed) {
@@ -483,6 +587,19 @@ UDPSocketParent::FireInternalError(uint32_t aLineNo)
 
   mozilla::Unused << SendCallbackError(NS_LITERAL_CSTRING("Internal error"),
                                        NS_LITERAL_CSTRING(__FILE__), aLineNo);
+}
+
+void
+UDPSocketParent::SendInternalError(nsIEventTarget *aThread,
+                                   uint32_t aLineNo)
+{
+  UDPSOCKET_LOG(("SendInternalError: %u", aLineNo));
+  Unused <<
+    NS_WARN_IF(NS_FAILED(aThread->Dispatch(WrapRunnable(
+                                             RefPtr<UDPSocketParent>(this),
+                                             &UDPSocketParent::FireInternalError,
+                                             aLineNo),
+                                           NS_DISPATCH_NORMAL)));
 }
 
 } // namespace dom

@@ -139,7 +139,6 @@ public:
   // WebIDL
   Attr* GetNamedItem(const nsAString& aAttrName);
   Attr* NamedGetter(const nsAString& aAttrName, bool& aFound);
-  bool NameIsEnumerable(const nsAString& aName);
   already_AddRefed<Attr>
   RemoveNamedItem(mozilla::dom::NodeInfo* aNodeInfo, ErrorResult& aError);
   already_AddRefed<Attr>
@@ -159,7 +158,7 @@ public:
                     ErrorResult& aError);
 
   void
-  GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames);
+  GetSupportedNames(nsTArray<nsString>& aNames);
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
@@ -178,12 +177,7 @@ private:
   GetAttrNodeInfo(const nsAString& aNamespaceURI,
                   const nsAString& aLocalName);
 
-  Attr* GetAttribute(mozilla::dom::NodeInfo* aNodeInfo, bool aNsAware);
-
-  /**
-   * Remove an attribute, returns the removed node.
-   */
-  already_AddRefed<Attr> RemoveAttribute(mozilla::dom::NodeInfo* aNodeInfo);
+  Attr* GetAttribute(mozilla::dom::NodeInfo* aNodeInfo);
 };
 
 // XXX khuey yes this is crazy.  The bindings code needs to see this include,

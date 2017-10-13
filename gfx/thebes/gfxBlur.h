@@ -8,7 +8,6 @@
 
 #include "gfxTypes.h"
 #include "nsSize.h"
-#include "nsAutoPtr.h"
 #include "gfxPoint.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
@@ -90,7 +89,8 @@ public:
         return mContext;
     }
 
-    already_AddRefed<mozilla::gfx::SourceSurface> DoBlur(mozilla::gfx::DrawTarget* aDT, mozilla::gfx::IntPoint* aTopLeft);
+    already_AddRefed<mozilla::gfx::SourceSurface>
+    DoBlur(DrawTarget* aDT, mozilla::gfx::IntPoint* aTopLeft);
 
     /**
      * Does the actual blurring/spreading and mask applying. Users of this
@@ -183,7 +183,7 @@ protected:
     /**
      * The temporary alpha surface.
      */
-    nsAutoArrayPtr<unsigned char> mData;
+    mozilla::UniquePtr<unsigned char[]> mData;
 
      /**
       * The object that actually does the blurring for us.

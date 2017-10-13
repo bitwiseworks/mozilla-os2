@@ -10,7 +10,7 @@
 #define LIBANGLE_RENDERER_D3D_SURFACED3D_H_
 
 #include "libANGLE/renderer/SurfaceImpl.h"
-#include "libANGLE/renderer/d3d/d3d11/NativeWindow.h"
+#include "libANGLE/renderer/d3d/NativeWindowD3D.h"
 
 namespace egl
 {
@@ -25,20 +25,16 @@ class RendererD3D;
 class SurfaceD3D : public SurfaceImpl
 {
   public:
-    static SurfaceD3D *createFromWindow(RendererD3D *renderer, egl::Display *display, const egl::Config *config,
-                                        EGLNativeWindowType window, EGLint fixedSize, EGLint width, EGLint height);
-    static SurfaceD3D *createOffscreen(RendererD3D *renderer, egl::Display *display, const egl::Config *config,
-                                       EGLClientBuffer shareHandle, EGLint width, EGLint height);
     ~SurfaceD3D() override;
     void releaseSwapChain();
 
     egl::Error initialize() override;
-    FramebufferImpl *createDefaultFramebuffer(const gl::Framebuffer::Data &data) override;
+    FramebufferImpl *createDefaultFramebuffer(const gl::FramebufferState &state) override;
 
     egl::Error swap() override;
     egl::Error postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height) override;
     egl::Error querySurfacePointerANGLE(EGLint attribute, void **value) override;
-    egl::Error bindTexImage(EGLint buffer) override;
+    egl::Error bindTexImage(gl::Texture *texture, EGLint buffer) override;
     egl::Error releaseTexImage(EGLint buffer) override;
     void setSwapInterval(EGLint interval) override;
 
@@ -59,9 +55,15 @@ class SurfaceD3D : public SurfaceImpl
     gl::Error getAttachmentRenderTarget(const gl::FramebufferAttachment::Target &target,
                                         FramebufferAttachmentRenderTarget **rtOut) override;
 
-  private:
-    SurfaceD3D(RendererD3D *renderer, egl::Display *display, const egl::Config *config, EGLint width, EGLint height,
-               EGLint fixedSize, EGLClientBuffer shareHandle, EGLNativeWindowType window);
+  protected:
+    SurfaceD3D(const egl::SurfaceState &state,
+               RendererD3D *renderer,
+               egl::Display *display,
+               const egl::Config *config,
+               EGLNativeWindowType window,
+               EGLenum buftype,
+               EGLClientBuffer clientBuffer,
+               const egl::AttributeMap &attribs);
 
     egl::Error swapRect(EGLint x, EGLint y, EGLint width, EGLint height);
     egl::Error resetSwapChain(int backbufferWidth, int backbufferHeight);
@@ -71,6 +73,7 @@ class SurfaceD3D : public SurfaceImpl
     egl::Display *mDisplay;
 
     bool mFixedSize;
+    GLint mOrientation;
 
     GLenum mRenderTargetFormat;
     GLenum mDepthStencilFormat;
@@ -78,16 +81,41 @@ class SurfaceD3D : public SurfaceImpl
     SwapChainD3D *mSwapChain;
     bool mSwapIntervalDirty;
 
-    NativeWindow mNativeWindow;   // Handler for the Window that the surface is created for.
+    NativeWindowD3D *mNativeWindow;  // Handler for the Window that the surface is created for.
     EGLint mWidth;
     EGLint mHeight;
 
     EGLint mSwapInterval;
 
     HANDLE mShareHandle;
+    IUnknown *mD3DTexture;
 };
 
+class WindowSurfaceD3D : public SurfaceD3D
+{
+  public:
+    WindowSurfaceD3D(const egl::SurfaceState &state,
+                     RendererD3D *renderer,
+                     egl::Display *display,
+                     const egl::Config *config,
+                     EGLNativeWindowType window,
+                     const egl::AttributeMap &attribs);
+    ~WindowSurfaceD3D() override;
+};
 
-}
+class PbufferSurfaceD3D : public SurfaceD3D
+{
+  public:
+    PbufferSurfaceD3D(const egl::SurfaceState &state,
+                      RendererD3D *renderer,
+                      egl::Display *display,
+                      const egl::Config *config,
+                      EGLenum buftype,
+                      EGLClientBuffer clientBuffer,
+                      const egl::AttributeMap &attribs);
+    ~PbufferSurfaceD3D() override;
+};
+
+}  // namespace rx
 
 #endif // LIBANGLE_RENDERER_D3D_SURFACED3D_H_

@@ -41,14 +41,14 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrack, DOMEventTargetHelper)
 
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
+  TextTrack(nsPIDOMWindowInner* aOwnerWindow,
             TextTrackKind aKind,
             const nsAString& aLabel,
             const nsAString& aLanguage,
             TextTrackMode aMode,
             TextTrackReadyState aReadyState,
             TextTrackSource aTextTrackSource);
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
+  TextTrack(nsPIDOMWindowInner* aOwnerWindow,
             TextTrackList* aTextTrackList,
             TextTrackKind aKind,
             const nsAString& aLabel,
@@ -59,20 +59,14 @@ public:
 
   void SetDefaultSettings();
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   TextTrackKind Kind() const
   {
     return mKind;
   }
-  void GetLabel(nsAString& aLabel) const
-  {
-    aLabel = mLabel;
-  }
-  void GetLanguage(nsAString& aLanguage) const
-  {
-    aLanguage = mLanguage;
-  }
+  void GetLabel(nsAString& aLabel) const;
+  void GetLanguage(nsAString& aLanguage) const;
   void GetInBandMetadataTrackDispatchType(nsAString& aType) const
   {
     aType = mType;
@@ -117,6 +111,12 @@ public:
   TextTrackSource GetTextTrackSource() {
     return mTextTrackSource;
   }
+
+  void SetCuesInactive();
+
+  void NotifyCueUpdated(TextTrackCue *aCue);
+
+  void DispatchAsyncTrustedEvent(const nsString& aEventName);
 
 private:
   ~TextTrack();

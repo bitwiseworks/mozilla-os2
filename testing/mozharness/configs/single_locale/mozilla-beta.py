@@ -3,7 +3,6 @@ config = {
     "branch": "mozilla-beta",
     "en_us_binary_url": "http://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/latest-mozilla-beta/",
     "update_channel": "beta",
-    "latest_mar_dir": '/pub/mozilla.org/firefox/nightly/latest-mozilla-beta-l10n',
 
     # l10n
     "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-beta",
@@ -13,17 +12,14 @@ config = {
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
     }, {
-        "vcs": "hgtool",
+        "vcs": "hg",
         "repo": "https://hg.mozilla.org/releases/mozilla-beta",
-        "revision": "default",
+        "revision": "%(revision)s",
         "dest": "mozilla-beta",
-    }, {
-        "vcs": "hgtool",
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
+        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
     }],
     # purge options
     'purge_minsize': 12,
@@ -31,6 +27,7 @@ config = {
     'default_actions': [
         "clobber",
         "pull",
+        "clone-locales",
         "list-locales",
         "setup",
         "repack",

@@ -4,7 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Process each item in the "constants hash" to add to "global" and give a name
-this.EXPORTED_SYMBOLS = [((this[key] = val), key) for ([key, val] in Iterator({
+this.EXPORTED_SYMBOLS = [];
+for (let [key, val] of Object.entries({
 
 WEAVE_VERSION:                         "@weave_version@",
 
@@ -44,7 +45,7 @@ MAX_IGNORE_ERROR_COUNT:                5,
 
 // Backoff intervals
 MINIMUM_BACKOFF_INTERVAL:              15 * 60 * 1000,      // 15 minutes
-MAXIMUM_BACKOFF_INTERVAL:              8 * 60 * 60 * 1000,  // 8 hours 
+MAXIMUM_BACKOFF_INTERVAL:              8 * 60 * 60 * 1000,  // 8 hours
 
 // HMAC event handling timeout.
 // 10 minutes: a compromise between the multi-desktop sync interval
@@ -75,6 +76,10 @@ PASSWORDS_STORE_BATCH_SIZE:            50,      // same as MOBILE_BATCH_SIZE
 ADDONS_STORE_BATCH_SIZE:               1000000, // process all addons at once
 APPS_STORE_BATCH_SIZE:                 50,      // same as MOBILE_BATCH_SIZE
 
+// Default batch size for download batching
+// (how many records are fetched at a time from the server when batching is used).
+DEFAULT_DOWNLOAD_BATCH_SIZE:           1000,
+
 // score thresholds for early syncs
 SINGLE_USER_THRESHOLD:                 1000,
 MULTI_DEVICE_THRESHOLD:                300,
@@ -93,12 +98,15 @@ SCORE_UPDATE_DELAY:                    100,
 // observed spurious idle/back events and short enough to pre-empt user activity.
 IDLE_OBSERVER_BACK_DELAY:              100,
 
-// Number of records to upload in a single POST (multiple POSTS if exceeded)
-// FIXME: Record size limit is 256k (new cluster), so this can be quite large!
-// (Bug 569295)
+// Max number of records or bytes to upload in a single POST - we'll do multiple POSTS if either
+// MAX_UPLOAD_RECORDS or MAX_UPLOAD_BYTES is hit)
 MAX_UPLOAD_RECORDS:                    100,
+MAX_UPLOAD_BYTES:                      1024 * 1023, // just under 1MB
 MAX_HISTORY_UPLOAD:                    5000,
 MAX_HISTORY_DOWNLOAD:                  5000,
+
+// TTL of the message sent to another device when sending a tab
+NOTIFY_TAB_SENT_TTL_SECS:              1 * 3600, // 1 hour
 
 // Top-level statuses:
 STATUS_OK:                             "success.status_ok",
@@ -144,6 +152,8 @@ ENGINE_UNKNOWN_FAIL:                   "error.engine.reason.unknown_fail",
 ENGINE_APPLY_FAIL:                     "error.engine.reason.apply_fail",
 ENGINE_METARECORD_DOWNLOAD_FAIL:       "error.engine.reason.metarecord_download_fail",
 ENGINE_METARECORD_UPLOAD_FAIL:         "error.engine.reason.metarecord_upload_fail",
+// an upload failure where the batch was interrupted with a 412
+ENGINE_BATCH_INTERRUPTED:              "error.engine.reason.batch_interrupted",
 
 JPAKE_ERROR_CHANNEL:                   "jpake.error.channel",
 JPAKE_ERROR_NETWORK:                   "jpake.error.network",
@@ -179,6 +189,10 @@ TEST_HARNESS_ID:                       "xuth@mozilla.org",
 MIN_PP_LENGTH:                         12,
 MIN_PASS_LENGTH:                       8,
 
-LOG_DATE_FORMAT:                       "%Y-%m-%d %H:%M:%S",
+DEVICE_TYPE_DESKTOP:                   "desktop",
+DEVICE_TYPE_MOBILE:                    "mobile",
 
-}))];
+})) {
+  this[key] = val;
+  this.EXPORTED_SYMBOLS.push(key);
+}

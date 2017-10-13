@@ -130,9 +130,9 @@ JSSecurityCallbacks StructuredCloneTestPrincipals::securityCallbacks = {
 
 BEGIN_TEST(testStructuredClone_SavedFrame)
 {
-    JS_SetSecurityCallbacks(rt, &StructuredCloneTestPrincipals::securityCallbacks);
-    JS_InitDestroyPrincipalsCallback(rt, StructuredCloneTestPrincipals::destroy);
-    JS_InitReadPrincipalsCallback(rt, StructuredCloneTestPrincipals::read);
+    JS_SetSecurityCallbacks(cx, &StructuredCloneTestPrincipals::securityCallbacks);
+    JS_InitDestroyPrincipalsCallback(cx, StructuredCloneTestPrincipals::destroy);
+    JS_InitReadPrincipalsCallback(cx, StructuredCloneTestPrincipals::read);
 
     auto testPrincipals = new StructuredCloneTestPrincipals(42, 0);
     CHECK(testPrincipals);
@@ -155,8 +155,9 @@ BEGIN_TEST(testStructuredClone_SavedFrame)
     for (auto* pp = principalsToTest; pp->principals != DONE; pp++) {
         fprintf(stderr, "Testing with principals '%s'\n", pp->name);
 
+	JS::CompartmentOptions options;
         JS::RootedObject g(cx, JS_NewGlobalObject(cx, getGlobalClass(), pp->principals,
-                                                  JS::FireOnNewGlobalHook));
+                                                  JS::FireOnNewGlobalHook, options));
         CHECK(g);
         JSAutoCompartment ac(cx, g);
 

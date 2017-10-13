@@ -28,18 +28,6 @@ class CodeGeneratorARM64 : public CodeGeneratorShared
   protected:
     NonAssertingLabel deoptLabel_;
 
-    // FIXME: VIXL Operand does not match the platform-agnostic Operand,
-    // which is just a union of possible arguments.
-    inline Operand ToOperand(const LAllocation& a) {
-        MOZ_CRASH("ToOperand");
-    }
-    inline Operand ToOperand(const LAllocation* a) {
-        return ToOperand(*a);
-    }
-    inline Operand ToOperand(const LDefinition* def) {
-        return ToOperand(def->output());
-    }
-
     MoveOperand toMoveOperand(const LAllocation a) const;
 
     void bailoutIf(Assembler::Condition condition, LSnapshot* snapshot);
@@ -145,8 +133,8 @@ class CodeGeneratorARM64 : public CodeGeneratorShared
     virtual void visitCompareBitwise(LCompareBitwise* lir);
     virtual void visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir);
     virtual void visitBitAndAndBranch(LBitAndAndBranch* baab);
-    virtual void visitAsmJSUInt32ToDouble(LAsmJSUInt32ToDouble* lir);
-    virtual void visitAsmJSUInt32ToFloat32(LAsmJSUInt32ToFloat32* lir);
+    virtual void visitWasmUint32ToDouble(LWasmUint32ToDouble* lir);
+    virtual void visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir);
     virtual void visitNotI(LNotI* ins);
     virtual void visitNotD(LNotD* ins);
     virtual void visitNotF(LNotF* ins);
@@ -163,6 +151,7 @@ class CodeGeneratorARM64 : public CodeGeneratorShared
     virtual void visitTruncateFToInt32(LTruncateFToInt32* ins);
 
     virtual void visitClzI(LClzI* lir);
+    virtual void visitCtzI(LCtzI* lir);
     // Out of line visitors.
     void visitOutOfLineBailout(OutOfLineBailout* ool);
     void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
@@ -209,24 +198,24 @@ class CodeGeneratorARM64 : public CodeGeneratorShared
     void visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins);
     void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
     void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
-    void visitAsmJSCall(LAsmJSCall* ins);
+    void visitWasmCall(LWasmCall* ins);
+    void visitWasmCallI64(LWasmCallI64* ins);
     void visitAsmJSLoadHeap(LAsmJSLoadHeap* ins);
     void visitAsmJSStoreHeap(LAsmJSStoreHeap* ins);
     void visitAsmJSCompareExchangeHeap(LAsmJSCompareExchangeHeap* ins);
     void visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins);
-    void visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins);
-    void visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins);
-    void visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins);
-    void visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins);
-    void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    void visitWasmStackArg(LWasmStackArg* ins);
+
+    void visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins);
+    void visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins);
 
     void generateInvalidateEpilogue();
 
     void setReturnDoubleRegs(LiveRegisterSet* regs);
 
   protected:
-    void postAsmJSCall(LAsmJSCall* lir) {
-        MOZ_CRASH("postAsmJSCall");
+    void postWasmCall(LWasmCall* lir) {
+        MOZ_CRASH("postWasmCall");
     }
 
     void visitEffectiveAddress(LEffectiveAddress* ins);
@@ -236,16 +225,15 @@ class CodeGeneratorARM64 : public CodeGeneratorShared
   public:
     // Unimplemented SIMD instructions.
     void visitSimdSplatX4(LSimdSplatX4* lir) { MOZ_CRASH("NYI"); }
-    void visitInt32x4(LInt32x4* ins) { MOZ_CRASH("NYI"); }
-    void visitFloat32x4(LFloat32x4* ins) { MOZ_CRASH("NYI"); }
+    void visitSimd128Int(LSimd128Int* ins) { MOZ_CRASH("NYI"); }
+    void visitSimd128Float(LSimd128Float* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementI(LSimdExtractElementI* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementF(LSimdExtractElementF* ins) { MOZ_CRASH("NYI"); }
-    void visitSimdSignMaskX4(LSimdSignMaskX4* ins) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryCompIx4(LSimdBinaryCompIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir) { MOZ_CRASH("NYI"); }
-    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir) { MOZ_CRASH("NYI"); }
+    void visitSimdBinaryBitwise(LSimdBinaryBitwise* lir) { MOZ_CRASH("NYI"); }
 };
 
 typedef CodeGeneratorARM64 CodeGeneratorSpecific;

@@ -18,12 +18,12 @@ def android_version_code_v0(buildid, cpu_arch=None, min_sdk=0, max_sdk=0):
     # None is interpreted as arm.
     if not cpu_arch or cpu_arch in ['armeabi', 'armeabi-v7a']:
         # Increment by MIN_SDK_VERSION -- this adds 9 to every build ID as a
-        # minimum.  Our split APK starts at 11.
+        # minimum.  Our split APK starts at 15.
         return base + min_sdk + 0
     elif cpu_arch in ['x86']:
         # Increment the version code by 3 for x86 builds so they are offered to
         # x86 phones that have ARM emulators, beating the 2-point advantage that
-        # the v11+ ARMv7 APK has.  If we change our splits in the future, we'll
+        # the v15+ ARMv7 APK has.  If we change our splits in the future, we'll
         # need to do this further still.
         return base + min_sdk + 3
     else:
@@ -55,12 +55,15 @@ def android_version_code_v1(buildid, cpu_arch=None, min_sdk=0, max_sdk=0):
 
     The bit labelled 'p' is a placeholder that is always 0 (for now).
 
-    The bit labelled 'g' is 1 if the build is targeting Android API 11/14+ and 0
-    otherwise, which means the build targets Android API 9-10 (Gingerbread).
+    Firefox no longer supports API 14 or earlier.
 
-    Fennec no longer supports Android API 8 or earlier. After Bug 1155801 it
-    no longer supports API 11-13. API 9 is still supported due to significant usage.
-    We temporarily treat both 11 and 14 the same: Bug 1219512.
+    This version code computation allows for a split on API levels that allowed
+    us to ship builds specifically for Gingerbread (API 9-10); we preserve
+    that functionality for sanity's sake, and to allow us to reintroduce a
+    split in the future.
+
+    At present, the bit labelled 'g' is 1 if the build is an ARM build
+    targeting API 15+, which will always be the case.
 
     We throw an explanatory exception when we are within one calendar year of
     running out of build events.  This gives lots of time to update the version
@@ -76,10 +79,10 @@ def android_version_code_v1(buildid, cpu_arch=None, min_sdk=0, max_sdk=0):
     '''
     def hours_since_cutoff(buildid):
         # The ID is formatted like YYYYMMDDHHMMSS (using
-        # datetime.now().strftime('%Y%m%d%H%M%S'); see
-        # toolkit/xre/make-platformini.py).  The inverse function is
-        # time.strptime.  N.B.: the time module expresses time as decimal
-        # seconds since the epoch.
+        # datetime.now().strftime('%Y%m%d%H%M%S'); see build/variables.py).
+        # The inverse function is time.strptime.
+        # N.B.: the time module expresses time as decimal seconds since the
+        # epoch.
         fmt = '%Y%m%d%H%M%S'
         build = time.strptime(str(buildid), fmt)
         cutoff = time.strptime(str(V1_CUTOFF), fmt)
@@ -110,9 +113,9 @@ def android_version_code_v1(buildid, cpu_arch=None, min_sdk=0, max_sdk=0):
         # 0 is interpreted as SDK 9.
         if not min_sdk or min_sdk == 9:
             pass
-        # This used to compare to 11. The 14+ APK directly supersedes 11+, so
+        # This used to compare to 11. The 15+ APK directly supersedes 11+, so
         # we reuse this check.
-        elif min_sdk == 14 or min_sdk == 11:
+        elif min_sdk == 15:
             version |= 1 << 0
         else:
             raise ValueError("Don't know how to compute android:versionCode "

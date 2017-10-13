@@ -14,7 +14,6 @@
 #include "nsIPluginTag.h"
 #include "nsPluginsDir.h"
 #include "nsPluginDirServiceProvider.h"
-#include "nsAutoPtr.h"
 #include "nsWeakPtr.h"
 #include "nsIPrompt.h"
 #include "nsWeakReference.h"
@@ -188,6 +187,11 @@ public:
   // Helper that checks if a type is whitelisted in plugin.allowed_types.
   // Always returns true if plugin.allowed_types is not set
   static bool IsTypeWhitelisted(const char *aType);
+
+  // Helper that checks if a plugin of a given MIME type can be loaded by the
+  // parent process. It checks the plugin.load_in_parent_process.<mime> pref.
+  // Always returns false if plugin.load_in_parent_process.<mime> is not set.
+  static bool ShouldLoadTypeInParent(const nsACString& aMimeType);
 
   // checks whether aType is a type we recognize for potential special handling
   enum SpecialType { eSpecialType_None,
@@ -382,8 +386,6 @@ private:
 
   // set by pref plugin.disable
   bool mPluginsDisabled;
-  // set by pref plugins.click_to_play
-  bool mPluginsClickToPlay;
 
   // Any instances in this array will have valid plugin objects via GetPlugin().
   // When removing an instance it might not die - be sure to null out it's plugin.

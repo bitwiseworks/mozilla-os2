@@ -4,8 +4,10 @@
 "use strict";
 
 const constants = require("../constants");
-const { rdpInvoke, asPaused } = require("../utils");
+const { asPaused } = require("../utils");
 const { reportException } = require("devtools/shared/DevToolsUtils");
+const { setNamedTimeout } = require("devtools/client/shared/widgets/view-helpers");
+const { Task } = require("devtools/shared/task");
 
 const FETCH_EVENT_LISTENERS_DELAY = 200; // ms
 
@@ -49,8 +51,8 @@ function fetchEventListeners() {
   };
 }
 
-const _getListeners = Task.async(function*() {
-  const response = yield rdpInvoke(gThreadClient, gThreadClient.eventListeners);
+const _getListeners = Task.async(function* () {
+  const response = yield gThreadClient.eventListeners();
 
   // Make sure all the listeners are sorted by the event type, since
   // they"re not guaranteed to be clustered together.
@@ -81,14 +83,14 @@ const _getListeners = Task.async(function*() {
   return listeners;
 });
 
-const _getDefinitionSite = Task.async(function*(aFunction) {
+const _getDefinitionSite = Task.async(function* (aFunction) {
   const grip = gThreadClient.pauseGrip(aFunction);
   let response;
 
   try {
-    response = yield rdpInvoke(grip, grip.getDefinitionSite);
+    response = yield grip.getDefinitionSite();
   }
-  catch(e) {
+  catch (e) {
     // Don't make this error fatal, because it would break the entire events pane.
     reportException("_getDefinitionSite", e);
     return null;
@@ -100,7 +102,7 @@ const _getDefinitionSite = Task.async(function*(aFunction) {
 function updateEventBreakpoints(eventNames) {
   return dispatch => {
     setNamedTimeout("event-breakpoints-update", 0, () => {
-      gThreadClient.pauseOnDOMEvents(eventNames, function() {
+      gThreadClient.pauseOnDOMEvents(eventNames, function () {
         // Notify that event breakpoints were added/removed on the server.
         window.emit(EVENTS.EVENT_BREAKPOINTS_UPDATED);
 
@@ -110,7 +112,7 @@ function updateEventBreakpoints(eventNames) {
         });
       });
     });
-  }
+  };
 }
 
 module.exports = { updateEventBreakpoints, fetchEventListeners };

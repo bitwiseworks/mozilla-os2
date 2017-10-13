@@ -7,6 +7,7 @@
 #define NSSVGFOREIGNOBJECTFRAME_H__
 
 #include "mozilla/Attributes.h"
+#include "nsAutoPtr.h"
 #include "nsContainerFrame.h"
 #include "nsIPresShell.h"
 #include "nsISVGChildFrame.h"
@@ -15,10 +16,8 @@
 
 class gfxContext;
 
-typedef nsContainerFrame nsSVGForeignObjectFrameBase;
-
-class nsSVGForeignObjectFrame : public nsSVGForeignObjectFrameBase,
-                                public nsISVGChildFrame
+class nsSVGForeignObjectFrame : public nsContainerFrame
+                              , public nsISVGChildFrame
 {
   friend nsContainerFrame*
   NS_NewSVGForeignObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -39,12 +38,12 @@ public:
                                      int32_t         aModType) override;
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
-    return GetFirstPrincipalChild()->GetContentInsertionFrame();
+    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
   }
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
@@ -60,7 +59,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsSVGForeignObjectFrameBase::IsFrameOfType(aFlags &
+    return nsContainerFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eSVG | nsIFrame::eSVGForeignObject));
   }
 
@@ -75,9 +74,9 @@ public:
 #endif
 
   // nsISVGChildFrame interface:
-  virtual nsresult PaintSVG(gfxContext& aContext,
-                            const gfxMatrix& aTransform,
-                            const nsIntRect* aDirtyRect = nullptr) override;
+  virtual DrawResult PaintSVG(gfxContext& aContext,
+                              const gfxMatrix& aTransform,
+                              const nsIntRect* aDirtyRect = nullptr) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   virtual nsRect GetCoveredRegion() override;
   virtual void ReflowSVG() override;

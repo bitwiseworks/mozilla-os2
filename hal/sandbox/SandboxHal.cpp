@@ -17,7 +17,8 @@
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/Observer.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "nsAutoPtr.h"
 #include "WindowIdentifier.h"
 
 using namespace mozilla;
@@ -50,7 +51,7 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
 {
   HAL_LOG("Vibrate: Sending to parent process.");
 
-  AutoInfallibleTArray<uint32_t, 8> p(pattern);
+  AutoTArray<uint32_t, 8> p(pattern);
 
   WindowIdentifier newID(id);
   newID.AppendProcessID();
@@ -191,7 +192,7 @@ SetScreenBrightness(double aBrightness)
   Hal()->SendSetScreenBrightness(aBrightness);
 }
 
-void 
+void
 AdjustSystemClock(int64_t aDeltaMilliseconds)
 {
   Hal()->SendAdjustSystemClock(aDeltaMilliseconds);
@@ -201,7 +202,7 @@ void
 SetTimezone(const nsCString& aTimezoneSpec)
 {
   Hal()->SendSetTimezone(nsCString(aTimezoneSpec));
-} 
+}
 
 nsCString
 GetTimezone()
@@ -367,76 +368,6 @@ SetThreadPriority(PlatformThreadId aThreadId,
 }
 
 void
-EnableFMRadio(const hal::FMRadioSettings& aSettings)
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-void
-DisableFMRadio()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-void
-FMRadioSeek(const hal::FMRadioSeekDirection& aDirection)
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-void
-GetFMRadioSettings(FMRadioSettings* aSettings)
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-void
-SetFMRadioFrequency(const uint32_t aFrequency)
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-uint32_t
-GetFMRadioFrequency()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-  return 0;
-}
-
-bool
-IsFMRadioOn()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-  return false;
-}
-
-uint32_t
-GetFMRadioSignalStrength()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-  return 0;
-}
-
-void
-CancelFMRadioSeek()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-bool
-EnableRDS(uint32_t aMask)
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-  return false;
-}
-
-void
-DisableRDS()
-{
-  NS_RUNTIMEABORT("FM radio cannot be called from sandboxed contexts.");
-}
-
-void
 FactoryReset(FactoryResetReason& aReason)
 {
   if (aReason == FactoryResetReason::Normal) {
@@ -463,6 +394,23 @@ StopDiskSpaceWatcher()
 bool IsHeadphoneEventFromInputDev()
 {
   NS_RUNTIMEABORT("IsHeadphoneEventFromInputDev() cannot be called from sandboxed contexts.");
+  return false;
+}
+
+nsresult StartSystemService(const char* aSvcName, const char* aArgs)
+{
+  NS_RUNTIMEABORT("System services cannot be controlled from sandboxed contexts.");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+void StopSystemService(const char* aSvcName)
+{
+  NS_RUNTIMEABORT("System services cannot be controlled from sandboxed contexts.");
+}
+
+bool SystemServiceIsRunning(const char* aSvcName)
+{
+  NS_RUNTIMEABORT("System services cannot be controlled from sandboxed contexts.");
   return false;
 }
 
@@ -504,10 +452,12 @@ public:
               PBrowserParent *browserParent) override
   {
     // We give all content vibration permission.
-    TabParent *tabParent = TabParent::GetFrom(browserParent);
+    //    TabParent *tabParent = TabParent::GetFrom(browserParent);
+    /* xxxkhuey wtf
     nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(tabParent->GetBrowserDOMWindow());
-    WindowIdentifier newID(id, window);
+    */
+    WindowIdentifier newID(id, nullptr);
     hal::Vibrate(pattern, newID);
     return true;
   }
@@ -516,10 +466,12 @@ public:
   RecvCancelVibrate(InfallibleTArray<uint64_t> &&id,
                     PBrowserParent *browserParent) override
   {
-    TabParent *tabParent = TabParent::GetFrom(browserParent);
+    //TabParent *tabParent = TabParent::GetFrom(browserParent);
+    /* XXXkhuey wtf
     nsCOMPtr<nsIDOMWindow> window =
-      do_QueryInterface(tabParent->GetBrowserDOMWindow());
-    WindowIdentifier newID(id, window);
+      tabParent->GetBrowserDOMWindow();
+    */
+    WindowIdentifier newID(id, nullptr);
     hal::CancelVibrate(newID);
     return true;
   }
@@ -703,14 +655,14 @@ public:
     return true;
   }
 
-  virtual bool 
+  virtual bool
   RecvSetTimezone(const nsCString& aTimezoneSpec) override
   {
     if (!AssertAppProcessPermission(this, "time")) {
       return false;
     }
     hal::SetTimezone(aTimezoneSpec);
-    return true;  
+    return true;
   }
 
   virtual bool
@@ -768,13 +720,13 @@ public:
     hal::RegisterSensorObserver(aSensor, this);
     return true;
   }
-   
+
   virtual bool
   RecvDisableSensorNotifications(const SensorType &aSensor) override {
     hal::UnregisterSensorObserver(aSensor, this);
     return true;
   }
-  
+
   void Notify(const SensorData& aSensorData) override {
     Unused << SendNotifySensorChange(aSensorData);
   }
@@ -799,7 +751,7 @@ public:
     hal::RegisterWakeLockObserver(this);
     return true;
   }
-   
+
   virtual bool
   RecvDisableWakeLockNotifications() override
   {
@@ -813,7 +765,7 @@ public:
     hal::GetWakeLockInfo(aTopic, aWakeLockInfo);
     return true;
   }
-  
+
   void Notify(const WakeLockInformation& aWakeLockInfo) override
   {
     Unused << SendNotifyWakeLockChange(aWakeLockInfo);
@@ -879,18 +831,6 @@ public:
     hal::FactoryReset(reason);
     return true;
   }
-
-  virtual mozilla::ipc::IProtocol*
-  CloneProtocol(Channel* aChannel,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override
-  {
-    ContentParent* contentParent = aCtx->GetContentParent();
-    nsAutoPtr<PHalParent> actor(contentParent->AllocPHalParent());
-    if (!actor || !contentParent->RecvPHalConstructor(actor)) {
-      return nullptr;
-    }
-    return actor.forget();
-  }
 };
 
 class HalChild : public PHalChild {
@@ -951,7 +891,7 @@ public:
 bool
 HalChild::RecvNotifySensorChange(const hal::SensorData &aSensorData) {
   hal::NotifySensorChange(aSensorData);
-  
+
   return true;
 }
 

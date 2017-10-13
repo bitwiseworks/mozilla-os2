@@ -9,7 +9,6 @@
 #include <sstream>
 #include <vector>
 
-#include "base/histogram.h"
 #include "CSFLog.h"
 #include "timecard.h"
 
@@ -47,6 +46,9 @@
 #include "signaling/src/jsep/JsepSession.h"
 #include "signaling/src/jsep/JsepSessionImpl.h"
 
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Sprintf.h"
+
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 #ifdef XP_WIN
 // We need to undef the MS macro for nsIDocument::CreateEvent
@@ -56,9 +58,9 @@
 #endif // XP_WIN
 
 #include "nsIDocument.h"
-#include "nsPerformance.h"
 #include "nsGlobalWindow.h"
 #include "nsDOMDataChannel.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Preferences.h"
@@ -77,10 +79,14 @@
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/dom/RTCCertificate.h"
 #include "mozilla/dom/RTCConfigurationBinding.h"
+#include "mozilla/dom/RTCDTMFSenderBinding.h"
+#include "mozilla/dom/RTCDTMFToneChangeEvent.h"
+#include "mozilla/dom/RTCRtpSenderBinding.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
 #include "mozilla/dom/RTCPeerConnectionBinding.h"
 #include "mozilla/dom/PeerConnectionImplBinding.h"
 #include "mozilla/dom/DataChannelBinding.h"
+#include "mozilla/dom/PerformanceTiming.h"
 #include "mozilla/dom/PluginCrashedEvent.h"
 #include "MediaStreamList.h"
 #include "MediaStreamTrack.h"
@@ -89,12 +95,16 @@
 #include "nsIScriptGlobalObject.h"
 #include "MediaStreamGraph.h"
 #include "DOMMediaStream.h"
-#include "rlogringbuffer.h"
+#include "rlogconnector.h"
 #include "WebrtcGlobalInformation.h"
 #include "mozilla/dom/Event.h"
 #include "nsIDOMCustomEvent.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/net/DataChannelProtocol.h"
+#endif
+
+#ifndef USE_FAKE_MEDIA_STREAMS
+#include "MediaStreamGraphImpl.h"
 #endif
 
 #ifdef XP_WIN
@@ -130,10 +140,17 @@ typedef PCObserverString ObString;
 
 static const char* logTag = "PeerConnectionImpl";
 
-
 // Getting exceptions back down from PCObserver is generally not harmful.
 namespace {
-class JSErrorResult : public ErrorResult
+// This is a terrible hack.  The problem is that SuppressException is not
+// inline, and we link this file without libxul in some cases (e.g. for our test
+// setup).  So we can't use ErrorResult or IgnoredErrorResult because those call
+// SuppressException...  And we can't use FastErrorResult because we can't
+// include BindingUtils.h, because our linking is completely fucked up.  Use
+// BaseErrorResult directly.  Please do not let me see _anyone_ doing this
+// without really careful review from someone who knows what they are doing.
+class JSErrorResult :
+    public binding_danger::TErrorResult<binding_danger::JustAssertCleanupPolicy>
 {
 public:
   ~JSErrorResult()
@@ -156,109 +173,24 @@ public:
 
 class WrappableJSErrorResult {
 public:
-  WrappableJSErrorResult() : isCopy(false) {}
-  WrappableJSErrorResult(const WrappableJSErrorResult &other) : mRv(), isCopy(true) {}
+  WrappableJSErrorResult()
+    : mRv(MakeUnique<JSErrorResult>()),
+      isCopy(false) {}
+  WrappableJSErrorResult(const WrappableJSErrorResult &other)
+    : mRv(MakeUnique<JSErrorResult>()),
+      isCopy(true) {}
   ~WrappableJSErrorResult() {
     if (isCopy) {
       MOZ_ASSERT(NS_IsMainThread());
     }
   }
-  operator JSErrorResult &() { return mRv; }
+  operator JSErrorResult &() { return *mRv; }
+  operator ErrorResult &() { return *mRv; }
 private:
-  JSErrorResult mRv;
+  mozilla::UniquePtr<JSErrorResult> mRv;
   bool isCopy;
 };
 }
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-class TracksAvailableCallback : public DOMMediaStream::OnTracksAvailableCallback
-{
-public:
-  TracksAvailableCallback(size_t numNewAudioTracks,
-                          size_t numNewVideoTracks,
-                          const std::string& pcHandle,
-                          RefPtr<PeerConnectionObserver> aObserver)
-  : DOMMediaStream::OnTracksAvailableCallback()
-  , mObserver(aObserver)
-  , mPcHandle(pcHandle)
-  {}
-
-  virtual void NotifyTracksAvailable(DOMMediaStream* aStream) override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    PeerConnectionWrapper wrapper(mPcHandle);
-
-    if (!wrapper.impl() || wrapper.impl()->IsClosed()) {
-      return;
-    }
-
-    nsTArray<RefPtr<MediaStreamTrack>> tracks;
-    aStream->GetTracks(tracks);
-
-    std::string streamId = PeerConnectionImpl::GetStreamId(*aStream);
-    bool notifyStream = true;
-
-    for (size_t i = 0; i < tracks.Length(); i++) {
-      std::string trackId;
-      // This is the first chance we get to set the string track id on this
-      // track. It would be nice if we could specify this along with the numeric
-      // track id from the start, but we're stuck doing this fixup after the
-      // fact.
-      nsresult rv = wrapper.impl()->GetRemoteTrackId(streamId,
-                                                     tracks[i]->GetTrackID(),
-                                                     &trackId);
-
-      if (NS_FAILED(rv)) {
-        CSFLogError(logTag, "%s: Failed to get string track id for %u, rv = %u",
-                            __FUNCTION__,
-                            static_cast<unsigned>(tracks[i]->GetTrackID()),
-                            static_cast<unsigned>(rv));
-        MOZ_ASSERT(false);
-        continue;
-      }
-
-      std::string origTrackId = PeerConnectionImpl::GetTrackId(*tracks[i]);
-
-      if (origTrackId == trackId) {
-        // Pre-existing track
-        notifyStream = false;
-        continue;
-      }
-
-      tracks[i]->AssignId(NS_ConvertUTF8toUTF16(trackId.c_str()));
-
-      JSErrorResult jrv;
-      CSFLogInfo(logTag, "Calling OnAddTrack(%s)", trackId.c_str());
-      mObserver->OnAddTrack(*tracks[i], jrv);
-      if (jrv.Failed()) {
-        CSFLogError(logTag, ": OnAddTrack(%u) failed! Error: %u",
-                    static_cast<unsigned>(i),
-                    jrv.ErrorCodeAsInt());
-      }
-    }
-
-    if (notifyStream) {
-      // Start currentTime from the point where this stream was successfully
-      // returned.
-      aStream->SetLogicalStreamStartTime(
-          aStream->GetPlaybackStream()->GetCurrentTime());
-
-      JSErrorResult rv;
-      CSFLogInfo(logTag, "Calling OnAddStream(%s)", streamId.c_str());
-      mObserver->OnAddStream(*aStream, rv);
-      if (rv.Failed()) {
-        CSFLogError(logTag, ": OnAddStream() failed! Error: %u",
-                    rv.ErrorCodeAsInt());
-      }
-    }
-  }
-
-private:
-  RefPtr<PeerConnectionObserver> mObserver;
-  const std::string mPcHandle;
-};
-#endif
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 static nsresult InitNSSInContent()
@@ -366,6 +298,24 @@ bool PCUuidGenerator::Generate(std::string* idp) {
   return true;
 }
 
+bool IsPrivateBrowsing(nsPIDOMWindowInner* aWindow)
+{
+#if defined(MOZILLA_EXTERNAL_LINKAGE)
+  return false;
+#else
+  if (!aWindow) {
+    return false;
+  }
+
+  nsIDocument *doc = aWindow->GetExtantDoc();
+  if (!doc) {
+    return false;
+  }
+
+  nsILoadContext *loadContext = doc->GetLoadContext();
+  return loadContext && loadContext->UsePrivateBrowsing();
+#endif
+}
 
 PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
 : mTimeCard(MOZ_LOG_TEST(signalingLogInfo(),LogLevel::Error) ?
@@ -381,7 +331,6 @@ PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
   , mIdentity(nullptr)
 #endif
   , mPrivacyRequested(false)
-  , mIsLoop(false)
   , mSTSThread(nullptr)
   , mAllowIceLoopback(false)
   , mAllowIceLinkLocal(false)
@@ -394,11 +343,17 @@ PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
   , mAddCandidateErrorCount(0)
   , mTrickle(true) // TODO(ekr@rtfm.com): Use pref
   , mNegotiationNeeded(false)
+  , mPrivateWindow(false)
 {
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   MOZ_ASSERT(NS_IsMainThread());
+  auto log = RLogConnector::CreateInstance();
   if (aGlobal) {
     mWindow = do_QueryInterface(aGlobal->GetAsSupports());
+    if (IsPrivateBrowsing(mWindow)) {
+      mPrivateWindow = true;
+      log->EnterPrivateMode();
+    }
   }
 #endif
   CSFLogInfo(logTag, "%s: PeerConnectionImpl constructor for %s",
@@ -424,6 +379,15 @@ PeerConnectionImpl::~PeerConnectionImpl()
   }
   // This aborts if not on main thread (in Debug builds)
   PC_AUTO_ENTER_API_CALL_NO_CHECK();
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  if (mPrivateWindow) {
+    auto * log = RLogConnector::GetInstance();
+    if (log) {
+      log->ExitPrivateMode();
+    }
+    mPrivateWindow = false;
+  }
+#endif
   if (PeerConnectionCtx::isActive()) {
     PeerConnectionCtx::GetInstance()->mPeerConnections.erase(mHandle);
   } else {
@@ -452,24 +416,7 @@ PeerConnectionImpl::MakeMediaStream()
                                   AudioChannel::Normal);
 
   RefPtr<DOMMediaStream> stream =
-    DOMMediaStream::CreateSourceStream(GetWindow(), graph);
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  // Make the stream data (audio/video samples) accessible to the receiving page.
-  // We're only certain that privacy hasn't been requested if we're connected.
-  if (mDtlsConnected && !PrivacyRequested()) {
-    nsIDocument* doc = GetWindow()->GetExtantDoc();
-    if (!doc) {
-      return nullptr;
-    }
-    stream->CombineWithPrincipal(doc->NodePrincipal());
-  } else {
-    // we're either certain that we need isolation for the streams, OR
-    // we're not sure and we can fix the stream in SetDtlsConnected
-    nsCOMPtr<nsIPrincipal> principal =
-      do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
-    stream->CombineWithPrincipal(principal);
-  }
-#endif
+    DOMMediaStream::CreateSourceStreamAsInput(GetWindow(), graph);
 
   CSFLogDebug(logTag, "Created media stream %p, inner: %p", stream.get(), stream->GetInputStream());
 
@@ -532,14 +479,15 @@ PeerConnectionConfiguration::Init(const RTCConfiguration& aSrc)
   }
 
   switch (aSrc.mIceTransportPolicy) {
-    case dom::RTCIceTransportPolicy::None:
-      setIceTransportPolicy(NrIceCtx::ICE_POLICY_NONE);
-      break;
     case dom::RTCIceTransportPolicy::Relay:
       setIceTransportPolicy(NrIceCtx::ICE_POLICY_RELAY);
       break;
     case dom::RTCIceTransportPolicy::All:
-      setIceTransportPolicy(NrIceCtx::ICE_POLICY_ALL);
+      if (Preferences::GetBool("media.peerconnection.ice.no_host", false)) {
+        setIceTransportPolicy(NrIceCtx::ICE_POLICY_NO_HOST);
+      } else {
+        setIceTransportPolicy(NrIceCtx::ICE_POLICY_ALL);
+      }
       break;
     default:
       MOZ_CRASH();
@@ -621,8 +569,8 @@ PeerConnectionConfiguration::AddIceServer(const RTCIceServer &aServer)
       port = (isStuns || isTurns)? 5349 : 3478;
 
     if (isTurn || isTurns) {
-      NS_ConvertUTF16toUTF8 credential(aServer.mCredential);
-      NS_ConvertUTF16toUTF8 username(aServer.mUsername);
+      NS_ConvertUTF16toUTF8 credential(aServer.mCredential.Value());
+      NS_ConvertUTF16toUTF8 username(aServer.mUsername.Value());
 
       if (!addTurnServer(host.get(), port,
                          username.get(),
@@ -679,7 +627,7 @@ PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   // Currently no standalone unit tests for DataChannel,
   // which is the user of mWindow
   MOZ_ASSERT(aWindow);
-  mWindow = aWindow;
+  mWindow = aWindow->AsInner();
   NS_ENSURE_STATE(mWindow);
 #endif // MOZILLA_INTERNAL_API
 
@@ -695,24 +643,16 @@ PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
     location->ToString(locationAStr);
 
     CopyUTF16toUTF8(locationAStr, locationCStr);
-#define HELLO_CLICKER_URL_START "https://hello.firefox.com/"
-#define HELLO_INITIATOR_URL_START "about:loop"
-    mIsLoop = (strncmp(HELLO_CLICKER_URL_START, locationCStr.get(),
-                       strlen(HELLO_CLICKER_URL_START)) == 0) ||
-              (strncmp(HELLO_INITIATOR_URL_START, locationCStr.get(),
-                       strlen(HELLO_INITIATOR_URL_START)) == 0);
   }
 
-  PR_snprintf(
-      temp,
-      sizeof(temp),
-      "%llu (id=%llu url=%s)",
-      static_cast<unsigned long long>(timestamp),
-      static_cast<unsigned long long>(mWindow ? mWindow->WindowID() : 0),
-      locationCStr.get() ? locationCStr.get() : "NULL");
+  SprintfLiteral(temp,
+                 "%" PRIu64 " (id=%" PRIu64 " url=%s)",
+                 static_cast<uint64_t>(timestamp),
+                 static_cast<uint64_t>(mWindow ? mWindow->WindowID() : 0),
+                 locationCStr.get() ? locationCStr.get() : "NULL");
 
 #else
-  PR_snprintf(temp, sizeof(temp), "%llu", (unsigned long long)timestamp);
+  SprintfLiteral(temp, "%" PRIu64, static_cast<uint64_t>(timestamp));
 #endif // MOZILLA_INTERNAL_API
 
   mName = temp;
@@ -727,15 +667,15 @@ PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   }
 
   char hex[17];
-  PR_snprintf(hex,sizeof(hex),"%.2x%.2x%.2x%.2x%.2x%.2x%.2x%.2x",
-    handle_bin[0],
-    handle_bin[1],
-    handle_bin[2],
-    handle_bin[3],
-    handle_bin[4],
-    handle_bin[5],
-    handle_bin[6],
-    handle_bin[7]);
+  SprintfLiteral(hex, "%.2x%.2x%.2x%.2x%.2x%.2x%.2x%.2x",
+                 handle_bin[0],
+                 handle_bin[1],
+                 handle_bin[2],
+                 handle_bin[3],
+                 handle_bin[4],
+                 handle_bin[5],
+                 handle_bin[6],
+                 handle_bin[7]);
 
   mHandle = hex;
 
@@ -931,22 +871,233 @@ class CompareCodecPriority {
     std::string mPreferredCodec;
 };
 
+class ConfigureCodec {
+  public:
+    explicit ConfigureCodec(nsCOMPtr<nsIPrefBranch>& branch) :
+      mHardwareH264Enabled(false),
+      mHardwareH264Supported(false),
+      mSoftwareH264Enabled(false),
+      mH264Enabled(false),
+      mVP9Enabled(false),
+      mH264Level(13), // minimum suggested for WebRTC spec
+      mH264MaxBr(0), // Unlimited
+      mH264MaxMbps(0), // Unlimited
+      mVP8MaxFs(0),
+      mVP8MaxFr(0),
+      mUseTmmbr(false),
+      mUseRemb(false),
+      mUseAudioFec(false),
+      mRedUlpfecEnabled(false),
+      mDtmfEnabled(false)
+    {
+#ifdef MOZ_WEBRTC_OMX
+      // Check to see if what HW codecs are available (not in use) at this moment.
+      // Note that streaming video decode can reserve a decoder
+
+      // XXX See bug 1018791 Implement W3 codec reservation policy
+      // Note that currently, OMXCodecReservation needs to be held by an sp<> because it puts
+      // 'this' into an sp<EventListener> to talk to the resource reservation code
+
+      // This pref is a misnomer; it is solely for h264 _hardware_ support.
+      branch->GetBoolPref("media.peerconnection.video.h264_enabled",
+          &mHardwareH264Enabled);
+
+      if (mHardwareH264Enabled) {
+        // Ok, it is preffed on. Can we actually do it?
+        android::sp<android::OMXCodecReservation> encode = new android::OMXCodecReservation(true);
+        android::sp<android::OMXCodecReservation> decode = new android::OMXCodecReservation(false);
+
+        // Currently we just check if they're available right now, which will fail if we're
+        // trying to call ourself, for example.  It will work for most real-world cases, like
+        // if we try to add a person to a 2-way call to make a 3-way mesh call
+        if (encode->ReserveOMXCodec() && decode->ReserveOMXCodec()) {
+          CSFLogDebug( logTag, "%s: H264 hardware codec available", __FUNCTION__);
+          mHardwareH264Supported = true;
+        }
+      }
+
+#endif // MOZ_WEBRTC_OMX
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+      mSoftwareH264Enabled = PeerConnectionCtx::GetInstance()->gmpHasH264();
+#else
+      // For unit-tests
+      mSoftwareH264Enabled = true;
+#endif
+
+      mH264Enabled = mHardwareH264Supported || mSoftwareH264Enabled;
+
+      branch->GetIntPref("media.navigator.video.h264.level", &mH264Level);
+      mH264Level &= 0xFF;
+
+      branch->GetIntPref("media.navigator.video.h264.max_br", &mH264MaxBr);
+
+#ifdef MOZ_WEBRTC_OMX
+      // Level 1.2; but let's allow CIF@30 or QVGA@30+ by default
+      mH264MaxMbps = 11880;
+#endif
+
+      branch->GetIntPref("media.navigator.video.h264.max_mbps", &mH264MaxMbps);
+
+      branch->GetBoolPref("media.peerconnection.video.vp9_enabled",
+          &mVP9Enabled);
+
+      branch->GetIntPref("media.navigator.video.max_fs", &mVP8MaxFs);
+      if (mVP8MaxFs <= 0) {
+        mVP8MaxFs = 12288; // We must specify something other than 0
+      }
+
+      branch->GetIntPref("media.navigator.video.max_fr", &mVP8MaxFr);
+      if (mVP8MaxFr <= 0) {
+        mVP8MaxFr = 60; // We must specify something other than 0
+      }
+
+      // TMMBR is enabled from a pref in about:config
+      branch->GetBoolPref("media.navigator.video.use_tmmbr", &mUseTmmbr);
+
+      // REMB is enabled by default, but can be disabled from about:config
+      branch->GetBoolPref("media.navigator.video.use_remb", &mUseRemb);
+
+      branch->GetBoolPref("media.navigator.audio.use_fec", &mUseAudioFec);
+
+      branch->GetBoolPref("media.navigator.video.red_ulpfec_enabled",
+                          &mRedUlpfecEnabled);
+
+      // media.peerconnection.dtmf.enabled controls both sdp generation for
+      // DTMF support as well as DTMF exposure to DOM
+      branch->GetBoolPref("media.peerconnection.dtmf.enabled", &mDtmfEnabled);
+    }
+
+    void operator()(JsepCodecDescription* codec) const
+    {
+      switch (codec->mType) {
+        case SdpMediaSection::kAudio:
+          {
+            JsepAudioCodecDescription& audioCodec =
+              static_cast<JsepAudioCodecDescription&>(*codec);
+            if (audioCodec.mName == "opus") {
+              audioCodec.mFECEnabled = mUseAudioFec;
+            } else if (audioCodec.mName == "telephone-event") {
+              audioCodec.mEnabled = mDtmfEnabled;
+            }
+          }
+          break;
+        case SdpMediaSection::kVideo:
+          {
+            JsepVideoCodecDescription& videoCodec =
+              static_cast<JsepVideoCodecDescription&>(*codec);
+
+            if (videoCodec.mName == "H264") {
+              // Override level
+              videoCodec.mProfileLevelId &= 0xFFFF00;
+              videoCodec.mProfileLevelId |= mH264Level;
+
+              videoCodec.mConstraints.maxBr = mH264MaxBr;
+
+              videoCodec.mConstraints.maxMbps = mH264MaxMbps;
+
+              // Might disable it, but we set up other params anyway
+              videoCodec.mEnabled = mH264Enabled;
+
+              if (videoCodec.mPacketizationMode == 0 && !mSoftwareH264Enabled) {
+                // We're assuming packetization mode 0 is unsupported by
+                // hardware.
+                videoCodec.mEnabled = false;
+              }
+
+              if (mHardwareH264Supported) {
+                videoCodec.mStronglyPreferred = true;
+              }
+            } else if (videoCodec.mName == "red") {
+              videoCodec.mEnabled = mRedUlpfecEnabled;
+            } else if (videoCodec.mName == "ulpfec") {
+              videoCodec.mEnabled = mRedUlpfecEnabled;
+            } else if (videoCodec.mName == "VP8" || videoCodec.mName == "VP9") {
+              if (videoCodec.mName == "VP9" && !mVP9Enabled) {
+                videoCodec.mEnabled = false;
+                break;
+              }
+              videoCodec.mConstraints.maxFs = mVP8MaxFs;
+              videoCodec.mConstraints.maxFps = mVP8MaxFr;
+            }
+
+            if (mUseTmmbr) {
+              videoCodec.EnableTmmbr();
+            }
+            if (mUseRemb) {
+              videoCodec.EnableRemb();
+            }
+          }
+          break;
+        case SdpMediaSection::kText:
+        case SdpMediaSection::kApplication:
+        case SdpMediaSection::kMessage:
+          {} // Nothing to configure for these.
+      }
+    }
+
+  private:
+    bool mHardwareH264Enabled;
+    bool mHardwareH264Supported;
+    bool mSoftwareH264Enabled;
+    bool mH264Enabled;
+    bool mVP9Enabled;
+    int32_t mH264Level;
+    int32_t mH264MaxBr;
+    int32_t mH264MaxMbps;
+    int32_t mVP8MaxFs;
+    int32_t mVP8MaxFr;
+    bool mUseTmmbr;
+    bool mUseRemb;
+    bool mUseAudioFec;
+    bool mRedUlpfecEnabled;
+    bool mDtmfEnabled;
+};
+
+class ConfigureRedCodec {
+  public:
+    explicit ConfigureRedCodec(nsCOMPtr<nsIPrefBranch>& branch,
+                               std::vector<uint8_t>* redundantEncodings) :
+      mRedundantEncodings(redundantEncodings)
+    {
+      // if we wanted to override or modify which encodings are considered
+      // for redundant encodings, we'd probably want to handle it here by
+      // checking prefs modifying the operator() code below
+    }
+
+    void operator()(JsepCodecDescription* codec) const
+    {
+      if (codec->mType == SdpMediaSection::kVideo &&
+          codec->mEnabled == false) {
+        uint8_t pt = (uint8_t)strtoul(codec->mDefaultPt.c_str(), nullptr, 10);
+        // don't search for the codec payload type unless we have a valid
+        // conversion (non-zero)
+        if (pt != 0) {
+          std::vector<uint8_t>::iterator it =
+            std::find(mRedundantEncodings->begin(),
+                      mRedundantEncodings->end(),
+                      pt);
+          if (it != mRedundantEncodings->end()) {
+            mRedundantEncodings->erase(it);
+          }
+        }
+      }
+    }
+
+  private:
+    std::vector<uint8_t>* mRedundantEncodings;
+};
+
 nsresult
 PeerConnectionImpl::ConfigureJsepSessionCodecs() {
-  if (mHaveConfiguredCodecs) {
-    return NS_OK;
-  }
-  mHaveConfiguredCodecs = true;
-
-#if !defined(MOZILLA_XPCOMRT_API)
   nsresult res;
   nsCOMPtr<nsIPrefService> prefs =
     do_GetService("@mozilla.org/preferences-service;1", &res);
 
   if (NS_FAILED(res)) {
     CSFLogError(logTag, "%s: Couldn't get prefs service, res=%u",
-                        __FUNCTION__,
-                        static_cast<unsigned>(res));
+        __FUNCTION__,
+        static_cast<unsigned>(res));
     return res;
   }
 
@@ -956,137 +1107,28 @@ PeerConnectionImpl::ConfigureJsepSessionCodecs() {
     return NS_ERROR_FAILURE;
   }
 
+  ConfigureCodec configurer(branch);
+  mJsepSession->ForEachCodec(configurer);
 
-  bool hardwareH264Supported = false;
-
-#ifdef MOZ_WEBRTC_OMX
-  bool hardwareH264Enabled = false;
-
-  // Check to see if what HW codecs are available (not in use) at this moment.
-  // Note that streaming video decode can reserve a decoder
-
-  // XXX See bug 1018791 Implement W3 codec reservation policy
-  // Note that currently, OMXCodecReservation needs to be held by an sp<> because it puts
-  // 'this' into an sp<EventListener> to talk to the resource reservation code
-
-  // This pref is a misnomer; it is solely for h264 _hardware_ support.
-  branch->GetBoolPref("media.peerconnection.video.h264_enabled",
-                      &hardwareH264Enabled);
-
-  if (hardwareH264Enabled) {
-    // Ok, it is preffed on. Can we actually do it?
-    android::sp<android::OMXCodecReservation> encode = new android::OMXCodecReservation(true);
-    android::sp<android::OMXCodecReservation> decode = new android::OMXCodecReservation(false);
-
-    // Currently we just check if they're available right now, which will fail if we're
-    // trying to call ourself, for example.  It will work for most real-world cases, like
-    // if we try to add a person to a 2-way call to make a 3-way mesh call
-    if (encode->ReserveOMXCodec() && decode->ReserveOMXCodec()) {
-      CSFLogDebug( logTag, "%s: H264 hardware codec available", __FUNCTION__);
-      hardwareH264Supported = true;
+  // first find the red codec description
+  std::vector<JsepCodecDescription*>& codecs = mJsepSession->Codecs();
+  JsepVideoCodecDescription* redCodec = nullptr;
+  for (auto codec : codecs) {
+    // we only really care about finding the RED codec if it is
+    // enabled
+    if (codec->mName == "red" && codec->mEnabled) {
+      redCodec = static_cast<JsepVideoCodecDescription*>(codec);
+      break;
     }
   }
-
-#endif // MOZ_WEBRTC_OMX
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  bool softwareH264Enabled = PeerConnectionCtx::GetInstance()->gmpHasH264();
-#else
-  // For unit-tests
-  bool softwareH264Enabled = true;
-#endif
-
-  bool h264Enabled = hardwareH264Supported || softwareH264Enabled;
-
-  bool vp9Enabled = false;
-  branch->GetBoolPref("media.peerconnection.video.vp9_enabled",
-                      &vp9Enabled);
-
-  auto& codecs = mJsepSession->Codecs();
+  // if red codec was found, configure it for the other enabled codecs
+  if (redCodec) {
+    ConfigureRedCodec configureRed(branch, &(redCodec->mRedundantEncodings));
+    mJsepSession->ForEachCodec(configureRed);
+  }
 
   // We use this to sort the list of codecs once everything is configured
   CompareCodecPriority comparator;
-
-  // Set parameters
-  for (auto i = codecs.begin(); i != codecs.end(); ++i) {
-    auto &codec = **i;
-    switch (codec.mType) {
-      case SdpMediaSection::kAudio:
-        // Nothing to configure here, for now.
-        break;
-      case SdpMediaSection::kVideo:
-        {
-          JsepVideoCodecDescription& videoCodec =
-            static_cast<JsepVideoCodecDescription&>(codec);
-
-          if (videoCodec.mName == "H264") {
-            int32_t level = 13; // minimum suggested for WebRTC spec
-            branch->GetIntPref("media.navigator.video.h264.level", &level);
-            level &= 0xFF;
-            // Override level
-            videoCodec.mProfileLevelId &= 0xFFFF00;
-            videoCodec.mProfileLevelId |= level;
-
-            int32_t maxBr = 0; // Unlimited
-            branch->GetIntPref("media.navigator.video.h264.max_br", &maxBr);
-            videoCodec.mConstraints.maxBr = maxBr;
-
-            int32_t maxMbps = 0; // Unlimited
-#ifdef MOZ_WEBRTC_OMX
-            // Level 1.2; but let's allow CIF@30 or QVGA@30+ by default
-            maxMbps = 11880;
-#endif
-            branch->GetIntPref("media.navigator.video.h264.max_mbps", &maxMbps);
-            videoCodec.mConstraints.maxMbps = maxMbps;
-
-            // Might disable it, but we set up other params anyway
-            videoCodec.mEnabled = h264Enabled;
-
-            if (videoCodec.mPacketizationMode == 0 && !softwareH264Enabled) {
-              // We're assuming packetization mode 0 is unsupported by
-              // hardware.
-              videoCodec.mEnabled = false;
-            }
-
-            if (hardwareH264Supported) {
-              videoCodec.mStronglyPreferred = true;
-            }
-          } else if (codec.mName == "VP8" || codec.mName == "VP9") {
-            if (videoCodec.mName == "VP9" && !vp9Enabled) {
-              videoCodec.mEnabled = false;
-              break;
-            }
-            int32_t maxFs = 0;
-            branch->GetIntPref("media.navigator.video.max_fs", &maxFs);
-            if (maxFs <= 0) {
-              maxFs = 12288; // We must specify something other than 0
-            }
-            videoCodec.mConstraints.maxFs = maxFs;
-
-            int32_t maxFr = 0;
-            branch->GetIntPref("media.navigator.video.max_fr", &maxFr);
-            if (maxFr <= 0) {
-              maxFr = 60; // We must specify something other than 0
-            }
-            videoCodec.mConstraints.maxFps = maxFr;
-
-          }
-
-          // TMMBR is enabled from a pref in about:config
-          bool useTmmbr = false;
-          branch->GetBoolPref("media.navigator.video.use_tmmbr",
-            &useTmmbr);
-          if (useTmmbr) {
-            videoCodec.EnableTmmbr();
-          }
-        }
-        break;
-      case SdpMediaSection::kText:
-      case SdpMediaSection::kApplication:
-      case SdpMediaSection::kMessage:
-        {} // Nothing to configure for these.
-    }
-  }
 
   // Sort by priority
   int32_t preferredCodec = 0;
@@ -1097,8 +1139,7 @@ PeerConnectionImpl::ConfigureJsepSessionCodecs() {
     comparator.SetPreferredCodec(preferredCodec);
   }
 
-  std::stable_sort(codecs.begin(), codecs.end(), comparator);
-#endif // !defined(MOZILLA_XPCOMRT_API)
+  mJsepSession->SortCodecs(comparator);
   return NS_OK;
 }
 
@@ -1218,17 +1259,6 @@ PeerConnectionImpl::AddTrackToJsepSession(SdpMediaSection::MediaType type,
                                           const std::string& streamId,
                                           const std::string& trackId)
 {
-  if (!PeerConnectionCtx::GetInstance()->isReady()) {
-    // We are not ready to configure codecs for this track. We need to defer.
-    PeerConnectionCtx::GetInstance()->queueJSEPOperation(
-        WrapRunnableNM(DeferredAddTrackToJsepSession,
-                       mHandle,
-                       type,
-                       streamId,
-                       trackId));
-    return NS_OK;
-  }
-
   nsresult res = ConfigureJsepSessionCodecs();
   if (NS_FAILED(res)) {
     CSFLogError(logTag, "Failed to configure codecs");
@@ -1477,6 +1507,7 @@ PeerConnectionImpl::CreateOffer(const RTCOfferOptions& aOptions)
 {
   JsepOfferOptions options;
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  // convert the RTCOfferOptions to JsepOfferOptions
   if (aOptions.mOfferToReceiveAudio.WasPassed()) {
     options.mOfferToReceiveAudio =
       mozilla::Some(size_t(aOptions.mOfferToReceiveAudio.Value()));
@@ -1486,6 +1517,8 @@ PeerConnectionImpl::CreateOffer(const RTCOfferOptions& aOptions)
     options.mOfferToReceiveVideo =
         mozilla::Some(size_t(aOptions.mOfferToReceiveVideo.Value()));
   }
+
+  options.mIceRestart = mozilla::Some(aOptions.mIceRestart);
 
   if (aOptions.mMozDontOfferDataChannel.WasPassed()) {
     options.mDontOfferDataChannel =
@@ -1513,6 +1546,12 @@ NS_IMETHODIMP
 PeerConnectionImpl::CreateOffer(const JsepOfferOptions& aOptions)
 {
   PC_AUTO_ENTER_API_CALL(true);
+  bool restartIce = aOptions.mIceRestart.isSome() && *(aOptions.mIceRestart);
+  if (!restartIce &&
+      mMedia->GetIceRestartState() ==
+          PeerConnectionMedia::ICE_RESTART_PROVISIONAL) {
+    RollbackIceRestart();
+  }
 
   RefPtr<PeerConnectionObserver> pco = do_QueryObjectReferent(mPCObserver);
   if (!pco) {
@@ -1529,7 +1568,33 @@ PeerConnectionImpl::CreateOffer(const JsepOfferOptions& aOptions)
 
   CSFLogDebug(logTag, "CreateOffer()");
 
-  nsresult nrv = ConfigureJsepSessionCodecs();
+  nsresult nrv;
+  if (restartIce && !mJsepSession->GetLocalDescription().empty()) {
+    // If restart is requested and a restart is already in progress, we
+    // need to make room for the restart request so we either rollback
+    // or finalize to "clear" the previous restart.
+    if (mMedia->GetIceRestartState() ==
+            PeerConnectionMedia::ICE_RESTART_PROVISIONAL) {
+      // we're mid-restart and can rollback
+      RollbackIceRestart();
+    } else if (mMedia->GetIceRestartState() ==
+                   PeerConnectionMedia::ICE_RESTART_COMMITTED) {
+      // we're mid-restart and can't rollback, finalize restart even
+      // though we're not really ready yet
+      FinalizeIceRestart();
+    }
+
+    CSFLogInfo(logTag, "Offerer restarting ice");
+    nrv = SetupIceRestart();
+    if (NS_FAILED(nrv)) {
+      CSFLogError(logTag, "%s: SetupIceRestart failed, res=%u",
+                           __FUNCTION__,
+                           static_cast<unsigned>(nrv));
+      return nrv;
+    }
+  }
+
+  nrv = ConfigureJsepSessionCodecs();
   if (NS_FAILED(nrv)) {
     CSFLogError(logTag, "Failed to configure codecs");
     return nrv;
@@ -1574,13 +1639,31 @@ PeerConnectionImpl::CreateAnswer()
   }
 
   CSFLogDebug(logTag, "CreateAnswer()");
+
+  nsresult nrv;
+  if (mJsepSession->RemoteIceIsRestarting()) {
+    if (mMedia->GetIceRestartState() ==
+            PeerConnectionMedia::ICE_RESTART_COMMITTED) {
+      FinalizeIceRestart();
+    } else if (!mMedia->IsIceRestarting()) {
+      CSFLogInfo(logTag, "Answerer restarting ice");
+      nrv = SetupIceRestart();
+      if (NS_FAILED(nrv)) {
+        CSFLogError(logTag, "%s: SetupIceRestart failed, res=%u",
+                             __FUNCTION__,
+                             static_cast<unsigned>(nrv));
+        return nrv;
+      }
+    }
+  }
+
   STAMP_TIMECARD(mTimeCard, "Create Answer");
   // TODO(bug 1098015): Once RTCAnswerOptions is standardized, we'll need to
   // add it as a param to CreateAnswer, and convert it here.
   JsepAnswerOptions options;
   std::string answer;
 
-  nsresult nrv = mJsepSession->CreateAnswer(options, &answer);
+  nrv = mJsepSession->CreateAnswer(options, &answer);
   JSErrorResult rv;
   if (NS_FAILED(nrv)) {
     Error error;
@@ -1605,6 +1688,68 @@ PeerConnectionImpl::CreateAnswer()
   return NS_OK;
 }
 
+nsresult
+PeerConnectionImpl::SetupIceRestart()
+{
+  if (mMedia->IsIceRestarting()) {
+    CSFLogError(logTag, "%s: ICE already restarting",
+                         __FUNCTION__);
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  std::string ufrag = mMedia->ice_ctx()->GetNewUfrag();
+  std::string pwd = mMedia->ice_ctx()->GetNewPwd();
+  if (ufrag.empty() || pwd.empty()) {
+    CSFLogError(logTag, "%s: Bad ICE credentials (ufrag:'%s'/pwd:'%s')",
+                         __FUNCTION__,
+                         ufrag.c_str(), pwd.c_str());
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  // hold on to the current ice creds in case of rollback
+  mPreviousIceUfrag = mJsepSession->GetUfrag();
+  mPreviousIcePwd = mJsepSession->GetPwd();
+  mMedia->BeginIceRestart(ufrag, pwd);
+
+  nsresult nrv = mJsepSession->SetIceCredentials(ufrag, pwd);
+  if (NS_FAILED(nrv)) {
+    CSFLogError(logTag, "%s: Couldn't set ICE credentials, res=%u",
+                         __FUNCTION__,
+                         static_cast<unsigned>(nrv));
+    return nrv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+PeerConnectionImpl::RollbackIceRestart()
+{
+  mMedia->RollbackIceRestart();
+  // put back the previous ice creds
+  nsresult nrv = mJsepSession->SetIceCredentials(mPreviousIceUfrag,
+                                                 mPreviousIcePwd);
+  if (NS_FAILED(nrv)) {
+    CSFLogError(logTag, "%s: Couldn't set ICE credentials, res=%u",
+                         __FUNCTION__,
+                         static_cast<unsigned>(nrv));
+    return nrv;
+  }
+  mPreviousIceUfrag = "";
+  mPreviousIcePwd = "";
+
+  return NS_OK;
+}
+
+void
+PeerConnectionImpl::FinalizeIceRestart()
+{
+  mMedia->FinalizeIceRestart();
+  // clear the previous ice creds since they are no longer needed
+  mPreviousIceUfrag = "";
+  mPreviousIcePwd = "";
+}
+
 NS_IMETHODIMP
 PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP)
 {
@@ -1624,7 +1769,7 @@ PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP)
   STAMP_TIMECARD(mTimeCard, "Set Local Description");
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  bool isolated = mMedia->AnyLocalStreamHasPeerIdentity();
+  bool isolated = mMedia->AnyLocalTrackHasPeerIdentity();
   mPrivacyRequested = mPrivacyRequested || isolated;
 #endif
 
@@ -1687,6 +1832,251 @@ static void DeferredSetRemote(const std::string& aPcHandle,
                 "PeerConnectionCtx isn't ready?");
     }
     wrapper.impl()->SetRemoteDescription(aAction, aSdp.c_str());
+  }
+}
+
+static void StartTrack(MediaStream* aSource,
+                       TrackID aTrackId,
+                       nsAutoPtr<MediaSegment>&& aSegment) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  class Message : public ControlMessage {
+   public:
+    Message(MediaStream* aStream,
+            TrackID aTrack,
+            nsAutoPtr<MediaSegment>&& aSegment)
+      : ControlMessage(aStream),
+        track_id_(aTrack),
+        segment_(aSegment) {}
+
+    virtual void Run() override {
+      TrackRate track_rate = segment_->GetType() == MediaSegment::AUDIO ?
+        WEBRTC_DEFAULT_SAMPLE_RATE : mStream->GraphRate();
+      StreamTime current_end = mStream->GetTracksEnd();
+      TrackTicks current_ticks =
+        mStream->TimeToTicksRoundUp(track_rate, current_end);
+
+      // Add a track 'now' to avoid possible underrun, especially if we add
+      // a track "later".
+
+      if (current_end != 0L) {
+        CSFLogDebug(logTag, "added track @ %u -> %f",
+                    static_cast<unsigned>(current_end),
+                    mStream->StreamTimeToSeconds(current_end));
+      }
+
+      // To avoid assertions, we need to insert a dummy segment that covers up
+      // to the "start" time for the track
+      segment_->AppendNullData(current_ticks);
+      if (segment_->GetType() == MediaSegment::AUDIO) {
+        mStream->AsSourceStream()->AddAudioTrack(
+            track_id_,
+            WEBRTC_DEFAULT_SAMPLE_RATE,
+            0,
+            static_cast<AudioSegment*>(segment_.forget()));
+      } else {
+        mStream->AsSourceStream()->AddTrack(track_id_, 0, segment_.forget());
+      }
+    }
+   private:
+    TrackID track_id_;
+    nsAutoPtr<MediaSegment> segment_;
+  };
+
+  aSource->GraphImpl()->AppendMessage(
+      MakeUnique<Message>(aSource, aTrackId, Move(aSegment)));
+  CSFLogInfo(logTag, "Dispatched track-add for track id %u on stream %p",
+             aTrackId, aSource);
+#endif
+}
+
+
+nsresult
+PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
+{
+  JSErrorResult jrv;
+
+  std::vector<RefPtr<JsepTrack>> newTracks =
+    mJsepSession->GetRemoteTracksAdded();
+
+  // Group new tracks by stream id
+  std::map<std::string, std::vector<RefPtr<JsepTrack>>> tracksByStreamId;
+  for (auto i = newTracks.begin(); i != newTracks.end(); ++i) {
+    RefPtr<JsepTrack> track = *i;
+
+    if (track->GetMediaType() == mozilla::SdpMediaSection::kApplication) {
+      // Ignore datachannel
+      continue;
+    }
+
+    tracksByStreamId[track->GetStreamId()].push_back(track);
+  }
+
+  for (auto i = tracksByStreamId.begin(); i != tracksByStreamId.end(); ++i) {
+    std::string streamId = i->first;
+    std::vector<RefPtr<JsepTrack>>& tracks = i->second;
+
+    bool newStream = false;
+    RefPtr<RemoteSourceStreamInfo> info =
+      mMedia->GetRemoteStreamById(streamId);
+    if (!info) {
+      newStream = true;
+      nsresult nrv = CreateRemoteSourceStreamInfo(&info, streamId);
+      if (NS_FAILED(nrv)) {
+        aPco->OnSetRemoteDescriptionError(
+            kInternalError,
+            ObString("CreateRemoteSourceStreamInfo failed"),
+            jrv);
+        return nrv;
+      }
+
+      nrv = mMedia->AddRemoteStream(info);
+      if (NS_FAILED(nrv)) {
+        aPco->OnSetRemoteDescriptionError(
+            kInternalError,
+            ObString("AddRemoteStream failed"),
+            jrv);
+        return nrv;
+      }
+
+      CSFLogDebug(logTag, "Added remote stream %s", info->GetId().c_str());
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+      info->GetMediaStream()->AssignId(NS_ConvertUTF8toUTF16(streamId.c_str()));
+      info->GetMediaStream()->SetLogicalStreamStartTime(
+          info->GetMediaStream()->GetPlaybackStream()->GetCurrentTime());
+#else
+      info->GetMediaStream()->AssignId((streamId));
+#endif
+    }
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+    Sequence<OwningNonNull<DOMMediaStream>> streams;
+    if (!streams.AppendElement(OwningNonNull<DOMMediaStream>(
+            *info->GetMediaStream()),
+            fallible)) {
+      MOZ_ASSERT(false);
+      return NS_ERROR_FAILURE;
+    }
+
+    // Set the principal used for creating the tracks. This makes the stream
+    // data (audio/video samples) accessible to the receiving page. We're
+    // only certain that privacy hasn't been requested if we're connected.
+    nsCOMPtr<nsIPrincipal> principal;
+    nsIDocument* doc = GetWindow()->GetExtantDoc();
+    MOZ_ASSERT(doc);
+    if (mDtlsConnected && !PrivacyRequested()) {
+      principal = doc->NodePrincipal();
+    } else {
+      // we're either certain that we need isolation for the streams, OR
+      // we're not sure and we can fix the stream in SetDtlsConnected
+      principal =  nsNullPrincipal::CreateWithInheritedAttributes(doc->NodePrincipal());
+    }
+#endif
+
+    // We need to select unique ids, just use max + 1
+    TrackID maxTrackId = 0;
+    {
+      nsTArray<RefPtr<dom::MediaStreamTrack>> domTracks;
+      info->GetMediaStream()->GetTracks(domTracks);
+      for (auto& track : domTracks) {
+        maxTrackId = std::max(maxTrackId, track->mTrackID);
+      }
+    }
+
+    for (RefPtr<JsepTrack>& track : tracks) {
+      std::string webrtcTrackId(track->GetTrackId());
+      if (!info->HasTrack(webrtcTrackId)) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+        RefPtr<RemoteTrackSource> source =
+          new RemoteTrackSource(principal, nsString());
+#else
+        RefPtr<MediaStreamTrackSource> source = new MediaStreamTrackSource();
+#endif
+        TrackID trackID = ++maxTrackId;
+        RefPtr<MediaStreamTrack> domTrack;
+        nsAutoPtr<MediaSegment> segment;
+        if (track->GetMediaType() == SdpMediaSection::kAudio) {
+          domTrack =
+            info->GetMediaStream()->CreateDOMTrack(trackID,
+                                                   MediaSegment::AUDIO,
+                                                   source);
+          info->GetMediaStream()->AddTrackInternal(domTrack);
+          segment = new AudioSegment;
+        } else {
+          domTrack =
+            info->GetMediaStream()->CreateDOMTrack(trackID,
+                                                   MediaSegment::VIDEO,
+                                                   source);
+          info->GetMediaStream()->AddTrackInternal(domTrack);
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+          segment = new VideoSegment;
+#endif
+        }
+
+        StartTrack(info->GetMediaStream()->GetInputStream()->AsSourceStream(),
+                   trackID, Move(segment));
+        info->AddTrack(webrtcTrackId, domTrack);
+        CSFLogDebug(logTag, "Added remote track %s/%s",
+                    info->GetId().c_str(), webrtcTrackId.c_str());
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+        domTrack->AssignId(NS_ConvertUTF8toUTF16(webrtcTrackId.c_str()));
+        aPco->OnAddTrack(*domTrack, streams, jrv);
+        if (jrv.Failed()) {
+          CSFLogError(logTag, ": OnAddTrack(%s) failed! Error: %u",
+                      webrtcTrackId.c_str(),
+                      jrv.ErrorCodeAsInt());
+        }
+#endif
+      }
+    }
+
+    if (newStream) {
+      aPco->OnAddStream(*info->GetMediaStream(), jrv);
+      if (jrv.Failed()) {
+        CSFLogError(logTag, ": OnAddStream() failed! Error: %u",
+                    jrv.ErrorCodeAsInt());
+      }
+    }
+  }
+  return NS_OK;
+}
+
+void
+PeerConnectionImpl::RemoveOldRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
+{
+  JSErrorResult jrv;
+
+  std::vector<RefPtr<JsepTrack>> removedTracks =
+    mJsepSession->GetRemoteTracksRemoved();
+
+  for (auto i = removedTracks.begin(); i != removedTracks.end(); ++i) {
+    const std::string& streamId = (*i)->GetStreamId();
+    const std::string& trackId = (*i)->GetTrackId();
+
+    RefPtr<RemoteSourceStreamInfo> info = mMedia->GetRemoteStreamById(streamId);
+    if (!info) {
+      MOZ_ASSERT(false, "A stream/track was removed that wasn't in PCMedia. "
+                        "This is a bug.");
+      continue;
+    }
+
+    mMedia->RemoveRemoteTrack(streamId, trackId);
+
+    DOMMediaStream* stream = info->GetMediaStream();
+    nsTArray<RefPtr<MediaStreamTrack>> tracks;
+    stream->GetTracks(tracks);
+    for (auto& track : tracks) {
+      if (PeerConnectionImpl::GetTrackId(*track) == trackId) {
+        aPco->OnRemoveTrack(*track, jrv);
+        break;
+      }
+    }
+
+    // We might be holding the last ref, but that's ok.
+    if (!info->GetTrackCount()) {
+      aPco->OnRemoveStream(*stream, jrv);
+    }
   }
 }
 
@@ -1768,112 +2158,13 @@ PeerConnectionImpl::SetRemoteDescription(int32_t action, const char* aSDP)
                 __FUNCTION__, mHandle.c_str(), errorString.c_str());
     pco->OnSetRemoteDescriptionError(error, ObString(errorString.c_str()), jrv);
   } else {
-    std::vector<RefPtr<JsepTrack>> newTracks =
-      mJsepSession->GetRemoteTracksAdded();
-
-    // Group new tracks by stream id
-    std::map<std::string, std::vector<RefPtr<JsepTrack>>> tracksByStreamId;
-    for (auto i = newTracks.begin(); i != newTracks.end(); ++i) {
-      RefPtr<JsepTrack> track = *i;
-
-      if (track->GetMediaType() == mozilla::SdpMediaSection::kApplication) {
-        // Ignore datachannel
-        continue;
-      }
-
-      tracksByStreamId[track->GetStreamId()].push_back(track);
+    nrv = CreateNewRemoteTracks(pco);
+    if (NS_FAILED(nrv)) {
+      // aPco was already notified, just return early.
+      return NS_OK;
     }
 
-    for (auto i = tracksByStreamId.begin(); i != tracksByStreamId.end(); ++i) {
-      std::string streamId = i->first;
-      std::vector<RefPtr<JsepTrack>>& tracks = i->second;
-
-      RefPtr<RemoteSourceStreamInfo> info =
-        mMedia->GetRemoteStreamById(streamId);
-      if (!info) {
-        nsresult nrv = CreateRemoteSourceStreamInfo(&info, streamId);
-        if (NS_FAILED(nrv)) {
-          pco->OnSetRemoteDescriptionError(
-              kInternalError,
-              ObString("CreateRemoteSourceStreamInfo failed"),
-              jrv);
-          return NS_OK;
-        }
-
-        nrv = mMedia->AddRemoteStream(info);
-        if (NS_FAILED(nrv)) {
-          pco->OnSetRemoteDescriptionError(
-              kInternalError,
-              ObString("AddRemoteStream failed"),
-              jrv);
-          return NS_OK;
-        }
-        CSFLogDebug(logTag, "Added remote stream %s", info->GetId().c_str());
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-        info->GetMediaStream()->AssignId(NS_ConvertUTF8toUTF16(streamId.c_str()));
-#else
-        info->GetMediaStream()->AssignId((streamId));
-#endif
-      }
-
-      size_t numNewAudioTracks = 0;
-      size_t numNewVideoTracks = 0;
-      size_t numPreexistingTrackIds = 0;
-
-      for (auto j = tracks.begin(); j != tracks.end(); ++j) {
-        RefPtr<JsepTrack> track = *j;
-        if (!info->HasTrack(track->GetTrackId())) {
-          if (track->GetMediaType() == SdpMediaSection::kAudio) {
-            ++numNewAudioTracks;
-          } else if (track->GetMediaType() == SdpMediaSection::kVideo) {
-            ++numNewVideoTracks;
-          } else {
-            MOZ_ASSERT(false);
-            continue;
-          }
-          info->AddTrack(track->GetTrackId());
-          CSFLogDebug(logTag, "Added remote track %s/%s",
-                      info->GetId().c_str(), track->GetTrackId().c_str());
-        } else {
-          ++numPreexistingTrackIds;
-        }
-      }
-
-      // Now that the streams are all set up, notify about track availability.
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-      TracksAvailableCallback* tracksAvailableCallback =
-        new TracksAvailableCallback(numNewAudioTracks,
-                                    numNewVideoTracks,
-                                    mHandle,
-                                    pco);
-      info->GetMediaStream()->OnTracksAvailable(tracksAvailableCallback);
-#else
-      if (!numPreexistingTrackIds) {
-        pco->OnAddStream(*info->GetMediaStream(), jrv);
-      }
-#endif
-    }
-
-    std::vector<RefPtr<JsepTrack>> removedTracks =
-      mJsepSession->GetRemoteTracksRemoved();
-
-    for (auto i = removedTracks.begin(); i != removedTracks.end(); ++i) {
-      RefPtr<RemoteSourceStreamInfo> info =
-        mMedia->GetRemoteStreamById((*i)->GetStreamId());
-      if (!info) {
-        MOZ_ASSERT(false, "A stream/track was removed that wasn't in PCMedia. "
-                          "This is a bug.");
-        continue;
-      }
-
-      mMedia->RemoveRemoteTrack((*i)->GetStreamId(), (*i)->GetTrackId());
-
-      // We might be holding the last ref, but that's ok.
-      if (!info->GetTrackCount()) {
-        pco->OnRemoveStream(*info->GetMediaStream(), jrv);
-      }
-    }
+    RemoveOldRemoteTracks(pco);
 
     pco->OnSetRemoteDescriptionSuccess(jrv);
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
@@ -1891,7 +2182,7 @@ PeerConnectionImpl::SetRemoteDescription(int32_t action, const char* aSDP)
 nsresult
 PeerConnectionImpl::GetTimeSinceEpoch(DOMHighResTimeStamp *result) {
   MOZ_ASSERT(NS_IsMainThread());
-  nsPerformance *perf = mWindow->GetPerformance();
+  Performance *perf = mWindow->GetPerformance();
   NS_ENSURE_TRUE(perf && perf->Timing(), NS_ERROR_UNEXPECTED);
   *result = perf->Now() + perf->Timing()->NavigationStart();
   return NS_OK;
@@ -2036,7 +2327,8 @@ PeerConnectionImpl::SetPeerIdentity(const nsAString& aPeerIdentity)
       CSFLogInfo(logTag, "Can't update principal on streams; document gone");
       return NS_ERROR_FAILURE;
     }
-    mMedia->UpdateSinkIdentity_m(doc->NodePrincipal(), mPeerIdentity);
+    MediaStreamTrack* allTracks = nullptr;
+    mMedia->UpdateSinkIdentity_m(allTracks, doc->NodePrincipal(), mPeerIdentity);
   }
   return NS_OK;
 }
@@ -2069,27 +2361,13 @@ PeerConnectionImpl::SetDtlsConnected(bool aPrivacyRequested)
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 void
-PeerConnectionImpl::PrincipalChanged(DOMMediaStream* aMediaStream) {
+PeerConnectionImpl::PrincipalChanged(MediaStreamTrack* aTrack) {
   nsIDocument* doc = GetWindow()->GetExtantDoc();
   if (doc) {
-    mMedia->UpdateSinkIdentity_m(doc->NodePrincipal(), mPeerIdentity);
+    mMedia->UpdateSinkIdentity_m(aTrack, doc->NodePrincipal(), mPeerIdentity);
   } else {
     CSFLogInfo(logTag, "Can't update sink principal; document gone");
   }
-}
-#endif
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-nsresult
-PeerConnectionImpl::GetRemoteTrackId(const std::string streamId,
-                                     TrackID numericTrackId,
-                                     std::string* trackId) const
-{
-  if (IsClosed()) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  return mMedia->GetRemoteTrackId(streamId, numericTrackId, trackId);
 }
 #endif
 
@@ -2142,15 +2420,9 @@ nsresult
 PeerConnectionImpl::AddTrack(MediaStreamTrack& aTrack,
                              DOMMediaStream& aMediaStream)
 {
-  if (!aMediaStream.HasTrack(aTrack)) {
-    CSFLogError(logTag, "%s: Track is not in stream", __FUNCTION__);
-    return NS_ERROR_FAILURE;
-  }
-  uint32_t num = mMedia->LocalStreamsLength();
-
   std::string streamId = PeerConnectionImpl::GetStreamId(aMediaStream);
   std::string trackId = PeerConnectionImpl::GetTrackId(aTrack);
-  nsresult res = mMedia->AddTrack(&aMediaStream, streamId, trackId);
+  nsresult res = mMedia->AddTrack(aMediaStream, streamId, aTrack, trackId);
   if (NS_FAILED(res)) {
     return res;
   }
@@ -2158,9 +2430,10 @@ PeerConnectionImpl::AddTrack(MediaStreamTrack& aTrack,
   CSFLogDebug(logTag, "Added track (%s) to stream %s",
                       trackId.c_str(), streamId.c_str());
 
-  if (num != mMedia->LocalStreamsLength()) {
-    aMediaStream.AddPrincipalChangeObserver(this);
-  }
+  aTrack.AddPrincipalChangeObserver(this);
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  PrincipalChanged(&aTrack);
+#endif
 
   if (aTrack.AsAudioStreamTrack()) {
     res = AddTrackToJsepSession(SdpMediaSection::kAudio, streamId, trackId);
@@ -2189,26 +2462,48 @@ PeerConnectionImpl::AddTrack(MediaStreamTrack& aTrack,
   return NS_OK;
 }
 
+nsresult
+PeerConnectionImpl::SelectSsrc(MediaStreamTrack& aRecvTrack,
+                               unsigned short aSsrcIndex)
+{
+  for (size_t i = 0; i < mMedia->RemoteStreamsLength(); ++i) {
+    if (mMedia->GetRemoteStreamByIndex(i)->GetMediaStream()->
+        HasTrack(aRecvTrack)) {
+      auto& pipelines = mMedia->GetRemoteStreamByIndex(i)->GetPipelines();
+      std::string trackId = PeerConnectionImpl::GetTrackId(aRecvTrack);
+      auto it = pipelines.find(trackId);
+      if (it != pipelines.end()) {
+        it->second->SelectSsrc_m(aSsrcIndex);
+      }
+    }
+  }
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 PeerConnectionImpl::RemoveTrack(MediaStreamTrack& aTrack) {
   PC_AUTO_ENTER_API_CALL(true);
 
-  DOMMediaStream* stream = aTrack.GetStream();
+  std::string trackId = PeerConnectionImpl::GetTrackId(aTrack);
 
-  if (!stream) {
-    CSFLogError(logTag, "%s: Track has no stream", __FUNCTION__);
-    return NS_ERROR_INVALID_ARG;
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  nsString wideTrackId;
+  aTrack.GetId(wideTrackId);
+  for (size_t i = 0; i < mDTMFStates.Length(); ++i) {
+    if (mDTMFStates[i].mTrackId == wideTrackId) {
+      mDTMFStates[i].mSendTimer->Cancel();
+      mDTMFStates.RemoveElementAt(i);
+      break;
+    }
   }
+#endif
 
-  std::string streamId = PeerConnectionImpl::GetStreamId(*stream);
-  RefPtr<LocalSourceStreamInfo> info = media()->GetLocalStreamById(streamId);
+  RefPtr<LocalSourceStreamInfo> info = media()->GetLocalStreamByTrackId(trackId);
 
   if (!info) {
     CSFLogError(logTag, "%s: Unknown stream", __FUNCTION__);
     return NS_ERROR_INVALID_ARG;
   }
-
-  std::string trackId(PeerConnectionImpl::GetTrackId(aTrack));
 
   nsresult rv =
     mJsepSession->RemoveTrack(info->GetId(), trackId);
@@ -2223,7 +2518,120 @@ PeerConnectionImpl::RemoveTrack(MediaStreamTrack& aTrack) {
 
   media()->RemoveLocalTrack(info->GetId(), trackId);
 
+  aTrack.RemovePrincipalChangeObserver(this);
+
   OnNegotiationNeeded();
+
+  return NS_OK;
+}
+
+static int GetDTMFToneCode(uint16_t c)
+{
+  const char* DTMF_TONECODES = "0123456789*#ABCD";
+
+  if (c == ',') {
+    // , is a special character indicating a 2 second delay
+    return -1;
+  }
+
+  const char* i = strchr(DTMF_TONECODES, c);
+  MOZ_ASSERT(i);
+  return i - DTMF_TONECODES;
+}
+
+NS_IMETHODIMP
+PeerConnectionImpl::InsertDTMF(mozilla::dom::RTCRtpSender& sender,
+                               const nsAString& tones, uint32_t duration,
+                               uint32_t interToneGap) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  PC_AUTO_ENTER_API_CALL(false);
+
+  // Check values passed in from PeerConnection.js
+  MOZ_ASSERT(duration >= 40, "duration must be at least 40");
+  MOZ_ASSERT(duration <= 6000, "duration must be at most 6000");
+  MOZ_ASSERT(interToneGap >= 30, "interToneGap must be at least 30");
+
+  JSErrorResult jrv;
+
+  // Retrieve track
+  RefPtr<MediaStreamTrack> mst = sender.GetTrack(jrv);
+  if (jrv.Failed()) {
+    NS_WARNING("Failed to retrieve track for RTCRtpSender!");
+    return jrv.StealNSResult();
+  }
+
+  nsString senderTrackId;
+  mst->GetId(senderTrackId);
+
+  // Attempt to locate state for the DTMFSender
+  DTMFState* state = nullptr;
+  for (auto& dtmfState : mDTMFStates) {
+    if (dtmfState.mTrackId == senderTrackId) {
+      state = &dtmfState;
+      break;
+    }
+  }
+
+  // No state yet, create a new one
+  if (!state) {
+    state = mDTMFStates.AppendElement();
+    state->mPeerConnectionImpl = this;
+    state->mTrackId = senderTrackId;
+    state->mSendTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+    MOZ_ASSERT(state->mSendTimer);
+  }
+  MOZ_ASSERT(state);
+
+  auto trackPairs = mJsepSession->GetNegotiatedTrackPairs();
+  state->mLevel = -1;
+  for (auto& trackPair : trackPairs) {
+    if (state->mTrackId.EqualsASCII(trackPair.mSending->GetTrackId().c_str())) {
+      if (trackPair.mBundleLevel.isSome()) {
+        state->mLevel = *trackPair.mBundleLevel;
+      } else {
+        state->mLevel = trackPair.mLevel;
+      }
+      break;
+    }
+  }
+
+  state->mTones = tones;
+  state->mDuration = duration;
+  state->mInterToneGap = interToneGap;
+  if (!state->mTones.IsEmpty()) {
+    state->mSendTimer->InitWithFuncCallback(DTMFSendTimerCallback_m, state, 0,
+                                            nsITimer::TYPE_ONE_SHOT);
+  }
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PeerConnectionImpl::GetDTMFToneBuffer(mozilla::dom::RTCRtpSender& sender,
+                                      nsAString& outToneBuffer) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  PC_AUTO_ENTER_API_CALL(false);
+
+  JSErrorResult jrv;
+
+  // Retrieve track
+  RefPtr<MediaStreamTrack> mst = sender.GetTrack(jrv);
+  if (jrv.Failed()) {
+    NS_WARNING("Failed to retrieve track for RTCRtpSender!");
+    return jrv.StealNSResult();
+  }
+
+  nsString senderTrackId;
+  mst->GetId(senderTrackId);
+
+  // Attempt to locate state for the DTMFSender
+  for (auto& dtmfState : mDTMFStates) {
+    if (dtmfState.mTrackId == senderTrackId) {
+      outToneBuffer = dtmfState.mTones;
+      break;
+    }
+  }
+#endif
 
   return NS_OK;
 }
@@ -2232,6 +2640,19 @@ NS_IMETHODIMP
 PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
                                  MediaStreamTrack& aWithTrack) {
   PC_AUTO_ENTER_API_CALL(true);
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  nsString trackId;
+  aThisTrack.GetId(trackId);
+
+  for (size_t i = 0; i < mDTMFStates.Length(); ++i) {
+    if (mDTMFStates[i].mTrackId == trackId) {
+      mDTMFStates[i].mSendTimer->Cancel();
+      mDTMFStates.RemoveElementAt(i);
+      break;
+    }
+  }
+#endif
 
   RefPtr<PeerConnectionObserver> pco = do_QueryObjectReferent(mPCObserver);
   if (!pco) {
@@ -2268,10 +2689,16 @@ PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
   std::string origTrackId = PeerConnectionImpl::GetTrackId(aThisTrack);
   std::string newTrackId = PeerConnectionImpl::GetTrackId(aWithTrack);
 
-  std::string origStreamId =
-    PeerConnectionImpl::GetStreamId(*aThisTrack.GetStream());
+  RefPtr<LocalSourceStreamInfo> info =
+    media()->GetLocalStreamByTrackId(origTrackId);
+  if (!info) {
+    CSFLogError(logTag, "Could not find stream from trackId");
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  std::string origStreamId = info->GetId();
   std::string newStreamId =
-    PeerConnectionImpl::GetStreamId(*aWithTrack.GetStream());
+    PeerConnectionImpl::GetStreamId(*aWithTrack.mOwningStream);
 
   nsresult rv = mJsepSession->ReplaceTrack(origStreamId,
                                            origTrackId,
@@ -2290,7 +2717,7 @@ PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
 
   rv = media()->ReplaceTrack(origStreamId,
                              origTrackId,
-                             aWithTrack.GetStream(),
+                             aWithTrack,
                              newStreamId,
                              newTrackId);
 
@@ -2306,6 +2733,17 @@ PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
     }
     return NS_OK;
   }
+  aThisTrack.RemovePrincipalChangeObserver(this);
+  aWithTrack.AddPrincipalChangeObserver(this);
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  PrincipalChanged(&aWithTrack);
+#endif
+
+  // We update the media pipelines here so we can apply different codec
+  // settings for different sources (e.g. screensharing as opposed to camera.)
+  // TODO: We should probably only do this if the source has in fact changed.
+  mMedia->UpdateMediaPipelines(*mJsepSession);
+
   pco->OnReplaceTrackSuccess(jrv);
   if (jrv.Failed()) {
     CSFLogError(logTag, "Error firing replaceTrack success callback");
@@ -2315,19 +2753,97 @@ PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
   return NS_OK;
 }
 
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+NS_IMETHODIMP
+PeerConnectionImpl::SetParameters(MediaStreamTrack& aTrack,
+                                  const RTCRtpParameters& aParameters) {
+  PC_AUTO_ENTER_API_CALL(true);
+
+  std::vector<JsepTrack::JsConstraints> constraints;
+  if (aParameters.mEncodings.WasPassed()) {
+    for (auto& encoding : aParameters.mEncodings.Value()) {
+      JsepTrack::JsConstraints constraint;
+      if (encoding.mRid.WasPassed()) {
+        constraint.rid = NS_ConvertUTF16toUTF8(encoding.mRid.Value()).get();
+      }
+      if (encoding.mMaxBitrate.WasPassed()) {
+        constraint.constraints.maxBr = encoding.mMaxBitrate.Value();
+      }
+      constraint.constraints.scaleDownBy = encoding.mScaleResolutionDownBy;
+      constraints.push_back(constraint);
+    }
+  }
+  return SetParameters(aTrack, constraints);
+}
+#endif
+
+nsresult
+PeerConnectionImpl::SetParameters(
+    MediaStreamTrack& aTrack,
+    const std::vector<JsepTrack::JsConstraints>& aConstraints)
+{
+  std::string trackId = PeerConnectionImpl::GetTrackId(aTrack);
+  RefPtr<LocalSourceStreamInfo> info = media()->GetLocalStreamByTrackId(trackId);
+  if (!info) {
+    CSFLogError(logTag, "%s: Unknown stream", __FUNCTION__);
+    return NS_ERROR_INVALID_ARG;
+  }
+  std::string streamId = info->GetId();
+
+  return mJsepSession->SetParameters(streamId, trackId, aConstraints);
+}
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+NS_IMETHODIMP
+PeerConnectionImpl::GetParameters(MediaStreamTrack& aTrack,
+                                  RTCRtpParameters& aOutParameters) {
+  PC_AUTO_ENTER_API_CALL(true);
+
+  std::vector<JsepTrack::JsConstraints> constraints;
+  nsresult rv = GetParameters(aTrack, &constraints);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  aOutParameters.mEncodings.Construct();
+  for (auto& constraint : constraints) {
+    RTCRtpEncodingParameters encoding;
+    encoding.mRid.Construct(NS_ConvertASCIItoUTF16(constraint.rid.c_str()));
+    encoding.mMaxBitrate.Construct(constraint.constraints.maxBr);
+    encoding.mScaleResolutionDownBy = constraint.constraints.scaleDownBy;
+    aOutParameters.mEncodings.Value().AppendElement(Move(encoding), fallible);
+  }
+  return NS_OK;
+}
+#endif
+
+nsresult
+PeerConnectionImpl::GetParameters(
+    MediaStreamTrack& aTrack,
+    std::vector<JsepTrack::JsConstraints>* aOutConstraints)
+{
+  std::string trackId = PeerConnectionImpl::GetTrackId(aTrack);
+  RefPtr<LocalSourceStreamInfo> info = media()->GetLocalStreamByTrackId(trackId);
+  if (!info) {
+    CSFLogError(logTag, "%s: Unknown stream", __FUNCTION__);
+    return NS_ERROR_INVALID_ARG;
+  }
+  std::string streamId = info->GetId();
+
+  return mJsepSession->GetParameters(streamId, trackId, aOutConstraints);
+}
+
 nsresult
 PeerConnectionImpl::CalculateFingerprint(
     const std::string& algorithm,
     std::vector<uint8_t>* fingerprint) const {
   uint8_t buf[DtlsIdentity::HASH_ALGORITHM_MAX_LENGTH];
   size_t len = 0;
-  CERTCertificate* cert;
 
   MOZ_ASSERT(fingerprint);
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  cert = mCertificate->Certificate();
+  const UniqueCERTCertificate& cert = mCertificate->Certificate();
 #else
-  cert = mIdentity->cert();
+  const UniqueCERTCertificate& cert = mIdentity->cert();
 #endif
   nsresult rv = DtlsIdentity::ComputeFingerprint(cert, algorithm,
                                                  &buf[0], sizeof(buf),
@@ -2485,7 +3001,7 @@ PeerConnectionImpl::PluginCrash(uint32_t aPluginID,
     PluginCrashedEvent::Constructor(doc, NS_LITERAL_STRING("PluginCrashed"), init);
 
   event->SetTrusted(true);
-  event->GetInternalNSEvent()->mFlags.mOnlyChromeDispatch = true;
+  event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
 
   EventDispatcher::DispatchDOMEvent(mWindow, nullptr, event, nullptr, nullptr);
 #endif
@@ -2508,25 +3024,19 @@ PeerConnectionImpl::RecordEndOfCallTelemetry() const
 
   // Report end-of-call Telemetry
   if (mJsepSession->GetNegotiations() > 0) {
-    Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_RENEGOTIATIONS :
-                          Telemetry::WEBRTC_RENEGOTIATIONS,
+    Telemetry::Accumulate(Telemetry::WEBRTC_RENEGOTIATIONS,
                           mJsepSession->GetNegotiations()-1);
   }
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_MAX_VIDEO_SEND_TRACK :
-                        Telemetry::WEBRTC_MAX_VIDEO_SEND_TRACK,
+  Telemetry::Accumulate(Telemetry::WEBRTC_MAX_VIDEO_SEND_TRACK,
                         mMaxSending[SdpMediaSection::MediaType::kVideo]);
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_MAX_VIDEO_RECEIVE_TRACK :
-                        Telemetry::WEBRTC_MAX_VIDEO_RECEIVE_TRACK,
+  Telemetry::Accumulate(Telemetry::WEBRTC_MAX_VIDEO_RECEIVE_TRACK,
                         mMaxReceiving[SdpMediaSection::MediaType::kVideo]);
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_MAX_AUDIO_SEND_TRACK :
-                        Telemetry::WEBRTC_MAX_AUDIO_SEND_TRACK,
+  Telemetry::Accumulate(Telemetry::WEBRTC_MAX_AUDIO_SEND_TRACK,
                         mMaxSending[SdpMediaSection::MediaType::kAudio]);
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_MAX_AUDIO_RECEIVE_TRACK :
-                        Telemetry::WEBRTC_MAX_AUDIO_RECEIVE_TRACK,
+  Telemetry::Accumulate(Telemetry::WEBRTC_MAX_AUDIO_RECEIVE_TRACK,
                         mMaxReceiving[SdpMediaSection::MediaType::kAudio]);
   // DataChannels appear in both Sending and Receiving
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_DATACHANNEL_NEGOTIATED :
-                        Telemetry::WEBRTC_DATACHANNEL_NEGOTIATED,
+  Telemetry::Accumulate(Telemetry::WEBRTC_DATACHANNEL_NEGOTIATED,
                         mMaxSending[SdpMediaSection::MediaType::kApplication]);
   // Enumerated/bitmask: 1 = Audio, 2 = Video, 4 = DataChannel
   // A/V = 3, A/V/D = 7, etc
@@ -2542,8 +3052,7 @@ PeerConnectionImpl::RecordEndOfCallTelemetry() const
   if (mMaxSending[SdpMediaSection::MediaType::kApplication]) {
     type |= kDataChannelTypeMask;
   }
-  Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_CALL_TYPE :
-                        Telemetry::WEBRTC_CALL_TYPE,
+  Telemetry::Accumulate(Telemetry::WEBRTC_CALL_TYPE,
                         type);
 #endif
 }
@@ -2553,11 +3062,17 @@ PeerConnectionImpl::CloseInt()
 {
   PC_AUTO_ENTER_API_CALL_NO_CHECK();
 
+  for (auto& dtmfState : mDTMFStates) {
+    dtmfState.mSendTimer->Cancel();
+  }
+
   // We do this at the end of the call because we want to make sure we've waited
   // for all trickle ICE candidates to come in; this can happen well after we've
   // transitioned to connected. As a bonus, this allows us to detect race
   // conditions where a stats dispatch happens right as the PC closes.
-  RecordLongtermICEStatistics();
+  if (!mPrivateWindow) {
+    RecordLongtermICEStatistics();
+  }
   RecordEndOfCallTelemetry();
   CSFLogInfo(logTag, "%s: Closing PeerConnectionImpl %s; "
              "ending call", __FUNCTION__, mHandle.c_str());
@@ -2588,17 +3103,18 @@ PeerConnectionImpl::ShutdownMedia()
     return;
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  // before we destroy references to local streams, detach from them
+  // before we destroy references to local tracks, detach from them
   for(uint32_t i = 0; i < media()->LocalStreamsLength(); ++i) {
     LocalSourceStreamInfo *info = media()->GetLocalStreamByIndex(i);
-    info->GetMediaStream()->RemovePrincipalChangeObserver(this);
+    for (const auto& pair : info->GetMediaStreamTracks()) {
+      pair.second->RemovePrincipalChangeObserver(this);
+    }
   }
 
   // End of call to be recorded in Telemetry
   if (!mStartTime.IsNull()){
     TimeDuration timeDelta = TimeStamp::Now() - mStartTime;
-    Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_CALL_DURATION :
-                                    Telemetry::WEBRTC_CALL_DURATION,
+    Telemetry::Accumulate(Telemetry::WEBRTC_CALL_DURATION,
                           timeDelta.ToSeconds());
   }
 #endif
@@ -2629,6 +3145,15 @@ PeerConnectionImpl::SetSignalingState_m(PCImplSignalingState aSignalingState,
 
   bool fireNegotiationNeeded = false;
   if (mSignalingState == PCImplSignalingState::SignalingStable) {
+    if (mMedia->GetIceRestartState() ==
+            PeerConnectionMedia::ICE_RESTART_PROVISIONAL) {
+      if (rollback) {
+        RollbackIceRestart();
+      } else {
+        mMedia->CommitIceRestart();
+      }
+    }
+
     // Either negotiation is done, or we've rolled back. In either case, we
     // need to re-evaluate whether further negotiation is required.
     mNegotiationNeeded = false;
@@ -2767,10 +3292,16 @@ toDomIceConnectionState(NrIceCtx::ConnectionState state) {
       return PCImplIceConnectionState::New;
     case NrIceCtx::ICE_CTX_CHECKING:
       return PCImplIceConnectionState::Checking;
-    case NrIceCtx::ICE_CTX_OPEN:
+    case NrIceCtx::ICE_CTX_CONNECTED:
       return PCImplIceConnectionState::Connected;
+    case NrIceCtx::ICE_CTX_COMPLETED:
+      return PCImplIceConnectionState::Completed;
     case NrIceCtx::ICE_CTX_FAILED:
       return PCImplIceConnectionState::Failed;
+    case NrIceCtx::ICE_CTX_DISCONNECTED:
+      return PCImplIceConnectionState::Disconnected;
+    case NrIceCtx::ICE_CTX_CLOSED:
+      return PCImplIceConnectionState::Closed;
   }
   MOZ_CRASH();
 }
@@ -2875,8 +3406,7 @@ static bool isSucceeded(PCImplIceConnectionState state) {
 }
 
 static bool isFailed(PCImplIceConnectionState state) {
-  return state == PCImplIceConnectionState::Failed ||
-         state == PCImplIceConnectionState::Disconnected;
+  return state == PCImplIceConnectionState::Failed;
 }
 #endif
 
@@ -2888,6 +3418,11 @@ void PeerConnectionImpl::IceConnectionStateChange(
   CSFLogDebug(logTag, "%s", __FUNCTION__);
 
   auto domState = toDomIceConnectionState(state);
+  if (domState == mIceConnectionState) {
+    // no work to be done since the states are the same.
+    // this can happen during ICE rollback situations.
+    return;
+  }
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   if (!isDone(mIceConnectionState) && isDone(domState)) {
@@ -2896,12 +3431,10 @@ void PeerConnectionImpl::IceConnectionStateChange(
     if (!mIceStartTime.IsNull()){
       TimeDuration timeDelta = TimeStamp::Now() - mIceStartTime;
       if (isSucceeded(domState)) {
-        Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_ICE_SUCCESS_TIME :
-                                        Telemetry::WEBRTC_ICE_SUCCESS_TIME,
+        Telemetry::Accumulate(Telemetry::WEBRTC_ICE_SUCCESS_TIME,
                               timeDelta.ToMilliseconds());
       } else if (isFailed(domState)) {
-        Telemetry::Accumulate(mIsLoop ? Telemetry::LOOP_ICE_FAILURE_TIME :
-                                        Telemetry::WEBRTC_ICE_FAILURE_TIME,
+        Telemetry::Accumulate(Telemetry::WEBRTC_ICE_FAILURE_TIME,
                               timeDelta.ToMilliseconds());
       }
     }
@@ -2919,6 +3452,14 @@ void PeerConnectionImpl::IceConnectionStateChange(
 #endif
 
   mIceConnectionState = domState;
+
+  if (mIceConnectionState == PCImplIceConnectionState::Connected ||
+      mIceConnectionState == PCImplIceConnectionState::Completed ||
+      mIceConnectionState == PCImplIceConnectionState::Failed) {
+    if (mMedia->IsIceRestarting()) {
+      FinalizeIceRestart();
+    }
+  }
 
   // Would be nice if we had a means of converting one of these dom enums
   // to a string that wasn't almost as much text as this switch statement...
@@ -3067,7 +3608,6 @@ PeerConnectionImpl::BuildStatsQuery_m(
 
   query->iceStartTime = mIceStartTime;
   query->failed = isFailed(mIceConnectionState);
-  query->isHello = mIsLoop;
 
   // Populate SDP on main
   if (query->internalStats) {
@@ -3089,35 +3629,16 @@ PeerConnectionImpl::BuildStatsQuery_m(
   }
 
   for (int i = 0, len = mMedia->LocalStreamsLength(); i < len; i++) {
-    auto& pipelines = mMedia->GetLocalStreamByIndex(i)->GetPipelines();
-    if (aSelector) {
-      if (mMedia->GetLocalStreamByIndex(i)->GetMediaStream()->
-          HasTrack(*aSelector)) {
-        auto it = pipelines.find(trackId);
-        if (it != pipelines.end()) {
-          query->pipelines.AppendElement(it->second);
-        }
-      }
-    } else {
-      for (auto it = pipelines.begin(); it != pipelines.end(); ++it) {
-        query->pipelines.AppendElement(it->second);
+    for (auto pipeline : mMedia->GetLocalStreamByIndex(i)->GetPipelines()) {
+      if (!aSelector || pipeline.second->trackid() == trackId) {
+        query->pipelines.AppendElement(pipeline.second);
       }
     }
   }
-
-  for (size_t i = 0, len = mMedia->RemoteStreamsLength(); i < len; i++) {
-    auto& pipelines = mMedia->GetRemoteStreamByIndex(i)->GetPipelines();
-    if (aSelector) {
-      if (mMedia->GetRemoteStreamByIndex(i)->
-          GetMediaStream()->HasTrack(*aSelector)) {
-        auto it = pipelines.find(trackId);
-        if (it != pipelines.end()) {
-          query->pipelines.AppendElement(it->second);
-        }
-      }
-    } else {
-      for (auto it = pipelines.begin(); it != pipelines.end(); ++it) {
-        query->pipelines.AppendElement(it->second);
+  for (int i = 0, len = mMedia->RemoteStreamsLength(); i < len; i++) {
+    for (auto pipeline : mMedia->GetRemoteStreamByIndex(i)->GetPipelines()) {
+      if (!aSelector || pipeline.second->trackid() == trackId) {
+        query->pipelines.AppendElement(pipeline.second);
       }
     }
   }
@@ -3556,13 +4077,8 @@ PeerConnectionImpl::startCallTelem() {
   mStartTime = TimeStamp::Now();
 
   // Increment session call counter
-  // If we want to track Loop calls independently here, we need two mConnectionCounters
-  int &cnt = PeerConnectionCtx::GetInstance()->mConnectionCounter;
-  if (cnt > 0) {
-    Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Subtract(cnt);
-  }
-  cnt++;
-  Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Add(cnt);
+  // If we want to track Loop calls independently here, we need two histograms.
+  Telemetry::Accumulate(Telemetry::WEBRTC_CALL_COUNT_2, 1);
 }
 #endif
 
@@ -3595,6 +4111,65 @@ PeerConnectionImpl::GetRemoteStreams(nsTArray<RefPtr<DOMMediaStream > >& result)
   return NS_OK;
 #else
   return NS_ERROR_FAILURE;
+#endif
+}
+
+void
+PeerConnectionImpl::DTMFSendTimerCallback_m(nsITimer* timer, void* closure)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  auto state = static_cast<DTMFState*>(closure);
+
+  nsString eventTone;
+  if (!state->mTones.IsEmpty()) {
+    uint16_t toneChar = state->mTones.CharAt(0);
+    int tone = GetDTMFToneCode(toneChar);
+
+    eventTone.Assign(toneChar);
+
+    state->mTones.Cut(0, 1);
+
+    if (tone == -1) {
+      state->mSendTimer->InitWithFuncCallback(DTMFSendTimerCallback_m, state,
+                                              2000, nsITimer::TYPE_ONE_SHOT);
+    } else {
+      // Reset delay if necessary
+      state->mSendTimer->InitWithFuncCallback(DTMFSendTimerCallback_m, state,
+                                              state->mDuration + state->mInterToneGap,
+                                              nsITimer::TYPE_ONE_SHOT);
+
+      RefPtr<AudioSessionConduit> conduit =
+        state->mPeerConnectionImpl->mMedia->GetAudioConduit(state->mLevel);
+
+      if (conduit) {
+        uint32_t duration = state->mDuration;
+        state->mPeerConnectionImpl->mSTSThread->Dispatch(WrapRunnableNM([conduit, tone, duration] () {
+            //Note: We default to channel 0, not inband, and 6dB attenuation.
+            //      here. We might want to revisit these choices in the future.
+            conduit->InsertDTMFTone(0, tone, true, duration, 6);
+          }), NS_DISPATCH_NORMAL);
+      }
+
+    }
+  } else {
+    state->mSendTimer->Cancel();
+  }
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  RefPtr<PeerConnectionObserver> pco = do_QueryObjectReferent(state->mPeerConnectionImpl->mPCObserver);
+  if (!pco) {
+    NS_WARNING("Failed to dispatch the RTCDTMFToneChange event!");
+    return;
+  }
+
+  JSErrorResult jrv;
+  pco->OnDTMFToneChange(state->mTrackId, eventTone, jrv);
+
+  if (jrv.Failed()) {
+    NS_WARNING("Failed to dispatch the RTCDTMFToneChange event!");
+    return;
+  }
 #endif
 }
 

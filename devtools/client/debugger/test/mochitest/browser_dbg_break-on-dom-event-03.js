@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Tests that the break-on-dom-events request works for load event listeners.
@@ -17,7 +19,7 @@ function test() {
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
-  gClient.connect((aType, aTraits) => {
+  gClient.connect().then(([aType, aTraits]) => {
     is(aType, "browser",
       "Root actor should identify itself as a browser.");
 
@@ -26,7 +28,7 @@ function test() {
       .then(aThreadClient => gThreadClient = aThreadClient)
       .then(pauseDebuggee)
       .then(testBreakOnLoad)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
       .then(null, aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
@@ -85,17 +87,11 @@ function testBreakOnLoad() {
 }
 
 function triggerButtonClick() {
-  let button  = content.document.querySelector("button");
+  let button = content.document.querySelector("button");
   EventUtils.sendMouseEvent({ type: "click" }, button);
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
   gThreadClient = null;
 });

@@ -44,7 +44,8 @@ HTMLTableColElement::ParseAttribute(int32_t aNamespaceID,
     }
     if (aAttribute == nsGkAtoms::span) {
       /* protection from unrealistic large colspan values */
-      return aResult.ParseIntWithBounds(aValue, 1, MAX_COLSPAN);
+      aResult.ParseIntWithFallback(aValue, 1, MAX_COLSPAN);
+      return true;
     }
     if (aAttribute == nsGkAtoms::width) {
       return aResult.ParseSpecialIntValue(aValue);
@@ -111,7 +112,7 @@ HTMLTableColElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes
         textAlign->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
     }
   }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) {
+  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
     nsCSSValue* verticalAlign = aData->ValueForVerticalAlign();
     if (verticalAlign->GetUnit() == eCSSUnit_Null) {
       // valign: enum

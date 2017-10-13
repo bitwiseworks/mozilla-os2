@@ -40,10 +40,10 @@ from __future__ import print_function
 import difflib
 import os
 import re
-import subprocess
 import sys
-import traceback
-from check_utils import get_all_toplevel_filenames
+
+from mozversioncontrol import get_repository_from_env
+
 
 # We don't bother checking files in these directories, because they're (a) auxiliary or (b)
 # imported code that doesn't follow our coding style.
@@ -66,10 +66,13 @@ included_inclnames_to_ignore = set([
     'jsautokw.h',               # generated in $OBJDIR
     'jscustomallocator.h',      # provided by embedders;  allowed to be missing
     'js-config.h',              # generated in $OBJDIR
+    'fdlibm.h',                 # fdlibm
     'pratom.h',                 # NSPR
     'prcvar.h',                 # NSPR
     'prerror.h',                # NSPR
     'prinit.h',                 # NSPR
+    'prio.h',                   # NSPR
+    'private/pprio.h',          # NSPR
     'prlink.h',                 # NSPR
     'prlock.h',                 # NSPR
     'prprf.h',                  # NSPR
@@ -77,8 +80,6 @@ included_inclnames_to_ignore = set([
     'prtypes.h',                # NSPR
     'selfhosted.out.h',         # generated in $OBJDIR
     'shellmoduleloader.out.h',  # generated in $OBJDIR
-    'unicode/locid.h',          # ICU
-    'unicode/numsys.h',         # ICU
     'unicode/timezone.h',       # ICU
     'unicode/ucal.h',           # ICU
     'unicode/uclean.h',         # ICU
@@ -88,6 +89,7 @@ included_inclnames_to_ignore = set([
     'unicode/uenum.h',          # ICU
     'unicode/unorm.h',          # ICU
     'unicode/unum.h',           # ICU
+    'unicode/unumsys.h',        # ICU
     'unicode/ustring.h',        # ICU
     'unicode/utypes.h',         # ICU
     'vtune/VTuneWrapper.h'      # VTune
@@ -226,24 +228,27 @@ def check_style():
     # - An "inclname" is how a file is referred to in a #include statement.
     #
     # Examples (filename -> inclname)
-    # - "mfbt/Attributes.h"     -> "mozilla/Attributes.h"
-    # - "mfbt/decimal/Decimal.h -> "mozilla/Decimal.h"
-    # - "js/public/Vector.h"    -> "js/Vector.h"
-    # - "js/src/vm/String.h"    -> "vm/String.h"
+    # - "mfbt/Attributes.h"         -> "mozilla/Attributes.h"
+    # - "mfbt/decimal/Decimal.h     -> "mozilla/Decimal.h"
+    # - "mozglue/misc/TimeStamp.h   -> "mozilla/TimeStamp.h"
+    # - "memory/mozalloc/mozalloc.h -> "mozilla/mozalloc.h"
+    # - "js/public/Vector.h"        -> "js/Vector.h"
+    # - "js/src/vm/String.h"        -> "vm/String.h"
 
-    mfbt_inclnames = set()      # type: set(inclname)
-    mozalloc_inclnames = set()  # type: set(inclname)
-    js_names = dict()           # type: dict(filename, inclname)
+    non_js_dirnames = ('mfbt/',
+                       'memory/mozalloc/',
+                       'mozglue/')  # type: tuple(str)
+    non_js_inclnames = set()        # type: set(inclname)
+    js_names = dict()               # type: dict(filename, inclname)
+
+    repo = get_repository_from_env()
 
     # Select the appropriate files.
-    for filename in get_all_toplevel_filenames():
-        if filename.startswith('mfbt/') and filename.endswith('.h'):
-            inclname = 'mozilla/' + filename.split('/')[-1]
-            mfbt_inclnames.add(inclname)
-
-        if filename.startswith('memory/mozalloc/') and filename.endswith('.h'):
-            inclname = 'mozilla/' + filename.split('/')[-1]
-            mozalloc_inclnames.add(inclname)
+    for filename in repo.get_files_in_working_directory():
+        for non_js_dir in non_js_dirnames:
+            if filename.startswith(non_js_dir) and filename.endswith('.h'):
+                inclname = 'mozilla/' + filename.split('/')[-1]
+                non_js_inclnames.add(inclname)
 
         if filename.startswith('js/public/') and filename.endswith('.h'):
             inclname = 'js/' + filename[len('js/public/'):]
@@ -255,13 +260,13 @@ def check_style():
             inclname = filename[len('js/src/'):]
             js_names[filename] = inclname
 
-    all_inclnames = mfbt_inclnames | mozalloc_inclnames | set(js_names.values())
+    all_inclnames = non_js_inclnames | set(js_names.values())
 
     edges = dict()      # type: dict(inclname, set(inclname))
 
     # We don't care what's inside the MFBT and MOZALLOC files, but because they
     # are #included from JS files we have to add them to the inclusion graph.
-    for inclname in mfbt_inclnames | mozalloc_inclnames:
+    for inclname in non_js_inclnames:
         edges[inclname] = set()
 
     # Process all the JS files.
@@ -274,7 +279,7 @@ def check_style():
 
             # This script is run in js/src/, so prepend '../../' to get to the root of the Mozilla
             # source tree.
-            with open(os.path.join('../..', filename)) as f:
+            with open(os.path.join(repo.path, filename)) as f:
                 do_file(filename, inclname, file_kind, f, all_inclnames, included_h_inclnames)
 
         edges[inclname] = included_h_inclnames

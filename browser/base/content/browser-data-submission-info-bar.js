@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+const LOGGER_NAME = "Toolkit.Telemetry";
+const LOGGER_PREFIX = "DataNotificationInfoBar::";
+
 /**
  * Represents an info bar that shows a data submission notification.
  */
@@ -21,7 +24,7 @@ var gDataNotificationInfoBar = {
   get _log() {
     let Log = Cu.import("resource://gre/modules/Log.jsm", {}).Log;
     delete this._log;
-    return this._log = Log.repository.getLogger("Services.DataReporting.InfoBar");
+    return this._log = Log.repository.getLoggerWithMessagePrefix(LOGGER_NAME, LOGGER_PREFIX);
   },
 
   init: function() {
@@ -66,7 +69,7 @@ var gDataNotificationInfoBar = {
     }];
 
     this._log.info("Creating data reporting policy notification.");
-    let notification = this._notificationBox.appendNotification(
+    this._notificationBox.appendNotification(
       message,
       this._DATA_REPORTING_NOTIFICATION,
       null,
@@ -122,4 +125,3 @@ var gDataNotificationInfoBar = {
     Ci.nsISupportsWeakReference,
   ]),
 };
-

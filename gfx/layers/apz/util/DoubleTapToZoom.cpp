@@ -60,7 +60,7 @@ ElementFromPoint(const nsCOMPtr<nsIPresShell>& aShell,
 static bool
 ShouldZoomToElement(const nsCOMPtr<dom::Element>& aElement) {
   if (nsIFrame* frame = aElement->GetPrimaryFrame()) {
-    if (frame->GetDisplay() == NS_STYLE_DISPLAY_INLINE) {
+    if (frame->GetDisplay() == StyleDisplay::Inline) {
       return false;
     }
   }
@@ -68,47 +68,6 @@ ShouldZoomToElement(const nsCOMPtr<dom::Element>& aElement) {
     return false;
   }
   return true;
-}
-
-// Calculate the bounding rect of |aElement|, relative to the origin
-// of the scrolled content of |aRootScrollFrame|.
-// The implementation of this calculation is adapted from
-// Element::GetBoundingClientRect().
-//
-// Where the element is contained inside a scrollable subframe, the
-// bounding rect is clipped to the bounds of the subframe.
-static CSSRect
-GetBoundingContentRect(const nsCOMPtr<dom::Element>& aElement,
-                       const nsIScrollableFrame* aRootScrollFrame) {
-
-  CSSRect result;
-  if (nsIFrame* frame = aElement->GetPrimaryFrame()) {
-    nsIFrame* relativeTo = aRootScrollFrame->GetScrolledFrame();
-    result = CSSRect::FromAppUnits(
-        nsLayoutUtils::GetAllInFlowRectsUnion(
-            frame,
-            relativeTo,
-            nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS));
-
-    // If the element is contained in a scrollable frame that is not
-    // the root scroll frame, make sure to clip the result so that it is
-    // not larger than the containing scrollable frame's bounds.
-    nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetNearestScrollableFrame(frame);
-    if (scrollFrame && scrollFrame != aRootScrollFrame) {
-      nsIFrame* subFrame = do_QueryFrame(scrollFrame);
-      MOZ_ASSERT(subFrame);
-      // Get the bounds of the scroll frame in the same coordinate space
-      // as |result|.
-      CSSRect subFrameRect = CSSRect::FromAppUnits(
-          nsLayoutUtils::TransformFrameRectToAncestor(
-              subFrame,
-              subFrame->GetRectRelativeToSelf(),
-              relativeTo));
-
-      result = subFrameRect.Intersect(result);
-    }
-  }
-  return result;
 }
 
 static bool
@@ -164,7 +123,7 @@ CalculateRectToZoomTo(const nsCOMPtr<nsIDocument>& aRootContentDocument,
   FrameMetrics metrics = nsLayoutUtils::CalculateBasicFrameMetrics(rootScrollFrame);
   CSSRect compositedArea(metrics.GetScrollOffset(), metrics.CalculateCompositedSizeInCssPixels());
   const CSSCoord margin = 15;
-  CSSRect rect = GetBoundingContentRect(element, rootScrollFrame);
+  CSSRect rect = nsLayoutUtils::GetBoundingContentRect(element, rootScrollFrame);
 
   // If the element is taller than the visible area of the page scale
   // the height of the |rect| so that it has the same aspect ratio as

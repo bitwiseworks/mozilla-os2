@@ -52,7 +52,7 @@ add_task(function* test_removePages() {
   try {
     PlacesUtils.annotations.getPageAnnotation(pages[ANNO_INDEX], ANNO_NAME);
     do_throw("did not expire expire_never anno on a not bookmarked item");
-  } catch(ex) {}
+  } catch (ex) {}
 
   // Cleanup.
   PlacesUtils.bookmarks.removeFolderChildren(PlacesUtils.unfiledBookmarksFolderId);
@@ -61,18 +61,18 @@ add_task(function* test_removePages() {
 
 add_task(function* test_removePagesByTimeframe() {
   let visits = [];
-  let startDate = Date.now() * 1000;
+  let startDate = (Date.now() - 10000) * 1000;
   for (let i = 0; i < 10; i++) {
     visits.push({
       uri: NetUtil.newURI(TEST_URI.spec + i),
-      visitDate: startDate + i
+      visitDate: startDate + i * 1000
     });
   }
 
   yield PlacesTestUtils.addVisits(visits);
 
   // Delete all pages except the first and the last.
-  PlacesUtils.bhistory.removePagesByTimeframe(startDate + 1, startDate + 8);
+  PlacesUtils.bhistory.removePagesByTimeframe(startDate + 1000, startDate + 8000);
 
   // Check that we have removed the correct pages.
   for (let i = 0; i < 10; i++) {
@@ -81,7 +81,7 @@ add_task(function* test_removePagesByTimeframe() {
   }
 
   // Clear remaining items and check that all pages have been removed.
-  PlacesUtils.bhistory.removePagesByTimeframe(startDate, startDate + 9);
+  PlacesUtils.bhistory.removePagesByTimeframe(startDate, startDate + 9000);
   do_check_eq(0, PlacesUtils.history.hasHistoryEntries);
 });
 

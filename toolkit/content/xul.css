@@ -115,14 +115,6 @@ button[type="menu-button"] {
   -moz-binding: url("chrome://global/content/bindings/button.xml#menu-button");
 }
 
-%ifdef MOZ_WIDGET_GTK
-/********* detection of system setting to use icons in buttons ***********/
-button[label]:not([label=""]) > .button-box > .button-icon:not(:-moz-system-metric(images-in-buttons)),
-button[label]:not([label=""]) > .button-box > .box-inherit > .button-icon:not(:-moz-system-metric(images-in-buttons)) {
-  display: none;
-}
-%endif
-
 /********** toolbarbutton **********/
 
 toolbarbutton {
@@ -255,15 +247,16 @@ caption {
 titlebar,
 toolbar:not([nowindowdrag="true"]):not([customizing="true"]),
 statusbar:not([nowindowdrag="true"]),
+%endif
 windowdragbox {
   -moz-window-dragging: drag;
 }
 
 /* The list below is non-comprehensive and will probably need some tweaking. */
+toolbaritem,
 toolbarbutton,
 button,
 textbox,
-searchbar,
 tab,
 radio,
 splitter,
@@ -271,7 +264,6 @@ scale,
 menulist {
   -moz-window-dragging: no-drag;
 }
-%endif
 
 /******* toolbar *******/
 
@@ -395,18 +387,6 @@ menucaption {
 .menu-text {
   -moz-box-flex: 1;
 }
-
-%ifdef MOZ_WIDGET_GTK
-/********* detection of system setting to use icons in menus ***********/
-@media not all and (-moz-images-in-menus) {
-  .menu-iconic-left {
-    visibility: hidden;
-  }
-  :-moz-any(menuitem[type], .menuitem-with-favicon) > .menu-iconic-left {
-    visibility: visible;
-  }
-}
-%endif
 
 /********* menuseparator ***********/
 
@@ -839,6 +819,25 @@ panel[type="autocomplete"] {
   -moz-binding: url("chrome://global/content/autocomplete.xml#history-dropmarker");
 }
 
+panel[type="autocomplete-richlistbox"] {
+  -moz-binding: url("chrome://global/content/bindings/autocomplete.xml#autocomplete-rich-result-popup");
+}
+
+.autocomplete-richlistbox {
+  -moz-binding: url("chrome://global/content/bindings/autocomplete.xml#autocomplete-richlistbox");
+  -moz-user-focus: ignore;
+}
+
+.autocomplete-richlistbox > scrollbox {
+  overflow-x: hidden !important;
+}
+
+.autocomplete-richlistitem {
+  -moz-binding: url("chrome://global/content/bindings/autocomplete.xml#autocomplete-richlistitem");
+  -moz-box-orient: vertical;
+  overflow: -moz-hidden-unscrollable;
+}
+
 %else
 
 textbox[type="autocomplete"] {
@@ -892,18 +891,7 @@ panel[type="autocomplete-richlistbox"] {
   -moz-binding: url("chrome://global/content/bindings/autocomplete.xml#history-dropmarker");
 }
 
-.ac-ellipsis-after {
-  visibility: hidden;
-}
-
-.ac-url-text[type~="action"],
-.ac-action-text:not([type~="action"]) {
-  visibility: collapse;
-}
-
 %endif
-
-
 
 /* the C++ implementation of widgets is too eager to make popups visible.
    this causes problems (bug 120155 and others), thus this workaround: */

@@ -10,13 +10,17 @@
 </head>
 <body>
 
-<script type="application/javascript;version=1.8">
+<script type="text/javascript">
 "use strict";
 
-function backgroundScript() {
+function background() {
   browser.runtime.onConnect.addListener(port => {
     browser.test.assertEq(port.name, "ernie", "port name correct");
     port.onDisconnect.addListener(() => {
+      browser.test.assertEq(null, port.error, "The port is implicitly closed without errors when the other context unloads");
+      // Closing an already-disconnected port is a no-op.
+      port.disconnect();
+      port.disconnect();
       browser.test.sendMessage("disconnected");
     });
     browser.test.sendMessage("connected");
@@ -28,25 +32,24 @@ function contentScript() {
 }
 
 let extensionData = {
-  background: "(" + backgroundScript.toString() + ")()",
+  background,
   manifest: {
     "permissions": ["tabs"],
     "content_scripts": [{
       "matches": ["http://mochi.test/*/file_sample.html"],
       "js": ["content_script.js"],
-      "run_at": "document_start"
-    }]
+      "run_at": "document_idle",
+    }],
   },
 
   files: {
-    "content_script.js": "(" + contentScript.toString() + ")()",
+    "content_script.js": contentScript,
   },
 };
 
 add_task(function* test_contentscript() {
   let extension = ExtensionTestUtils.loadExtension(extensionData);
   yield extension.startup();
-  info("extension loaded");
 
   let win = window.open("file_sample.html");
   yield Promise.all([waitForLoad(win), extension.awaitMessage("connected")]);
@@ -60,7 +63,7 @@ add_task(function* test_contentscript() {
 
   // Add an "unload" listener so that we don't put the window in the
   // bfcache. This way it gets destroyed immediately upon navigation.
-  win.addEventListener("unload", function() {});
+  win.addEventListener("unload", function() {});  // eslint-disable-line mozilla/balanced-listeners
 
   win.location = "http://example.com";
   yield extension.awaitMessage("disconnected");

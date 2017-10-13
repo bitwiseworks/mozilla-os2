@@ -6,6 +6,8 @@
 #ifndef MOZILLA_GFX_BASEMARGIN_H_
 #define MOZILLA_GFX_BASEMARGIN_H_
 
+#include <ostream>
+
 #include "Types.h"
 
 namespace mozilla {
@@ -21,10 +23,10 @@ struct Sides final {
     mBits = aSideBits;
   }
   bool IsEmpty() const { return mBits == 0; }
-  bool Top()     const { return mBits & eSideBitsTop; }
-  bool Right()   const { return mBits & eSideBitsRight; }
-  bool Bottom()  const { return mBits & eSideBitsBottom; }
-  bool Left()    const { return mBits & eSideBitsLeft; }
+  bool Top()     const { return (mBits & eSideBitsTop) != 0; }
+  bool Right()   const { return (mBits & eSideBitsRight) != 0; }
+  bool Bottom()  const { return (mBits & eSideBitsBottom) != 0; }
+  bool Left()    const { return (mBits & eSideBitsLeft) != 0; }
   bool Contains(SideBits aSideBits) const
   {
     MOZ_ASSERT((aSideBits & ~eSideBitsAll) == 0, "illegal side bits");
@@ -135,6 +137,12 @@ struct BaseMargin {
     bottom += aMargin.bottom;
     left += aMargin.left;
     return *static_cast<Sub*>(this);
+  }
+
+  friend std::ostream& operator<<(std::ostream& aStream,
+      const BaseMargin& aMargin) {
+    return aStream << '(' << aMargin.top << ',' << aMargin.right << ','
+                  << aMargin.bottom << ',' << aMargin.left << ')';
   }
 };
 

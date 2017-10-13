@@ -10,6 +10,7 @@
 #include "nsGtkUtils.h"
 #include "nsIWidget.h"
 #include "WidgetUtils.h"
+#include "nsPIDOMWindow.h"
 
 NS_IMPL_ISUPPORTS(nsColorPicker, nsIColorPicker)
 
@@ -57,10 +58,11 @@ GtkColorSelection* nsColorPicker::WidgetGetColorSelection(GtkWidget* widget)
 }
 #endif
 
-NS_IMETHODIMP nsColorPicker::Init(nsIDOMWindow *parent,
+NS_IMETHODIMP nsColorPicker::Init(mozIDOMWindowProxy *aParent,
                                   const nsAString& title,
                                   const nsAString& initialColor)
 {
+  auto* parent = nsPIDOMWindowOuter::From(aParent);
   mParentWidget = mozilla::widget::WidgetUtils::DOMWindowToWidget(parent);
   mTitle = title;
   mInitialColor = initialColor;
@@ -79,7 +81,7 @@ NS_IMETHODIMP nsColorPicker::Open(nsIColorPickerShownCallback *aColorPickerShown
 
   const nsAString& withoutHash  = StringTail(mInitialColor, 6);
   nscolor color;
-  if (!NS_HexToRGB(withoutHash, &color)) {
+  if (!NS_HexToRGBA(withoutHash, nsHexColorType::NoAlpha, &color)) {
     return NS_ERROR_FAILURE;
   }
 

@@ -4,8 +4,7 @@
 
 <!-- Sync panel -->
 
-<preferences id="syncEnginePrefs" hidden="true" data-category="paneSync"
-             onchange="gSyncPane.onPreferenceChanged();">
+<preferences id="syncEnginePrefs" hidden="true" data-category="paneSync">
   <preference id="engine.addons"
               name="services.sync.engine.addons"
               type="bool"/>
@@ -36,21 +35,8 @@
       hidden="true"
       data-category="paneSync">
   <label class="header-name" flex="1">&paneSync.title;</label>
-  <button class="help-button"
-          aria-label="&helpButton.label;"/>
+  <html:a class="help-button text-link" target="_blank" aria-label="&helpButton.label;"></html:a>
 </hbox>
-
-<vbox id="syncStatusMessage-container" data-category="paneSync" hidden="true">
-  <hbox id="syncStatusMessage">
-    <vbox id="syncStatusMessageWrapper">
-      <label id="syncStatusMessageTitle"></label>
-      <description id="syncStatusMessageDescription"></description>
-    </vbox>
-    <vbox>
-      <button id="syncStatusMessageClose" class="close-icon"/>
-    </vbox>
-  </hbox>
-</vbox>
 
 <deck id="weavePrefsDeck" data-category="paneSync" hidden="true">
   <!-- These panels are for the "legacy" sync provider -->
@@ -146,8 +132,7 @@
         </columns>
         <rows>
           <row align="center">
-            <label accesskey="&syncDeviceName.accesskey;"
-                   control="syncComputerName">
+            <label control="syncComputerName">
               &syncDeviceName.label;
             </label>
             <textbox id="syncComputerName"/>
@@ -199,9 +184,9 @@
               </vbox>
               <vbox flex="1">
                 <label id="signedOutAccountBoxTitle">&signedOut.accountBox.title;</label>
-                <hbox class="fxaAccountBoxButtons" align="center">
-                  <button id="noFxaSignUp">&signedOut.accountBox.create;</button>
-                  <button id="noFxaSignIn">&signedOut.accountBox.signin;</button>
+                <hbox class="fxaAccountBoxButtons">
+                  <button id="noFxaSignUp" label="&signedOut.accountBox.create;" accesskey="&signedOut.accountBox.create.accesskey;"></button>
+                  <button id="noFxaSignIn" label="&signedOut.accountBox.signin;" accesskey="&signedOut.accountBox.signin.accesskey;"></button>
                 </hbox>
               </vbox>
             </hbox>
@@ -213,15 +198,15 @@
       </vbox>
     </hbox>
     <label class="fxaMobilePromo">
-        &mobilePromo2.start;<!-- We put these comments to avoid inserting white spaces
+        &mobilePromo3.start;<!-- We put these comments to avoid inserting white spaces
         --><label id="fxaMobilePromo-android"
                   class="androidLink text-link"><!--
-        -->&mobilePromo2.androidLink;</label><!--
-        -->&mobilePromo2.iOSBefore;<!--
+        -->&mobilePromo3.androidLink;</label><!--
+        -->&mobilePromo3.iOSBefore;<!--
         --><label id="fxaMobilePromo-ios"
                   class="iOSLink text-link"><!--
-        -->&mobilePromo2.iOSLink;</label><!--
-        -->&mobilePromo2.end;
+        -->&mobilePromo3.iOSLink;</label><!--
+        -->&mobilePromo3.end;
     </label>
   </vbox>
 
@@ -234,17 +219,22 @@
 
             <!-- logged in and verified and all is good -->
             <hbox id="fxaLoginVerified" class="fxaAccountBox">
-              <vbox>
-                <image id="fxaProfileImage"
-                    onclick="gSyncPane.openChangeProfileImage();" hidden="true"
-                    tooltiptext="&profilePicture.tooltip;" class="actionable"/>
+              <vbox align="center" pack="center">
+                <image id="fxaProfileImage" class="actionable"
+                    role="button"
+                    onclick="gSyncPane.openChangeProfileImage(event);" hidden="true"
+                    onkeypress="gSyncPane.openChangeProfileImage(event);"
+                    tooltiptext="&profilePicture.tooltip;"/>
               </vbox>
-              <vbox flex="1">
-                <label id="fxaEmailAddress1"/>
+              <vbox flex="1" pack="center">
                 <label id="fxaDisplayName" hidden="true"/>
-                <hbox class="fxaAccountBoxButtons" align="center">
-                  <button id="fxaUnlinkButton">&disconnect.label;</button>
-                  <label id="verifiedManage" class="text-link">&verifiedManage.label;</label>
+                <label id="fxaEmailAddress1"/>
+                <hbox class="fxaAccountBoxButtons">
+                  <button id="fxaUnlinkButton" label="&disconnect.label;" accesskey="&disconnect.accesskey;"/>
+                  <html:a id="verifiedManage" target="_blank"
+                         accesskey="&verifiedManage.accesskey;"
+                         onkeypress="gSyncPane.openManageFirefoxAccount(event);"><!--
+                  -->&verifiedManage.label;</html:a>
                 </hbox>
               </vbox>
             </hbox>
@@ -263,9 +253,9 @@
                     &signedInUnverified.aftername.label;
                   </description>
                 </hbox>
-                <hbox class="fxaAccountBoxButtons" align="center">
-                  <button id="verifyFxaAccount">&verify.label;</button>
-                  <button id="unverifiedUnlinkFxaAccount">&forget.label;</button>
+                <hbox class="fxaAccountBoxButtons">
+                  <button id="verifyFxaAccount" accesskey="&verify.accesskey;">&verify.label;</button>
+                  <button id="unverifiedUnlinkFxaAccount" accesskey="&forget.accesskey;">&forget.label;</button>
                 </hbox>
               </vbox>
             </hbox>
@@ -284,9 +274,9 @@
                     &signedInLoginFailure.aftername.label;
                   </description>
                 </hbox>
-                <hbox class="fxaAccountBoxButtons" align="center">
-                  <button id="rejectReSignIn">&signIn.label;</button>
-                  <button id="rejectUnlinkFxaAccount">&forget.label;</button>
+                <hbox class="fxaAccountBoxButtons">
+                  <button id="rejectReSignIn" accessky="&signIn.accesskey;">&signIn.label;</button>
+                  <button id="rejectUnlinkFxaAccount" accesskey="&forget.accesskey;">&forget.label;</button>
                 </hbox>
               </vbox>
             </hbox>
@@ -325,11 +315,9 @@
         <image class="fxaSyncIllustration"/>
       </vbox>
     </hbox>
-    <spacer class="separator"/>
     <groupbox>
       <caption>
-        <label accesskey="&syncDeviceName.accesskey;"
-               control="fxaSyncComputerName">
+        <label control="fxaSyncComputerName">
           &fxaSyncDeviceName.label;
         </label>
       </caption>
@@ -337,28 +325,28 @@
         <textbox id="fxaSyncComputerName" disabled="true"/>
         <hbox>
           <button id="fxaChangeDeviceName"
-                  label="&changeSyncDeviceName.label;"/>
+                  label="&changeSyncDeviceName.label;"
+                  accesskey="&changeSyncDeviceName.accesskey;"/>
           <button id="fxaCancelChangeDeviceName"
                   label="&cancelChangeSyncDeviceName.label;"
+                  accesskey="&cancelChangeSyncDeviceName.accesskey;"
                   hidden="true"/>
           <button id="fxaSaveChangeDeviceName"
                   label="&saveChangeSyncDeviceName.label;"
+                  accesskey="&saveChangeSyncDeviceName.accesskey;"
                   hidden="true"/>
         </hbox>
       </hbox>
     </groupbox>
     <label class="fxaMobilePromo">
-        &mobilePromo2.start;<!-- We put these comments to avoid inserting white spaces
-        --><label class="androidLink text-link"
-                  href="https://www.mozilla.org/firefox/android/?utm_source=firefox-browser&amp;utm_medium=firefox-browser&amp;utm_campaign=sync-preferences"><!--
-        -->&mobilePromo2.androidLink;</label><!--
-        -->&mobilePromo2.iOSBefore;<!--
-        --><label class="iOSLink text-link"
-                  href="https://www.mozilla.org/firefox/ios/?utm_source=firefox-browser&amp;utm_medium=firefox-browser&amp;utm_campaign=sync-preferences"><!--
-        -->&mobilePromo2.iOSLink;</label><!--
-        -->&mobilePromo2.end;
+        &mobilePromo3.start;<!-- We put these comments to avoid inserting white spaces
+        --><label class="androidLink text-link" id="fxaMobilePromo-android-hasFxaAccount"><!--
+        -->&mobilePromo3.androidLink;</label><!--
+        -->&mobilePromo3.iOSBefore;<!--
+        --><label class="iOSLink text-link" id="fxaMobilePromo-ios-hasFxaAccount"><!--
+        -->&mobilePromo3.iOSLink;</label><!--
+        -->&mobilePromo3.end;
     </label>
-    <spacer class="separator" flex="1"/>
     <vbox id="tosPP-small" align="start">
       <label id="tosPP-small-ToS" class="text-link">
         &prefs.tosLink.label;

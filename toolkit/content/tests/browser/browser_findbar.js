@@ -27,7 +27,7 @@ add_task(function* test_hotkey_event_propagation() {
   for (let key of HOTKEYS) {
     is(findbar.hidden, true, "Findbar is hidden now.");
     gBrowser.selectedTab = tab;
-    yield promiseFocus();
+    yield SimpleTest.promiseFocus(gBrowser.selectedBrowser);
     yield BrowserTestUtils.sendChar(key, browser);
     is(findbar.hidden, false, "Findbar should not be hidden.");
     yield closeFindbarAndWait(findbar);
@@ -49,7 +49,7 @@ add_task(function* test_hotkey_event_propagation() {
   for (let key of HOTKEYS) {
     is(findbar.hidden, true, "Findbar is hidden now.");
     gBrowser.selectedTab = tab;
-    yield promiseFocus();
+    yield SimpleTest.promiseFocus(gBrowser.selectedBrowser);
     yield BrowserTestUtils.sendChar(key, browser);
     is(findbar.hidden, false, "Findbar should not be hidden.");
     yield closeFindbarAndWait(findbar);
@@ -119,11 +119,11 @@ add_task(function* test_tabwise_case_sensitive() {
  * process into the parent process or the other way around.
  * This test ensures that findbar properly handles such a change.
  */
-add_task(function * test_reinitialization_at_remoteness_change() {
+add_task(function* test_reinitialization_at_remoteness_change() {
   // This test only makes sence in e10s evironment.
   if (!gMultiProcessBrowser) {
     info("Skipping this test because of non-e10s environment.");
-    return true;
+    return;
   }
 
   info("Ensure findbar re-initialization at remoteness change.");
@@ -154,6 +154,45 @@ add_task(function * test_reinitialization_at_remoteness_change() {
 
   yield promiseFindFinished("s", false);
   ok(!findbar._findStatusDesc.textContent, "Findbar status should be empty");
+
+  yield BrowserTestUtils.removeTab(tab);
+});
+
+/**
+ * Ensure that the initial typed characters aren't lost immediately after
+ * opening the find bar.
+ */
+add_task(function* () {
+  // This test only makes sence in e10s evironment.
+  if (!gMultiProcessBrowser) {
+    info("Skipping this test because of non-e10s environment.");
+    return;
+  }
+
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_PAGE_URI);
+  let browser = tab.linkedBrowser;
+
+  ok(!gFindBarInitialized, "findbar isn't initialized yet");
+
+  let findBar = gFindBar;
+  let initialValue = findBar._findField.value;
+
+  EventUtils.synthesizeKey("f", { accelKey: true }, window);
+
+  let promises = [
+    BrowserTestUtils.sendChar("a", browser),
+    BrowserTestUtils.sendChar("b", browser),
+    BrowserTestUtils.sendChar("c", browser)
+  ];
+
+  isnot(document.activeElement, findBar._findField.inputField,
+    "findbar is not yet focused");
+  is(findBar._findField.value, initialValue, "still has initial find query");
+
+  yield Promise.all(promises);
+  is(document.activeElement, findBar._findField.inputField,
+    "findbar is now focused");
+  is(findBar._findField.value, "abc", "abc fully entered as find query");
 
   yield BrowserTestUtils.removeTab(tab);
 });
@@ -196,17 +235,6 @@ function promiseFindFinished(searchText, highlightOn) {
   });
 
   return deferred.promise;
-}
-
-/**
- * A promise-like wrapper for the waitForFocus helper.
- */
-function promiseFocus() {
-  return new Promise((resolve) => {
-    waitForFocus(function(){
-      resolve();
-    }, content);
-  });
 }
 
 function promiseRemotenessChange(tab, shouldBeRemote) {

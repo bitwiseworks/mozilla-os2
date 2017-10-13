@@ -12,7 +12,6 @@
 #include "mozilla/dom/WebSocketBinding.h" // for BinaryType
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/ErrorResult.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupports.h"
@@ -24,6 +23,7 @@
 #define DEFAULT_WSS_SCHEME_PORT 443
 
 class nsIInputStream;
+class nsITransportProvider;
 
 namespace mozilla {
 namespace dom {
@@ -56,7 +56,7 @@ public:
   virtual void DisconnectFromOwner() override;
 
   // nsWrapperCache
-  nsPIDOMWindow* GetParentObject() { return GetOwner(); }
+  nsPIDOMWindowInner* GetParentObject() { return GetOwner(); }
 
   virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -81,6 +81,20 @@ public: // WebIDL interface:
                                                  const nsAString& aUrl,
                                                  const Sequence<nsString>& aProtocols,
                                                  ErrorResult& rv);
+
+  static already_AddRefed<WebSocket> CreateServerWebSocket(const GlobalObject& aGlobal,
+                                                           const nsAString& aUrl,
+                                                           const Sequence<nsString>& aProtocols,
+                                                           nsITransportProvider* aTransportProvider,
+                                                           const nsAString& aNegotiatedExtensions,
+                                                           ErrorResult& rv);
+
+  static already_AddRefed<WebSocket> ConstructorCommon(const GlobalObject& aGlobal,
+                                                       const nsAString& aUrl,
+                                                       const Sequence<nsString>& aProtocols,
+                                                       nsITransportProvider* aTransportProvider,
+                                                       const nsACString& aNegotiatedExtensions,
+                                                       ErrorResult& rv);
 
   // webIDL: readonly attribute DOMString url
   void GetUrl(nsAString& aResult);
@@ -128,8 +142,8 @@ public: // WebIDL interface:
   void Send(const ArrayBufferView& aData,
             ErrorResult& aRv);
 
-private: // constructor && distructor
-  explicit WebSocket(nsPIDOMWindow* aOwnerWindow);
+private: // constructor && destructor
+  explicit WebSocket(nsPIDOMWindowInner* aOwnerWindow);
   virtual ~WebSocket();
 
   void SetReadyState(uint16_t aReadyState);
@@ -137,9 +151,6 @@ private: // constructor && distructor
   // These methods actually do the dispatch for various events.
   nsresult CreateAndDispatchSimpleEvent(const nsAString& aName);
   nsresult CreateAndDispatchMessageEvent(const nsACString& aData,
-                                         bool aIsBinary);
-  nsresult CreateAndDispatchMessageEvent(JSContext* aCx,
-                                         const nsACString& aData,
                                          bool aIsBinary);
   nsresult CreateAndDispatchCloseEvent(bool aWasClean,
                                        uint16_t aCode,

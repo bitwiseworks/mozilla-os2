@@ -11,6 +11,8 @@ function test() {
   // Bug 992270: Ignore uncaught about:home exceptions (related to snippets from IndexedDB)
   ignoreAllUncaughtExceptions(true);
 
+  let previouslySelectedEngine = Services.search.currentEngine;
+
   function replaceUrl(base) {
     return base;
   }
@@ -21,7 +23,6 @@ function test() {
     let engine = Services.search.getEngineByName(engine_name);
     ok(engine, engine_name + " is installed");
 
-    let previouslySelectedEngine = Services.search.currentEngine;
     Services.search.currentEngine = engine;
 
     // load about:home, but remove the listener first so it doesn't
@@ -75,13 +76,6 @@ function test() {
       }
     },
     {
-      name: "Search with eBay from about:home",
-      searchURL: replaceUrl("http://rover.ebay.com/rover/1/711-47294-18009-3/4?mfe=search&mpre=http://www.ebay.com/sch/i.html?_nkw=foo"),
-      run: function () {
-        verify_about_home_search("eBay");
-      }
-    },
-    {
       name: "Search with Google from about:home",
       searchURL: replaceUrl("https://www.google.com/search?q=foo&ie=utf-8&oe=utf-8"),
       run: function () {
@@ -119,6 +113,9 @@ function test() {
       if (!(flags & docStart) || !webProgress.isTopLevel)
         return;
 
+      if (req.originalURI.spec == "about:blank")
+        return;
+
       info("received document start");
 
       ok(req instanceof Ci.nsIChannel, "req is a channel");
@@ -132,6 +129,7 @@ function test() {
   }
 
   registerCleanupFunction(function () {
+    Services.search.currentEngine = previouslySelectedEngine;
     gBrowser.removeProgressListener(listener);
     gBrowser.removeTab(tab);
     if (gMutationObserver)

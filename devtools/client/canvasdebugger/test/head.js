@@ -4,29 +4,23 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-
-// Disable logging for all the tests. Both the debugger server and frontend will
-// be affected by this pref.
-var gEnableLogging = Services.prefs.getBoolPref("devtools.debugger.log");
-Services.prefs.setBoolPref("devtools.debugger.log", false);
-
-var { generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
-var { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-var { gDevTools } = Cu.import("resource://devtools/client/framework/gDevTools.jsm", {});
+var { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 
+var Services = require("Services");
 var promise = require("promise");
+var { gDevTools } = require("devtools/client/framework/devtools");
 var { DebuggerClient } = require("devtools/shared/client/main");
 var { DebuggerServer } = require("devtools/server/main");
-var { CallWatcherFront } = require("devtools/server/actors/call-watcher");
-var { CanvasFront } = require("devtools/server/actors/canvas");
+var { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
+var { CanvasFront } = require("devtools/shared/fronts/canvas");
 var { setTimeout } = require("sdk/timers");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var TiltGL = require("devtools/client/tilt/tilt-gl");
+var flags = require("devtools/shared/flags");
 var { TargetFactory } = require("devtools/client/framework/target");
 var { Toolbox } = require("devtools/client/framework/toolbox");
-var mm = null
+var { isWebGLSupported } = require("devtools/client/shared/webgl-utils");
+var mm = null;
 
 const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js";
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/canvasdebugger/test/";
@@ -39,18 +33,25 @@ const SIMPLE_CANVAS_TRANSPARENT_URL = EXAMPLE_URL + "doc_simple-canvas-transpare
 const SIMPLE_CANVAS_DEEP_STACK_URL = EXAMPLE_URL + "doc_simple-canvas-deep-stack.html";
 const WEBGL_ENUM_URL = EXAMPLE_URL + "doc_webgl-enum.html";
 const WEBGL_BINDINGS_URL = EXAMPLE_URL + "doc_webgl-bindings.html";
+const WEBGL_DRAW_ARRAYS = EXAMPLE_URL + "doc_webgl-drawArrays.html";
+const WEBGL_DRAW_ELEMENTS = EXAMPLE_URL + "doc_webgl-drawElements.html";
 const RAF_BEGIN_URL = EXAMPLE_URL + "doc_raf-begin.html";
+
+// Disable logging for all the tests. Both the debugger server and frontend will
+// be affected by this pref.
+var gEnableLogging = Services.prefs.getBoolPref("devtools.debugger.log");
+Services.prefs.setBoolPref("devtools.debugger.log", false);
 
 // All tests are asynchronous.
 waitForExplicitFinish();
 
 var gToolEnabled = Services.prefs.getBoolPref("devtools.canvasdebugger.enabled");
 
-DevToolsUtils.testing = true;
+flags.testing = true;
 
 registerCleanupFunction(() => {
   info("finish() was called, cleaning up...");
-  DevToolsUtils.testing = false;
+  flags.testing = false;
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setBoolPref("devtools.canvasdebugger.enabled", gToolEnabled);
 
@@ -64,7 +65,7 @@ registerCleanupFunction(() => {
  * Call manually in tests that use frame script utils after initializing
  * the shader editor. Call after init but before navigating to different pages.
  */
-function loadFrameScripts () {
+function loadFrameScripts() {
   mm = gBrowser.selectedBrowser.messageManager;
   mm.loadFrameScript(FRAME_SCRIPT_UTILS_URL, false);
 }
@@ -80,11 +81,11 @@ function addTab(aUrl, aWindow) {
   let tab = targetBrowser.selectedTab = targetBrowser.addTab(aUrl);
   let linkedBrowser = tab.linkedBrowser;
 
-  linkedBrowser.addEventListener("load", function onLoad() {
-    linkedBrowser.removeEventListener("load", onLoad, true);
-    info("Tab added and finished loading: " + aUrl);
-    deferred.resolve(tab);
-  }, true);
+  BrowserTestUtils.browserLoaded(linkedBrowser)
+    .then(function () {
+      info("Tab added and finished loading: " + aUrl);
+      deferred.resolve(tab);
+    });
 
   return deferred.promise;
 }
@@ -139,10 +140,7 @@ function isTestingSupported() {
     return true;
   }
 
-  let supported =
-    !TiltGL.isWebGLForceEnabled() &&
-     TiltGL.isWebGLSupported() &&
-     TiltGL.create3DContext(createCanvas());
+  let supported = isWebGLSupported(document);
 
   info("This test requires WebGL support.");
   info("Apparently, WebGL is" + (supported ? "" : " not") + " supported.");
@@ -161,6 +159,7 @@ function once(aTarget, aEventName, aUseCapture = false) {
   ]) {
     if ((add in aTarget) && (remove in aTarget)) {
       aTarget[add](aEventName, function onEvent(...aArgs) {
+        info("Got event: '" + aEventName + "' on " + aTarget + ".");
         aTarget[remove](aEventName, onEvent, aUseCapture);
         deferred.resolve(...aArgs);
       }, aUseCapture);
@@ -203,7 +202,7 @@ function initCallWatcherBackend(aUrl) {
   info("Initializing a call watcher front.");
   initServer();
 
-  return Task.spawn(function*() {
+  return Task.spawn(function* () {
     let tab = yield addTab(aUrl);
     let target = TargetFactory.forTab(tab);
 
@@ -218,7 +217,7 @@ function initCanvasDebuggerBackend(aUrl) {
   info("Initializing a canvas debugger front.");
   initServer();
 
-  return Task.spawn(function*() {
+  return Task.spawn(function* () {
     let tab = yield addTab(aUrl);
     let target = TargetFactory.forTab(tab);
 
@@ -232,7 +231,7 @@ function initCanvasDebuggerBackend(aUrl) {
 function initCanvasDebuggerFrontend(aUrl) {
   info("Initializing a canvas debugger pane.");
 
-  return Task.spawn(function*() {
+  return Task.spawn(function* () {
     let tab = yield addTab(aUrl);
     let target = TargetFactory.forTab(tab);
 
@@ -258,7 +257,7 @@ function teardown({target}) {
  * Takes a string `script` and evaluates it directly in the content
  * in potentially a different process.
  */
-function evalInDebuggee (script) {
+function evalInDebuggee(script) {
   let deferred = promise.defer();
 
   if (!mm) {
@@ -269,7 +268,7 @@ function evalInDebuggee (script) {
   mm.sendAsyncMessage("devtools:test:eval", { script: script, id: id });
   mm.addMessageListener("devtools:test:eval:response", handler);
 
-  function handler ({ data }) {
+  function handler({ data }) {
     if (id !== data.id) {
       return;
     }
@@ -294,12 +293,12 @@ function getSourceActor(aSources, aURL) {
  * @param number interval [optional]
  *        How often the predicate is invoked, in milliseconds.
  */
-function *waitUntil (predicate, interval = 10) {
+function* waitUntil(predicate, interval = 10) {
   if (yield predicate()) {
     return Promise.resolve(true);
   }
   let deferred = Promise.defer();
-  setTimeout(function() {
+  setTimeout(function () {
     waitUntil(predicate).then(() => deferred.resolve(true));
   }, interval);
   return deferred.promise;

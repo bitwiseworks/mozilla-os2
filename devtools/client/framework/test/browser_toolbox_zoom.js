@@ -1,11 +1,14 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var modifiers = {
-  accelKey: true
-};
+"use strict";
 
 var toolbox;
+
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
 function test() {
   addTab("about:blank").then(openToolbox);
@@ -23,40 +26,42 @@ function openToolbox() {
 function testZoom() {
   info("testing zoom keys");
 
-  testZoomLevel("in", 2, 1.2);
-  testZoomLevel("out", 3, 0.9);
-  testZoomLevel("reset", 1, 1);
+  testZoomLevel("In", 2, 1.2);
+  testZoomLevel("Out", 3, 0.9);
+  testZoomLevel("Reset", 1, 1);
 
   tidyUp();
 }
 
 function testZoomLevel(type, times, expected) {
-  sendZoomKey("toolbox-zoom-"+ type + "-key", times);
+  sendZoomKey("toolbox.zoom" + type + ".key", times);
 
   let zoom = getCurrentZoom(toolbox);
   is(zoom.toFixed(2), expected, "zoom level correct after zoom " + type);
 
-  is(toolbox.zoomValue.toFixed(2), expected,
+  let savedZoom = parseFloat(Services.prefs.getCharPref(
+    "devtools.toolbox.zoomValue"));
+  is(savedZoom.toFixed(2), expected,
      "saved zoom level is correct after zoom " + type);
 }
 
-function sendZoomKey(id, times) {
-  let key = toolbox.doc.getElementById(id).getAttribute("key");
+function sendZoomKey(shortcut, times) {
   for (let i = 0; i < times; i++) {
-    EventUtils.synthesizeKey(key, modifiers, toolbox.doc.defaultView);
+    synthesizeKeyShortcut(L10N.getStr(shortcut));
   }
 }
 
 function getCurrentZoom() {
-  var contViewer = toolbox.frame.docShell.contentViewer;
-  return contViewer.fullZoom;
+  let windowUtils = toolbox.win.QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils);
+  return windowUtils.fullZoom;
 }
 
 function tidyUp() {
-  toolbox.destroy().then(function() {
+  toolbox.destroy().then(function () {
     gBrowser.removeCurrentTab();
 
-    toolbox = modifiers = null;
+    toolbox = null;
     finish();
   });
 }

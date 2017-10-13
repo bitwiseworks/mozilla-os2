@@ -142,9 +142,9 @@ Could not accurately calculate the range attributes of an inline array creation.
 
 Arrays at this element access location have seen negative indexes.
 
-### TypedObjectNeutered
+### TypedObjectHasDetachedBuffer
 
-The typed object being accessed at this location may have been neutered (a neutered typed object is one where the underlying byte buffer has been removed or transferred to a worker).
+The storage for the typed object being accessed at this location might be a detached ArrayBuffer.  (This can happen if the typed object, or its underlying buffer as accessed using `TypedObject.storage(typedObject).buffer`, is transferred using the structured clone algorithm.)
 
 ### TypedObjectArrayRange
 
@@ -171,6 +171,22 @@ that it is a TypedArray.
 
 The observed type of the target of the property access doesn't guarantee
 that it is a String.
+
+### OperandNotString
+
+Optimization failed because of failing to speculate the operand is a string.
+
+### OperandNotNumber
+
+Optimization failed because of failing to speculate the operand is a number.
+
+### OperandNotStringOrNumber
+
+Optimization failed because of failing to speculate the operand is a string or a number.
+
+### OperandNotSimpleArith
+
+Optimization failed because of failing to speculate the operand is a simple arithmetic type. I.e. definitely not an object, string, symbol or internal magic type.
 
 ### StaticTypedArrayUint32
 
@@ -210,11 +226,6 @@ Optimization failed because SIMD JIT support was not enabled.
 
 The type observed as being retrieved from this property access did not
 match an optimizable type.
-
-### UnknownSimdProperty
-
-The property being accessed on the object is not one of the optimizable
-property names.
 
 ### HasCommonInliningPath
 
@@ -411,6 +422,11 @@ a scope chain object.
 
 An inline cache element which loads a bare variable name by calling a
 getter function on the global object.
+
+### ICNameStub_TypeOfNoProperty
+
+An inline cache element which loads undefined for the type
+of a missing property.
 
 ## Call Inlining Outcomes
 

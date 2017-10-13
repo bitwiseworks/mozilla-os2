@@ -10,8 +10,8 @@
  * device.
  */
 
-var protocol = require("devtools/server/protocol");
-var {method, Arg, Option, RetVal} = protocol;
+var protocol = require("devtools/shared/protocol");
+var {Arg, Option, RetVal} = protocol;
 var events = require("sdk/event/core");
 
 function simpleHello() {
@@ -22,9 +22,18 @@ function simpleHello() {
   };
 }
 
-var RootActor = protocol.ActorClass({
+const rootSpec = protocol.generateActorSpec({
   typeName: "root",
-  initialize: function(conn) {
+
+  methods: {
+    simpleReturn: {
+      response: { value: RetVal() },
+    }
+  }
+});
+
+var RootActor = protocol.ActorClassWithSpec(rootSpec, {
+  initialize: function (conn) {
     protocol.Actor.prototype.initialize.call(this, conn);
     // Root actor owns itself.
     this.manage(this);
@@ -34,15 +43,13 @@ var RootActor = protocol.ActorClass({
 
   sayHello: simpleHello,
 
-  simpleReturn: method(function() {
+  simpleReturn: function () {
     return this.sequence++;
-  }, {
-    response: { value: RetVal() },
-  })
+  }
 });
 
-var RootFront = protocol.FrontClass(RootActor, {
-  initialize: function(client) {
+var RootFront = protocol.FrontClassWithSpec(rootSpec, {
+  initialize: function (client) {
     this.actorID = "root";
     protocol.Front.prototype.initialize.call(this, client);
     // Root owns itself.
@@ -63,7 +70,7 @@ function run_test() {
   let client = new DebuggerClient(trace);
   let rootClient;
 
-  client.connect(function onConnect() {
+  client.connect().then(function onConnect() {
     rootClient = RootFront(client);
 
     rootClient.simpleReturn().then(() => {
@@ -81,10 +88,10 @@ function run_test() {
     }, () => {
       ok(false, "Request failed unexpectedly");
     }).then(() => {
-      client.close(() => {
+      client.close().then(() => {
         do_test_finished();
       });
-    })
+    });
   });
 
   do_test_pending();

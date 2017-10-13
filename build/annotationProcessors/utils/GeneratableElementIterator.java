@@ -27,8 +27,10 @@ public class GeneratableElementIterator implements Iterator<AnnotatableEntity> {
     private final Member[] mObjects;
     private AnnotatableEntity mNextReturnValue;
     private int mElementIndex;
+    private AnnotationInfo mClassInfo;
 
     private boolean mIterateEveryEntry;
+    private boolean mSkipCurrentEntry;
 
     public GeneratableElementIterator(ClassWithOptions annotatedClass) {
         mClass = annotatedClass;
@@ -55,11 +57,15 @@ public class GeneratableElementIterator implements Iterator<AnnotatableEntity> {
 
         // Check for "Wrap ALL the things" flag.
         for (Annotation annotation : aClass.getDeclaredAnnotations()) {
-            final String annotationTypeName = annotation.annotationType().getName();
-            if (annotationTypeName.equals("org.mozilla.gecko.annotation.WrapForJNI")) {
+            mClassInfo = buildAnnotationInfo(aClass, annotation);
+            if (mClassInfo != null) {
                 mIterateEveryEntry = true;
                 break;
             }
+        }
+
+        if (mSkipCurrentEntry) {
+            throw new IllegalArgumentException("Cannot skip entire class");
         }
 
         findNextValue();
@@ -115,6 +121,97 @@ public class GeneratableElementIterator implements Iterator<AnnotatableEntity> {
         return ret;
     }
 
+    private static <T extends Enum<T>> T getEnumValue(Class<T> type, String name)
+            throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
+        try {
+            return Enum.valueOf(type, name.toUpperCase());
+
+        } catch (IllegalArgumentException e) {
+            Object[] values = (Object[]) type.getDeclaredMethod("values").invoke(null);
+            StringBuilder names = new StringBuilder();
+
+            for (int i = 0; i < values.length; i++) {
+                if (i != 0) {
+                    names.append(", ");
+                }
+                names.append(values[i].toString().toLowerCase());
+            }
+
+            System.err.println("***");
+            System.err.println("*** Invalid value \"" + name + "\" for " + type.getSimpleName());
+            System.err.println("*** Specify one of " + names.toString());
+            System.err.println("***");
+            e.printStackTrace(System.err);
+            System.exit(6);
+            return null;
+        }
+    }
+
+    private AnnotationInfo buildAnnotationInfo(AnnotatedElement element, Annotation annotation) {
+        Class<? extends Annotation> annotationType = annotation.annotationType();
+        final String annotationTypeName = annotationType.getName();
+        if (!annotationTypeName.equals("org.mozilla.gecko.annotation.WrapForJNI")) {
+            return null;
+        }
+
+        String stubName = null;
+        AnnotationInfo.ExceptionMode exceptionMode = null;
+        AnnotationInfo.CallingThread callingThread = null;
+        AnnotationInfo.DispatchTarget dispatchTarget = null;
+
+        try {
+            final Method skipMethod = annotationType.getDeclaredMethod("skip");
+            skipMethod.setAccessible(true);
+            if ((Boolean) skipMethod.invoke(annotation)) {
+                mSkipCurrentEntry = true;
+                return null;
+            }
+
+            // Determine the explicitly-given name of the stub to generate, if any.
+            final Method stubNameMethod = annotationType.getDeclaredMethod("stubName");
+            stubNameMethod.setAccessible(true);
+            stubName = (String) stubNameMethod.invoke(annotation);
+
+            final Method exceptionModeMethod = annotationType.getDeclaredMethod("exceptionMode");
+            exceptionModeMethod.setAccessible(true);
+            exceptionMode = getEnumValue(
+                    AnnotationInfo.ExceptionMode.class,
+                    (String) exceptionModeMethod.invoke(annotation));
+
+            final Method calledFromMethod = annotationType.getDeclaredMethod("calledFrom");
+            calledFromMethod.setAccessible(true);
+            callingThread = getEnumValue(
+                    AnnotationInfo.CallingThread.class,
+                    (String) calledFromMethod.invoke(annotation));
+
+            final Method dispatchToMethod = annotationType.getDeclaredMethod("dispatchTo");
+            dispatchToMethod.setAccessible(true);
+            dispatchTarget = getEnumValue(
+                    AnnotationInfo.DispatchTarget.class,
+                    (String) dispatchToMethod.invoke(annotation));
+
+        } catch (NoSuchMethodException e) {
+            System.err.println("Unable to find expected field on WrapForJNI annotation. Did the signature change?");
+            e.printStackTrace(System.err);
+            System.exit(3);
+        } catch (IllegalAccessException e) {
+            System.err.println("IllegalAccessException reading fields on WrapForJNI annotation. Seems the semantics of Reflection have changed...");
+            e.printStackTrace(System.err);
+            System.exit(4);
+        } catch (InvocationTargetException e) {
+            System.err.println("InvocationTargetException reading fields on WrapForJNI annotation. This really shouldn't happen.");
+            e.printStackTrace(System.err);
+            System.exit(5);
+        }
+
+        // If the method name was not explicitly given in the annotation generate one...
+        if (stubName.isEmpty()) {
+            stubName = Utils.getNativeName(element);
+        }
+
+        return new AnnotationInfo(stubName, exceptionMode, callingThread, dispatchTarget);
+    }
+
     /**
      * Find and cache the next appropriately annotated method, plus the annotation parameter, if
      * one exists. Otherwise cache null, so hasNext returns false.
@@ -124,65 +221,16 @@ public class GeneratableElementIterator implements Iterator<AnnotatableEntity> {
             Member candidateElement = mObjects[mElementIndex];
             mElementIndex++;
             for (Annotation annotation : ((AnnotatedElement) candidateElement).getDeclaredAnnotations()) {
-                // WrappedJNIMethod has parameters. Use Reflection to obtain them.
-                Class<? extends Annotation> annotationType = annotation.annotationType();
-                final String annotationTypeName = annotationType.getName();
-                if (annotationTypeName.equals("org.mozilla.gecko.annotation.WrapForJNI")) {
-                    String stubName = null;
-                    boolean isMultithreadedStub = false;
-                    boolean noThrow = false;
-                    boolean narrowChars = false;
-                    boolean catchException = false;
-                    try {
-                        // Determine the explicitly-given name of the stub to generate, if any.
-                        final Method stubNameMethod = annotationType.getDeclaredMethod("stubName");
-                        stubNameMethod.setAccessible(true);
-                        stubName = (String) stubNameMethod.invoke(annotation);
-
-                        // Determine if the generated stub is to allow calls from multiple threads.
-                        final Method multithreadedStubMethod = annotationType.getDeclaredMethod("allowMultithread");
-                        multithreadedStubMethod.setAccessible(true);
-                        isMultithreadedStub = (Boolean) multithreadedStubMethod.invoke(annotation);
-
-                        // Determine if ignoring exceptions
-                        final Method noThrowMethod = annotationType.getDeclaredMethod("noThrow");
-                        noThrowMethod.setAccessible(true);
-                        noThrow = (Boolean) noThrowMethod.invoke(annotation);
-
-                        // Determine if strings should be wide or narrow
-                        final Method narrowCharsMethod = annotationType.getDeclaredMethod("narrowChars");
-                        narrowCharsMethod.setAccessible(true);
-                        narrowChars = (Boolean) narrowCharsMethod.invoke(annotation);
-
-                        // Determine if we should catch exceptions
-                        final Method catchExceptionMethod = annotationType.getDeclaredMethod("catchException");
-                        catchExceptionMethod.setAccessible(true);
-                        catchException = (Boolean) catchExceptionMethod.invoke(annotation);
-
-                    } catch (NoSuchMethodException e) {
-                        System.err.println("Unable to find expected field on WrapForJNI annotation. Did the signature change?");
-                        e.printStackTrace(System.err);
-                        System.exit(3);
-                    } catch (IllegalAccessException e) {
-                        System.err.println("IllegalAccessException reading fields on WrapForJNI annotation. Seems the semantics of Reflection have changed...");
-                        e.printStackTrace(System.err);
-                        System.exit(4);
-                    } catch (InvocationTargetException e) {
-                        System.err.println("InvocationTargetException reading fields on WrapForJNI annotation. This really shouldn't happen.");
-                        e.printStackTrace(System.err);
-                        System.exit(5);
-                    }
-
-                    // If the method name was not explicitly given in the annotation generate one...
-                    if (stubName.isEmpty()) {
-                        stubName = Utils.getNativeName(candidateElement);
-                    }
-
-                    AnnotationInfo annotationInfo = new AnnotationInfo(
-                        stubName, isMultithreadedStub, noThrow, narrowChars, catchException);
-                    mNextReturnValue = new AnnotatableEntity(candidateElement, annotationInfo);
+                AnnotationInfo info = buildAnnotationInfo((AnnotatedElement)candidateElement, annotation);
+                if (info != null) {
+                    mNextReturnValue = new AnnotatableEntity(candidateElement, info);
                     return;
                 }
+            }
+
+            if (mSkipCurrentEntry) {
+                mSkipCurrentEntry = false;
+                continue;
             }
 
             // If no annotation found, we might be expected to generate anyway
@@ -190,10 +238,9 @@ public class GeneratableElementIterator implements Iterator<AnnotatableEntity> {
             if (mIterateEveryEntry) {
                 AnnotationInfo annotationInfo = new AnnotationInfo(
                     Utils.getNativeName(candidateElement),
-                    /* multithreaded */ true,
-                    /* noThrow */ false,
-                    /* narrowChars */ false,
-                    /* catchException */ false);
+                    mClassInfo.exceptionMode,
+                    mClassInfo.callingThread,
+                    mClassInfo.dispatchTarget);
                 mNextReturnValue = new AnnotatableEntity(candidateElement, annotationInfo);
                 return;
             }

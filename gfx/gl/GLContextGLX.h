@@ -9,6 +9,7 @@
 
 #include "GLContext.h"
 #include "GLXLibrary.h"
+#include "mozilla/X11Util.h"
 
 namespace mozilla {
 namespace gl {
@@ -18,7 +19,8 @@ class GLContextGLX : public GLContext
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextGLX, override)
     static already_AddRefed<GLContextGLX>
-    CreateGLContext(const SurfaceCaps& caps,
+    CreateGLContext(CreateContextFlags flags,
+                    const SurfaceCaps& caps,
                     GLContextGLX* shareContext,
                     bool isOffscreen,
                     Display* display,
@@ -27,6 +29,12 @@ public:
                     bool deleteDrawable,
                     gfxXlibSurface* pixmap = nullptr,
                     ContextProfile profile = ContextProfile::OpenGLCompatibility);
+
+    // Finds a GLXFBConfig compatible with the provided window.
+    static bool
+    FindFBConfigForWindow(Display* display, int screen, Window window,
+                          ScopedXFree<GLXFBConfig>* const out_scopedConfigArr,
+                          GLXFBConfig* const out_config, int* const out_visid);
 
     ~GLContextGLX();
 
@@ -58,24 +66,23 @@ public:
     // Undoes the effect of a drawable override.
     bool RestoreDrawable();
 
-    virtual Maybe<gfx::IntSize> GetTargetSize() override;
-
 private:
     friend class GLContextProviderGLX;
 
-    GLContextGLX(const SurfaceCaps& caps,
+    GLContextGLX(CreateContextFlags flags,
+                 const SurfaceCaps& caps,
                  GLContext* shareContext,
                  bool isOffscreen,
-                 Display *aDisplay,
+                 Display* aDisplay,
                  GLXDrawable aDrawable,
                  GLXContext aContext,
                  bool aDeleteDrawable,
                  bool aDoubleBuffered,
-                 gfxXlibSurface *aPixmap,
+                 gfxXlibSurface* aPixmap,
                  ContextProfile profile);
 
     GLXContext mContext;
-    Display *mDisplay;
+    Display* mDisplay;
     GLXDrawable mDrawable;
     bool mDeleteDrawable;
     bool mDoubleBuffered;

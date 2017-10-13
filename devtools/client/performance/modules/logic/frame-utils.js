@@ -3,39 +3,27 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Cc, Ci, Cu, Cr } = require("chrome");
+const global = require("devtools/client/performance/modules/global");
+const demangle = require("devtools/client/shared/demangle");
+const { assert } = require("devtools/shared/DevToolsUtils");
+const { isChromeScheme, isContentScheme, parseURL } =
+  require("devtools/client/shared/source-utils");
 
-loader.lazyRequireGetter(this, "Services");
-loader.lazyRequireGetter(this, "global",
-  "devtools/client/performance/modules/global");
+const { CATEGORY_MASK, CATEGORY_MAPPINGS } = require("devtools/client/performance/modules/categories");
 
 // Character codes used in various parsing helper functions.
-const CHAR_CODE_A = "a".charCodeAt(0);
-const CHAR_CODE_C = "c".charCodeAt(0);
-const CHAR_CODE_E = "e".charCodeAt(0);
-const CHAR_CODE_F = "f".charCodeAt(0);
-const CHAR_CODE_H = "h".charCodeAt(0);
-const CHAR_CODE_I = "i".charCodeAt(0);
-const CHAR_CODE_J = "j".charCodeAt(0);
-const CHAR_CODE_L = "l".charCodeAt(0);
-const CHAR_CODE_M = "m".charCodeAt(0);
-const CHAR_CODE_O = "o".charCodeAt(0);
-const CHAR_CODE_P = "p".charCodeAt(0);
 const CHAR_CODE_R = "r".charCodeAt(0);
-const CHAR_CODE_S = "s".charCodeAt(0);
-const CHAR_CODE_T = "t".charCodeAt(0);
-const CHAR_CODE_U = "u".charCodeAt(0);
 const CHAR_CODE_0 = "0".charCodeAt(0);
 const CHAR_CODE_9 = "9".charCodeAt(0);
+const CHAR_CODE_CAP_Z = "Z".charCodeAt(0);
 
 const CHAR_CODE_LPAREN = "(".charCodeAt(0);
 const CHAR_CODE_RPAREN = ")".charCodeAt(0);
 const CHAR_CODE_COLON = ":".charCodeAt(0);
-const CHAR_CODE_SLASH = "/".charCodeAt(0);
 const CHAR_CODE_SPACE = " ".charCodeAt(0);
+const CHAR_CODE_UNDERSCORE = "_".charCodeAt(0);
 
-// The cache used in the `nsIURL` function.
-const gNSURLStore = new Map();
+const EVAL_TOKEN = "%20%3E%20eval";
 
 // The cache used to store inflated frames.
 const gInflatedFrameStore = new WeakMap();
@@ -147,42 +135,53 @@ function parseLocation(location, fallbackLine, fallbackColumn) {
     }
   }
 
-  let uri;
+  let parsedUrl;
   if (lineAndColumnIndex > 0) {
     let resource = location.substring(parenIndex + 1, lineAndColumnIndex);
     url = resource.split(" -> ").pop();
     if (url) {
-      uri = nsIURL(url);
+      parsedUrl = parseURL(url);
     }
   }
 
-  let functionName, fileName, hostName, port, host;
+  let functionName, fileName, port, host;
   line = line || fallbackLine;
   column = column || fallbackColumn;
 
-  // If the URI digged out from the `location` is valid, this is a JS frame.
-  if (uri) {
+  // If the URL digged out from the `location` is valid, this is a JS frame.
+  if (parsedUrl) {
     functionName = location.substring(0, parenIndex - 1);
-    fileName = uri.fileName || "/";
-    hostName = getHost(url, uri.host);
-    // nsIURL throws when accessing a piece of a URL that doesn't
-    // exist, because we can't have nice things. Only check this if hostName
-    // exists, to save an extra try/catch.
-    if (hostName) {
-      try {
-        port = uri.port === -1 ? null : uri.port;
-        host = port !== null ? `${hostName}:${port}` : hostName;
-      } catch (e) {
-        host = hostName;
-      }
+    fileName = parsedUrl.fileName;
+    port = parsedUrl.port;
+    host = parsedUrl.host;
+
+    // Check for the case of the filename containing eval
+    // e.g. "file.js%20line%2065%20%3E%20eval"
+    let evalIndex = fileName.indexOf(EVAL_TOKEN);
+    if (evalIndex !== -1 && evalIndex === (fileName.length - EVAL_TOKEN.length)) {
+      // Match the filename
+      let evalLine = line;
+      let [, _fileName, , _line] = fileName.match(/(.+)(%20line%20(\d+)%20%3E%20eval)/)
+                                   || [];
+      fileName = `${_fileName} (eval:${evalLine})`;
+      line = _line;
+      assert(_fileName !== undefined,
+             "Filename could not be found from an eval location site");
+      assert(_line !== undefined,
+             "Line could not be found from an eval location site");
+
+      // Match the url as well
+      [, url] = url.match(/(.+)( line (\d+) > eval)/) || [];
+      assert(url !== undefined,
+             "The URL could not be parsed correctly from an eval location site");
     }
   } else {
     functionName = location;
     url = null;
   }
 
-  return { functionName, fileName, hostName, host, port, url, line, column };
-};
+  return { functionName, fileName, host, port, url, line, column };
+}
 
 /**
  * Sets the properties of `isContent` and `category` on a frame.
@@ -233,18 +232,18 @@ function computeIsContentAndCategory(frame) {
           isChromeScheme(location, j) &&
           (location.indexOf("resource://devtools") !== -1 ||
            location.indexOf("resource://devtools") !== -1)) {
-        frame.category = global.CATEGORY_DEVTOOLS;
+        frame.category = CATEGORY_MASK("tools");
         return;
       }
     }
   }
 
   if (location === "EnterJIT") {
-    frame.category = global.CATEGORY_JIT;
+    frame.category = CATEGORY_MASK("js");
     return;
   }
 
-  frame.category = global.CATEGORY_OTHER;
+  frame.category = CATEGORY_MASK("other");
 }
 
 /**
@@ -264,7 +263,7 @@ function getInflatedFrameCache(frameTable) {
   inflatedCache = Array.from({ length: frameTable.data.length }, () => null);
   gInflatedFrameStore.set(frameTable, inflatedCache);
   return inflatedCache;
-};
+}
 
 /**
  * Get or add an inflated frame to a cache.
@@ -280,7 +279,7 @@ function getOrAddInflatedFrame(cache, index, frameTable, stringTable) {
     inflatedFrame = cache[index] = new InflatedFrame(index, frameTable, stringTable);
   }
   return inflatedFrame;
-};
+}
 
 /**
  * An intermediate data structured used to hold inflated frames.
@@ -313,7 +312,7 @@ function InflatedFrame(index, frameTable, stringTable) {
   // attempt to generate a useful category, fallback to the one provided
   // by the profiling data, or fallback to an unknown category.
   computeIsContentAndCategory(this);
-};
+}
 
 /**
  * Gets the frame key (i.e., equivalence group) according to options. Content
@@ -332,8 +331,7 @@ InflatedFrame.prototype.getFrameKey = function getFrameKey(options) {
 
   if (options.isLeaf) {
     // We only care about leaf platform frames if we are displaying content
-    // only. If no category is present, give the default category of
-    // CATEGORY_OTHER.
+    // only. If no category is present, give the default category of "other".
     //
     // 1. The leaf is where time is _actually_ being spent, so we _need_ to
     // show it to developers in some way to give them accurate profiling
@@ -353,131 +351,15 @@ InflatedFrame.prototype.getFrameKey = function getFrameKey(options) {
   return "";
 };
 
-/**
- * Helper for getting an nsIURL instance out of a string.
- */
-function nsIURL(url) {
-  let cached = gNSURLStore.get(url);
-  // If we cached a valid URI, or `null` in the case
-  // of a failure, return it.
-  if (cached !== void 0) {
-    return cached;
-  }
-  let uri = null;
-  try {
-    uri = Services.io.newURI(url, null, null).QueryInterface(Ci.nsIURL);
-    // Access the host, because the constructor doesn't necessarily throw
-    // if it's invalid, but accessing the host can throw as well
-    uri.host;
-  } catch(e) {
-    // The passed url string is invalid.
-    uri = null;
-  }
-
-  gNSURLStore.set(url, uri);
-  return uri;
-};
-
-/**
- * Takes a `host` string from an nsIURL instance and
- * returns the same string, or null, if it's an invalid host.
- */
-function getHost (url, hostName) {
-  return isChromeScheme(url, 0) ? null : hostName;
-}
-
-// For the functions below, we assume that we will never access the location
-// argument out of bounds, which is indeed the vast majority of cases.
-//
-// They are written this way because they are hot. Each frame is checked for
-// being content or chrome when processing the profile.
-
-function isColonSlashSlash(location, i) {
-  return location.charCodeAt(++i) === CHAR_CODE_COLON &&
-         location.charCodeAt(++i) === CHAR_CODE_SLASH &&
-         location.charCodeAt(++i) === CHAR_CODE_SLASH;
-}
-
-function isContentScheme(location, i) {
-  let firstChar = location.charCodeAt(i);
-
-  switch (firstChar) {
-  case CHAR_CODE_H: // "http://" or "https://"
-    if (location.charCodeAt(++i) === CHAR_CODE_T &&
-        location.charCodeAt(++i) === CHAR_CODE_T &&
-        location.charCodeAt(++i) === CHAR_CODE_P) {
-      if (location.charCodeAt(i + 1) === CHAR_CODE_S) {
-        ++i;
-      }
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  case CHAR_CODE_F: // "file://"
-    if (location.charCodeAt(++i) === CHAR_CODE_I &&
-        location.charCodeAt(++i) === CHAR_CODE_L &&
-        location.charCodeAt(++i) === CHAR_CODE_E) {
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  case CHAR_CODE_A: // "app://"
-    if (location.charCodeAt(++i) == CHAR_CODE_P &&
-        location.charCodeAt(++i) == CHAR_CODE_P) {
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  default:
-    return false;
-  }
-}
-
-function isChromeScheme(location, i) {
-  let firstChar = location.charCodeAt(i);
-
-  switch (firstChar) {
-  case CHAR_CODE_C: // "chrome://"
-    if (location.charCodeAt(++i) === CHAR_CODE_H &&
-        location.charCodeAt(++i) === CHAR_CODE_R &&
-        location.charCodeAt(++i) === CHAR_CODE_O &&
-        location.charCodeAt(++i) === CHAR_CODE_M &&
-        location.charCodeAt(++i) === CHAR_CODE_E) {
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  case CHAR_CODE_R: // "resource://"
-    if (location.charCodeAt(++i) === CHAR_CODE_E &&
-        location.charCodeAt(++i) === CHAR_CODE_S &&
-        location.charCodeAt(++i) === CHAR_CODE_O &&
-        location.charCodeAt(++i) === CHAR_CODE_U &&
-        location.charCodeAt(++i) === CHAR_CODE_R &&
-        location.charCodeAt(++i) === CHAR_CODE_C &&
-        location.charCodeAt(++i) === CHAR_CODE_E) {
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  case CHAR_CODE_J: // "jar:file://"
-    if (location.charCodeAt(++i) === CHAR_CODE_A &&
-        location.charCodeAt(++i) === CHAR_CODE_R &&
-        location.charCodeAt(++i) === CHAR_CODE_COLON &&
-        location.charCodeAt(++i) === CHAR_CODE_F &&
-        location.charCodeAt(++i) === CHAR_CODE_I &&
-        location.charCodeAt(++i) === CHAR_CODE_L &&
-        location.charCodeAt(++i) === CHAR_CODE_E) {
-      return isColonSlashSlash(location, i);
-    }
-    return false;
-
-  default:
-    return false;
-  }
-}
-
 function isNumeric(c) {
   return c >= CHAR_CODE_0 && c <= CHAR_CODE_9;
+}
+
+function shouldDemangle(name) {
+  return name && name.charCodeAt &&
+         name.charCodeAt(0) === CHAR_CODE_UNDERSCORE &&
+         name.charCodeAt(1) === CHAR_CODE_UNDERSCORE &&
+         name.charCodeAt(2) === CHAR_CODE_CAP_Z;
 }
 
 /**
@@ -495,7 +377,7 @@ function isNumeric(c) {
  *
  * @return {object}
  */
-function getFrameInfo (node, options) {
+function getFrameInfo(node, options) {
   let data = gFrameData.get(node);
 
   if (!data) {
@@ -509,12 +391,21 @@ function getFrameInfo (node, options) {
       data.isMetaCategory = node.isMetaCategory;
     }
     data.samples = node.youngestFrameSamples;
-    data.categoryData = global.CATEGORY_MAPPINGS[node.category] || {};
+    data.categoryData = CATEGORY_MAPPINGS[node.category] || {};
     data.nodeType = node.nodeType;
 
     // Frame name (function location or some meta information)
-    data.name = data.isMetaCategory ? data.categoryData.label : data.functionName || "";
-    data.tooltiptext = data.isMetaCategory ? data.categoryData.label : node.location || "";
+    if (data.isMetaCategory) {
+      data.name = data.categoryData.label;
+    } else if (shouldDemangle(data.functionName)) {
+      data.name = demangle(data.functionName);
+    } else {
+      data.name = data.functionName;
+    }
+
+    data.tooltiptext = data.isMetaCategory ?
+      data.categoryData.label :
+      node.location || "";
 
     gFrameData.set(node, data);
   }
@@ -563,9 +454,10 @@ exports.getFrameInfo = getFrameInfo;
  * @param {string} location
  * @return {?FrameNode}
  */
-function findFrameByLocation (threadNode, location) {
+function findFrameByLocation(threadNode, location) {
   if (!threadNode.inverted) {
-    throw new Error("FrameUtils.findFrameByLocation only supports leaf nodes in an inverted tree.");
+    throw new Error(
+      "FrameUtils.findFrameByLocation only supports leaf nodes in an inverted tree.");
   }
 
   let calls = threadNode.calls;
@@ -583,3 +475,4 @@ exports.parseLocation = parseLocation;
 exports.getInflatedFrameCache = getInflatedFrameCache;
 exports.getOrAddInflatedFrame = getOrAddInflatedFrame;
 exports.InflatedFrame = InflatedFrame;
+exports.shouldDemangle = shouldDemangle;

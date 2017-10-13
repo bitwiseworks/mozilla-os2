@@ -8,7 +8,6 @@
 #include "nsNetUtil.h"
 #include "nsAboutProtocolUtils.h"
 #include "mozilla/ArrayUtils.h"
-#include "nsDOMString.h"
 #include "nsIProtocolHandler.h"
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
@@ -44,6 +43,11 @@ static RedirEntry kRedirMap[] = {
     "buildconfig", "chrome://global/content/buildconfig.html",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
+  {
+    "checkerboard", "chrome://global/content/aboutCheckerboard.xhtml",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+      nsIAboutModule::ALLOW_SCRIPT
+  },
   { "config", "chrome://global/content/config.xul", 0 },
 #ifdef MOZ_CRASHREPORTER
   { "crashes", "chrome://global/content/crashes.xhtml", 0 },
@@ -52,13 +56,22 @@ static RedirEntry kRedirMap[] = {
     "credits", "https://www.mozilla.org/credits/",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
+#ifdef MOZ_DEVTOOLS_ALL
+  {
+    "debugging", "chrome://devtools/content/aboutdebugging/aboutdebugging.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+#endif
   {
     "license", "chrome://global/content/license.html",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+      nsIAboutModule::MAKE_LINKABLE
   },
   {
     "logo", "chrome://branding/content/about.png",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    // Linkable for testing reasons.
+    nsIAboutModule::MAKE_LINKABLE
   },
   {
     "memory", "chrome://global/content/aboutMemory.xhtml",
@@ -84,12 +97,10 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT |
       nsIAboutModule::HIDE_FROM_ABOUTABOUT
   },
-#ifdef NIGHTLY_BUILD
   {
     "performance", "chrome://global/content/aboutPerformance.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
   },
-#endif
   {
     "plugins", "chrome://global/content/plugins.html",
     nsIAboutModule::URI_MUST_LOAD_IN_CHILD
@@ -100,12 +111,20 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
     nsIAboutModule::ALLOW_SCRIPT
   },
+#ifndef ANDROID
+  {
+    "profiles", "chrome://global/content/aboutProfiles.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+#endif
   // about:srcdoc is unresolvable by specification.  It is included here
   // because the security manager would disallow srcdoc iframes otherwise.
   {
     "srcdoc", "about:blank",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
       nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+      // Needs to be linkable so content can touch its own srcdoc frames
+      nsIAboutModule::MAKE_LINKABLE |
       nsIAboutModule::URI_CAN_LOAD_IN_CHILD
   },
   {
@@ -117,7 +136,7 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
-    "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.xhtml",
+    "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.html",
     nsIAboutModule::ALLOW_SCRIPT
   }
 };
@@ -195,13 +214,6 @@ nsAboutRedirector::GetURIFlags(nsIURI* aURI, uint32_t* aResult)
 
   NS_ERROR("nsAboutRedirector called for unknown case");
   return NS_ERROR_ILLEGAL_VALUE;
-}
-
-NS_IMETHODIMP
-nsAboutRedirector::GetIndexedDBOriginPostfix(nsIURI* aURI, nsAString& aResult)
-{
-  SetDOMStringToNull(aResult);
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsresult

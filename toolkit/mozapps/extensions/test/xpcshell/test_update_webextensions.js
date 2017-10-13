@@ -61,8 +61,9 @@ var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WH
       obj[prop] = value;
   }
 
-  provide(aData, "addon.id", uuidGenerator.generateUUID().number);
-  let id = aData.addon.id;
+  let id = uuidGenerator.generateUUID().number;
+  provide(aData, "addon.id", id);
+  provide(aData, "addon.manifest.applications.gecko.id", id);
 
   let updatePath = `/updates/${id}.json`.replace(/[{}]/g, "");
   let updateUrl = `http://localhost:${gPort}${updatePath}`
@@ -82,6 +83,7 @@ var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WH
     update.version = version;
 
     provide(update, "addon.id", id);
+    provide(update, "addon.manifest.applications.gecko.id", id);
     let addon = update.addon;
 
     delete update.addon;
@@ -135,7 +137,7 @@ add_task(function* checkUpdateMetadata() {
     addon: {
       manifest: {
         version: "1.0",
-        application: { gecko: { strict_max_version: "45" } },
+        applications: { gecko: { strict_max_version: "45" } },
       }
     },
     updates: {
@@ -240,7 +242,7 @@ add_task(function* checkIllegalUpdateURL() {
       });
     });
 
-    ok(messages.some(msg => /nsIScriptSecurityManager.checkLoadURIStrWithPrincipal/.test(msg)),
+    ok(messages.some(msg => /Access denied for URL|may not load or link to|is not a valid URL/.test(msg)),
        "Got checkLoadURI error");
   }
 });

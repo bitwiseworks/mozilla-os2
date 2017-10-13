@@ -125,10 +125,10 @@ this.PushDB.prototype = {
       this.newTxn(
         "readwrite",
         this._dbStoreName,
-        function txnCb(aTxn, aStore) {
+        (aTxn, aStore) => {
           console.debug("delete: Removing record", aKeyID);
           aStore.get(aKeyID).onsuccess = event => {
-            aTxn.result = event.target.result;
+            aTxn.result = this.toPushRecord(event.target.result);
             aStore.delete(aKeyID);
           };
         },
@@ -216,18 +216,17 @@ this.PushDB.prototype = {
   },
 
   /**
-   * Reduces all records associated with an origin to a single value.
+   * Iterates over all records associated with an origin.
    *
    * @param {String} origin The origin, matched as a prefix against the scope.
    * @param {String} originAttributes Additional origin attributes. Requires
    *  an exact match.
-   * @param {Function} callback A function with the signature `(result,
-   *  record, cursor)`, where `result` is the value returned by the previous
-   *  invocation, `record` is the registration, and `cursor` is an `IDBCursor`.
-   * @param {Object} [initialValue] The value to use for the first invocation.
-   * @returns {Promise} Resolves with the value of the last invocation.
+   * @param {Function} callback A function with the signature `(record,
+   *  cursor)`, called for each record. `record` is the registration, and
+   *  `cursor` is an `IDBCursor`.
+   * @returns {Promise} Resolves once all records have been processed.
    */
-  reduceByOrigin: function(origin, originAttributes, callback, initialValue) {
+  forEachOrigin: function(origin, originAttributes, callback) {
     console.debug("forEachOrigin()");
 
     return new Promise((resolve, reject) =>
@@ -235,7 +234,7 @@ this.PushDB.prototype = {
         "readwrite",
         this._dbStoreName,
         (aTxn, aStore) => {
-          aTxn.result = initialValue;
+          aTxn.result = undefined;
 
           let index = aStore.index("identifiers");
           let range = IDBKeyRange.bound(
@@ -247,8 +246,7 @@ this.PushDB.prototype = {
             if (!cursor) {
               return;
             }
-            let record = this.toPushRecord(cursor.value);
-            aTxn.result = callback(aTxn.result, record, cursor);
+            callback(this.toPushRecord(cursor.value), cursor);
             cursor.continue();
           };
         },
@@ -378,11 +376,10 @@ this.PushDB.prototype = {
    *
    * @param {String} aKeyID The registration ID.
    * @param {Function} aUpdateFunc A function that receives the existing
-   *  registration record as its argument, and returns a new record. If the
-   *  function returns `null` or `undefined`, the record will not be updated.
-   *  If the record does not exist, the function will not be called.
-   * @returns {Promise} A promise resolved with either the updated record, or
-   *  `undefined` if the record was not updated.
+   *  registration record as its argument, and returns a new record.
+   * @returns {Promise} A promise resolved with either the updated record.
+   *  Rejects if the record does not exist, or the function returns an invalid
+   *  record.
    */
   update: function(aKeyID, aUpdateFunc) {
     return new Promise((resolve, reject) =>
@@ -395,19 +392,28 @@ this.PushDB.prototype = {
 
             let record = aEvent.target.result;
             if (!record) {
-              console.error("update: Record does not exist", aKeyID);
-              return;
+              throw new Error("Record " + aKeyID + " does not exist");
             }
             let newRecord = aUpdateFunc(this.toPushRecord(record));
             if (!this.isValidRecord(newRecord)) {
               console.error("update: Ignoring invalid update",
                 aKeyID, newRecord);
-              return;
+              throw new Error("Invalid update for record " + aKeyID);
             }
-            aStore.put(newRecord).onsuccess = aEvent => {
-              console.debug("update: Update successful", aKeyID, newRecord);
-              aTxn.result = newRecord;
-            };
+            function putRecord() {
+              let req = aStore.put(newRecord);
+              req.onsuccess = aEvent => {
+                console.debug("update: Update successful", aKeyID, newRecord);
+                aTxn.result = newRecord;
+              };
+            }
+            if (aKeyID === newRecord.keyID) {
+              putRecord();
+            } else {
+              // If we changed the primary key, delete the old record to avoid
+              // unique constraint errors.
+              aStore.delete(aKeyID).onsuccess = putRecord;
+            }
           };
         },
         resolve,

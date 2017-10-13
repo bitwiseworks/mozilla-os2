@@ -6,12 +6,10 @@
 
 var tests = [];
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_NONE,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 1: SORT BY NONE");
 
     this._unsortedData = [
@@ -69,12 +67,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_TITLE_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 2: SORT BY TITLE");
 
     this._unsortedData = [
@@ -144,12 +140,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_DATE_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 3: SORT BY DATE");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -160,7 +154,7 @@ tests.push({
         parentGuid: PlacesUtils.bookmarks.toolbarGuid,
         index: 0,
         uri: "http://example.com/c1",
-        lastVisit: timeInMicroseconds - 2,
+        lastVisit: timeInMicroseconds - 2000,
         title: "x1",
         isInQuery: true },
 
@@ -170,7 +164,7 @@ tests.push({
         parentGuid: PlacesUtils.bookmarks.toolbarGuid,
         index: 1,
         uri: "http://example.com/a",
-        lastVisit: timeInMicroseconds - 1,
+        lastVisit: timeInMicroseconds - 1000,
         title: "z",
         isInQuery: true },
 
@@ -180,7 +174,7 @@ tests.push({
         parentGuid: PlacesUtils.bookmarks.toolbarGuid,
         index: 2,
         uri: "http://example.com/b",
-        lastVisit: timeInMicroseconds - 3,
+        lastVisit: timeInMicroseconds - 3000,
         title: "y",
         isInQuery: true },
 
@@ -191,7 +185,7 @@ tests.push({
         parentGuid: PlacesUtils.bookmarks.toolbarGuid,
         index: 3,
         uri: "http://example.com/c2",
-        lastVisit: timeInMicroseconds - 2,
+        lastVisit: timeInMicroseconds - 2000,
         title: "x2",
         isInQuery: true },
 
@@ -202,7 +196,7 @@ tests.push({
         parentGuid: PlacesUtils.bookmarks.toolbarGuid,
         index: 4,
         uri: "http://example.com/c2",
-        lastVisit: timeInMicroseconds - 2,
+        lastVisit: timeInMicroseconds - 2000,
         title: "x2",
         isInQuery: true },
     ];
@@ -244,12 +238,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_URI_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 4: SORT BY URI");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -350,12 +342,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_VISITCOUNT_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 5: SORT BY VISITCOUNT");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -451,12 +441,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_KEYWORD_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 6: SORT BY KEYWORD");
 
     this._unsortedData = [
@@ -550,12 +538,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_DATEADDED_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 7: SORT BY DATEADDED");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -640,12 +626,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_LASTMODIFIED_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 8: SORT BY LASTMODIFIED");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -738,12 +722,10 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_TAGS_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 9: SORT BY TAGS");
 
     this._unsortedData = [
@@ -838,13 +820,12 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
 // SORT_BY_ANNOTATION_* (int32)
 
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 10: SORT BY ANNOTATION (int32)");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -934,13 +915,12 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
 // SORT_BY_ANNOTATION_* (int64)
 
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 11: SORT BY ANNOTATION (int64)");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -1016,13 +996,12 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
 // SORT_BY_ANNOTATION_* (string)
 
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 12: SORT BY ANNOTATION (string)");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -1098,13 +1077,12 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
 // SORT_BY_ANNOTATION_* (double)
 
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 13: SORT BY ANNOTATION (double)");
 
     var timeInMicroseconds = Date.now() * 1000;
@@ -1180,56 +1158,61 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
 // SORT_BY_FRECENCY_*
 
 tests.push({
   _sortingMode: Ci.nsINavHistoryQueryOptions.SORT_BY_FRECENCY_ASCENDING,
 
-  setup: function() {
+  *setup() {
     do_print("Sorting test 13: SORT BY FRECENCY ");
 
-    var timeInMicroseconds = Date.now() * 1000;
+    let timeInMicroseconds = PlacesUtils.toPRTime(Date.now() - 10000);
+
+    function newTimeInMicroseconds() {
+      timeInMicroseconds = timeInMicroseconds + 1000;
+      return timeInMicroseconds;
+    }
+
     this._unsortedData = [
       { isVisit: true,
         isDetails: true,
         uri: "http://moz.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "I",
         isInQuery: true },
 
       { isVisit: true,
         isDetails: true,
         uri: "http://moz.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "I",
         isInQuery: true },
 
       { isVisit: true,
         isDetails: true,
         uri: "http://moz.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "I",
         isInQuery: true },
 
       { isVisit: true,
         isDetails: true,
         uri: "http://is.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "love",
         isInQuery: true },
 
       { isVisit: true,
         isDetails: true,
         uri: "http://best.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "moz",
         isInQuery: true },
 
       { isVisit: true,
         isDetails: true,
         uri: "http://best.com/",
-        lastVisit: timeInMicroseconds++,
+        lastVisit: newTimeInMicroseconds(),
         title: "moz",
         isInQuery: true },
     ];
@@ -1262,8 +1245,6 @@ tests.push({
   }
 });
 
-////////////////////////////////////////////////////////////////////////////////
-
 function run_test()
 {
   run_next_test();
@@ -1271,7 +1252,7 @@ function run_test()
 
 add_task(function* test_sorting()
 {
-  for (let [, test] in Iterator(tests)) {
+  for (let test of tests) {
     yield test.setup();
     yield PlacesTestUtils.promiseAsyncUpdates();
     test.check();

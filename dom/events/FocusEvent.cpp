@@ -23,7 +23,7 @@ FocusEvent::FocusEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
+    mEvent->mTime = PR_Now();
   }
 }
 
@@ -38,22 +38,21 @@ FocusEvent::GetRelatedTarget(nsIDOMEventTarget** aRelatedTarget)
 EventTarget*
 FocusEvent::GetRelatedTarget()
 {
-  return mEvent->AsFocusEvent()->relatedTarget;
+  return mEvent->AsFocusEvent()->mRelatedTarget;
 }
 
-nsresult
+void
 FocusEvent::InitFocusEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsIDOMWindow* aView,
+                           nsGlobalWindow* aView,
                            int32_t aDetail,
                            EventTarget* aRelatedTarget)
 {
-  nsresult rv =
-    UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
-  NS_ENSURE_SUCCESS(rv, rv);
-  mEvent->AsFocusEvent()->relatedTarget = aRelatedTarget;
-  return NS_OK;
+  MOZ_ASSERT(!mEvent->mFlags.mIsBeingDispatched);
+
+  UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
+  mEvent->AsFocusEvent()->mRelatedTarget = aRelatedTarget;
 }
 
 already_AddRefed<FocusEvent>
@@ -65,9 +64,10 @@ FocusEvent::Constructor(const GlobalObject& aGlobal,
   nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
   RefPtr<FocusEvent> e = new FocusEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
-  aRv = e->InitFocusEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
-                          aParam.mDetail, aParam.mRelatedTarget);
+  e->InitFocusEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
+                    aParam.mDetail, aParam.mRelatedTarget);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 

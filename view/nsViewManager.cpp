@@ -189,16 +189,31 @@ void nsViewManager::DoSetWindowDimensions(nscoord aWidth, nscoord aHeight)
     // Don't resize the widget. It is already being set elsewhere.
     mRootView->SetDimensions(newDim, true, false);
     if (mPresShell)
-      mPresShell->ResizeReflow(aWidth, aHeight);
+      mPresShell->ResizeReflow(aWidth, aHeight, oldDim.width, oldDim.height);
   }
+}
+
+bool
+nsViewManager::ShouldDelayResize() const
+{
+  MOZ_ASSERT(mRootView);
+  if (!mRootView->IsEffectivelyVisible() ||
+      !mPresShell || !mPresShell->IsVisible()) {
+    return true;
+  }
+  if (nsRefreshDriver* rd = mPresShell->GetRefreshDriver()) {
+    if (rd->IsResizeSuppressed()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void
 nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight, bool aDelayResize)
 {
   if (mRootView) {
-    if (mRootView->IsEffectivelyVisible() && mPresShell &&
-        mPresShell->IsVisible() && !mPresShell->IsInFullscreenChange() && !aDelayResize) {
+    if (!ShouldDelayResize() && !aDelayResize) {
       if (mDelayedResize != nsSize(NSCOORD_NONE, NSCOORD_NONE) &&
           mDelayedResize != nsSize(aWidth, aHeight)) {
         // We have a delayed resize; that now obsolete size may already have
@@ -588,8 +603,7 @@ nsViewManager::InvalidateWidgetArea(nsView *aWidgetView,
         // plugin widgets are basically invisible
 #ifndef XP_MACOSX
         // GetBounds should compensate for chrome on a toplevel widget
-        LayoutDeviceIntRect bounds;
-        childWidget->GetBounds(bounds);
+        LayoutDeviceIntRect bounds = childWidget->GetBounds();
 
         nsTArray<LayoutDeviceIntRect> clipRects;
         childWidget->GetWindowClipRegion(&clipRects);
@@ -608,9 +622,8 @@ nsViewManager::InvalidateWidgetArea(nsView *aWidgetView,
   leftOver.Sub(aDamagedRegion, children);
 
   if (!leftOver.IsEmpty()) {
-    const nsRect* r;
-    for (nsRegionRectIterator iter(leftOver); (r = iter.Next());) {
-      LayoutDeviceIntRect bounds = ViewToWidget(aWidgetView, *r);
+    for (auto iter = leftOver.RectIter(); !iter.Done(); iter.Next()) {
+      LayoutDeviceIntRect bounds = ViewToWidget(aWidgetView, iter.Get());
       widget->Invalidate(bounds);
     }
   }
@@ -756,7 +769,7 @@ nsViewManager::DispatchEvent(WidgetGUIEvent *aEvent,
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   if ((mouseEvent &&
        // Ignore mouse events that we synthesize.
-       mouseEvent->reason == WidgetMouseEvent::eReal &&
+       mouseEvent->mReason == WidgetMouseEvent::eReal &&
        // Ignore mouse exit and enter (we'll get moves if the user
        // is really moving the mouse) since we get them when we
        // create and destroy widgets.

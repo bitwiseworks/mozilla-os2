@@ -87,11 +87,14 @@ EmitBaselineTailCallVM(JitCode* target, MacroAssembler& masm, uint32_t argSize)
 
     // Compute frame size.
     masm.movePtr(BaselineFrameReg, r0);
-    masm.ma_add(Imm32(BaselineFrame::FramePointerOffset), r0);
+    masm.as_add(r0, r0, Imm8(BaselineFrame::FramePointerOffset));
     masm.ma_sub(BaselineStackReg, r0);
 
     // Store frame size without VMFunction arguments for GC marking.
-    masm.ma_sub(r0, Imm32(argSize), r1);
+    {
+        ScratchRegisterScope scratch(masm);
+        masm.ma_sub(r0, Imm32(argSize), r1, scratch);
+    }
     masm.store32(r1, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
 
     // Push frame descriptor and perform the tail call.
@@ -99,7 +102,7 @@ EmitBaselineTailCallVM(JitCode* target, MacroAssembler& masm, uint32_t argSize)
     // it there through the stub calls), but the VMWrapper code being called
     // expects the return address to also be pushed on the stack.
     MOZ_ASSERT(ICTailCallReg == lr);
-    masm.makeFrameDescriptor(r0, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(r0, JitFrame_BaselineJS, ExitFrameLayout::Size());
     masm.push(r0);
     masm.push(lr);
     masm.branch(target);
@@ -121,28 +124,28 @@ EmitIonTailCallVM(JitCode* target, MacroAssembler& masm, uint32_t stackSize)
     // it there through the stub calls), but the VMWrapper code being called
     // expects the return address to also be pushed on the stack.
     MOZ_ASSERT(ICTailCallReg == lr);
-    masm.makeFrameDescriptor(r0, JitFrame_IonJS);
+    masm.makeFrameDescriptor(r0, JitFrame_IonJS, ExitFrameLayout::Size());
     masm.push(r0);
     masm.push(lr);
     masm.branch(target);
 }
 
 inline void
-EmitBaselineCreateStubFrameDescriptor(MacroAssembler& masm, Register reg)
+EmitBaselineCreateStubFrameDescriptor(MacroAssembler& masm, Register reg, uint32_t headerSize)
 {
     // Compute stub frame size. We have to add two pointers: the stub reg and
     // previous frame pointer pushed by EmitEnterStubFrame.
     masm.mov(BaselineFrameReg, reg);
-    masm.ma_add(Imm32(sizeof(void*) * 2), reg);
+    masm.as_add(reg, reg, Imm8(sizeof(void*) * 2));
     masm.ma_sub(BaselineStackReg, reg);
 
-    masm.makeFrameDescriptor(reg, JitFrame_BaselineStub);
+    masm.makeFrameDescriptor(reg, JitFrame_BaselineStub, headerSize);
 }
 
 inline void
 EmitBaselineCallVM(JitCode* target, MacroAssembler& masm)
 {
-    EmitBaselineCreateStubFrameDescriptor(masm, r0);
+    EmitBaselineCreateStubFrameDescriptor(masm, r0, ExitFrameLayout::Size());
     masm.push(r0);
     masm.call(target);
 }
@@ -150,7 +153,8 @@ EmitBaselineCallVM(JitCode* target, MacroAssembler& masm)
 inline void
 EmitIonCallVM(JitCode* target, size_t stackSlots, MacroAssembler& masm)
 {
-    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), JitFrame_IonStub);
+    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), JitFrame_IonStub,
+                                              ExitFrameLayout::Size());
     masm.Push(Imm32(descriptor));
     masm.callJit(target);
 
@@ -173,7 +177,7 @@ EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch)
 
     // Compute frame size.
     masm.mov(BaselineFrameReg, scratch);
-    masm.ma_add(Imm32(BaselineFrame::FramePointerOffset), scratch);
+    masm.as_add(scratch, scratch, Imm8(BaselineFrame::FramePointerOffset));
     masm.ma_sub(BaselineStackReg, scratch);
 
     masm.store32(scratch, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
@@ -182,7 +186,7 @@ EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch)
     // needed.
 
     // Push frame descriptor and return address.
-    masm.makeFrameDescriptor(scratch, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(scratch, JitFrame_BaselineJS, BaselineStubFrameLayout::Size());
     masm.Push(scratch);
     masm.Push(ICTailCallReg);
 
@@ -199,7 +203,13 @@ inline void
 EmitIonEnterStubFrame(MacroAssembler& masm, Register scratch)
 {
     MOZ_ASSERT(ICTailCallReg == lr);
-    masm.Push(ICTailCallReg);
+
+    // In arm the link register contains the return address,
+    // but in jit frames we expect it to be on the stack. As a result
+    // push the link register (which is actually part of the previous frame.
+    // Therefore using push instead of Push).
+    masm.push(ICTailCallReg);
+
     masm.Push(ICStubReg);
 }
 
@@ -234,7 +244,7 @@ inline void
 EmitIonLeaveStubFrame(MacroAssembler& masm)
 {
     masm.Pop(ICStubReg);
-    masm.Pop(ICTailCallReg);
+    masm.pop(ICTailCallReg); // See EmitIonEnterStubFrame for explanation on pop/Pop.
 }
 
 inline void

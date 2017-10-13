@@ -117,8 +117,8 @@ void WriteArrayString(std::stringstream &strstr, unsigned int i)
     strstr << "]";
 }
 
-const std::string VERTEX_ATTRIBUTE_STUB_STRING = "@@ VERTEX ATTRIBUTES @@";
-const std::string PIXEL_OUTPUT_STUB_STRING     = "@@ PIXEL OUTPUT @@";
+constexpr const char *VERTEX_ATTRIBUTE_STUB_STRING = "@@ VERTEX ATTRIBUTES @@";
+constexpr const char *PIXEL_OUTPUT_STUB_STRING     = "@@ PIXEL OUTPUT @@";
 }  // anonymous namespace
 
 std::string GetVaryingSemantic(int majorShaderModel, bool programUsesPointSize)
@@ -231,10 +231,11 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
             {
                 GLenum componentType = mRenderer->getVertexComponentType(vertexFormatType);
 
-                if (shaderAttribute.name == "gl_InstanceID")
+                if (shaderAttribute.name == "gl_InstanceID" ||
+                    shaderAttribute.name == "gl_VertexID")
                 {
-                    // The input type of the instance ID in HLSL (uint) differs from the one in ESSL
-                    // (int).
+                    // The input types of the instance ID and vertex ID in HLSL (uint) differs from
+                    // the ones in ESSL (int).
                     structStream << " uint";
                 }
                 else
@@ -250,6 +251,10 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
             if (shaderAttribute.name == "gl_InstanceID")
             {
                 structStream << "SV_InstanceID";
+            }
+            else if (shaderAttribute.name == "gl_VertexID")
+            {
+                structStream << "SV_VertexID";
             }
             else
             {
@@ -290,7 +295,7 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
     std::string vertexHLSL(sourceShader);
 
     size_t copyInsertionPos = vertexHLSL.find(VERTEX_ATTRIBUTE_STUB_STRING);
-    vertexHLSL.replace(copyInsertionPos, VERTEX_ATTRIBUTE_STUB_STRING.length(), structStream.str());
+    vertexHLSL.replace(copyInsertionPos, strlen(VERTEX_ATTRIBUTE_STUB_STRING), structStream.str());
 
     return vertexHLSL;
 }
@@ -355,7 +360,7 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
     std::string pixelHLSL(sourceShader);
 
     size_t outputInsertionPos = pixelHLSL.find(PIXEL_OUTPUT_STUB_STRING);
-    pixelHLSL.replace(outputInsertionPos, PIXEL_OUTPUT_STUB_STRING.length(),
+    pixelHLSL.replace(outputInsertionPos, strlen(PIXEL_OUTPUT_STUB_STRING),
                       declarationStream.str());
 
     return pixelHLSL;
@@ -390,15 +395,15 @@ void DynamicHLSL::generateVaryingLinkHLSL(ShaderType shaderType,
         linkStream << "    float gl_PointSize : " << builtins.glPointSize.str() << ";\n";
     }
 
-    // Do this after glPointSize, to potentially combine gl_PointCoord and gl_PointSize into the
+    // Do this after gl_PointSize, to potentially combine gl_PointCoord and gl_PointSize into the
     // same register.
     generateVaryingHLSL(varyingPacking, linkStream);
 
     linkStream << "};\n";
 }
 
-bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
-                                         const gl::Program::Data &programData,
+bool DynamicHLSL::generateShaderLinkHLSL(const gl::ContextState &data,
+                                         const gl::ProgramState &programData,
                                          const ProgramD3DMetadata &programMetadata,
                                          const VaryingPacking &varyingPacking,
                                          std::string *pixelHLSL,
@@ -407,10 +412,12 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
     ASSERT(pixelHLSL->empty() && vertexHLSL->empty());
 
     const gl::Shader *vertexShaderGL   = programData.getAttachedVertexShader();
-    const ShaderD3D *vertexShader      = GetImplAs<ShaderD3D>(vertexShaderGL);
     const gl::Shader *fragmentShaderGL = programData.getAttachedFragmentShader();
     const ShaderD3D *fragmentShader    = GetImplAs<ShaderD3D>(fragmentShaderGL);
     const int shaderModel              = mRenderer->getMajorShaderModel();
+
+    // usesViewScale() isn't supported in the D3D9 renderer
+    ASSERT(shaderModel >= 4 || !programMetadata.usesViewScale());
 
     bool useInstancedPointSpriteEmulation =
         programMetadata.usesPointSize() &&
@@ -427,13 +434,13 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
     if (useInstancedPointSpriteEmulation)
     {
         vertexStream << "static float minPointSize = "
-                     << static_cast<int>(data.caps->minAliasedPointSize) << ".0f;\n"
+                     << static_cast<int>(data.getCaps().minAliasedPointSize) << ".0f;\n"
                      << "static float maxPointSize = "
-                     << static_cast<int>(data.caps->maxAliasedPointSize) << ".0f;\n";
+                     << static_cast<int>(data.getCaps().maxAliasedPointSize) << ".0f;\n";
     }
 
     // Add stub string to be replaced when shader is dynamically defined by its layout
-    vertexStream << "\n" << VERTEX_ATTRIBUTE_STUB_STRING + "\n";
+    vertexStream << "\n" << std::string(VERTEX_ATTRIBUTE_STUB_STRING) << "\n";
 
     // Write the HLSL input/output declarations
     vertexStream << "struct VS_OUTPUT\n";
@@ -442,12 +449,6 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
                  << "VS_OUTPUT main(VS_INPUT input)\n"
                  << "{\n"
                  << "    initAttributes(input);\n";
-
-    if (vertexShader->usesDeferredInit())
-    {
-        vertexStream << "\n"
-                     << "    initializeDeferredGlobals();\n";
-    }
 
     vertexStream << "\n"
                  << "    gl_main();\n"
@@ -464,18 +465,43 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
     // On D3D9 or D3D11 Feature Level 9, we need to emulate large viewports using dx_ViewAdjust.
     if (shaderModel >= 4 && mRenderer->getShaderModelSuffix() == "")
     {
-        vertexStream << "    output.dx_Position.x = gl_Position.x;\n"
-                     << "    output.dx_Position.y = -gl_Position.y;\n"
-                     << "    output.dx_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n"
+        vertexStream << "    output.dx_Position.x = gl_Position.x;\n";
+
+        if (programMetadata.usesViewScale())
+        {
+            // This code assumes that dx_ViewScale.y = -1.0f when rendering to texture, and +1.0f
+            // when rendering to the default framebuffer. No other values are valid.
+            vertexStream << "    output.dx_Position.y = dx_ViewScale.y * gl_Position.y;\n";
+        }
+        else
+        {
+            vertexStream << "    output.dx_Position.y = - gl_Position.y;\n";
+        }
+
+        vertexStream << "    output.dx_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n"
                      << "    output.dx_Position.w = gl_Position.w;\n";
     }
     else
     {
         vertexStream << "    output.dx_Position.x = gl_Position.x * dx_ViewAdjust.z + "
-                        "dx_ViewAdjust.x * gl_Position.w;\n"
-                     << "    output.dx_Position.y = -(gl_Position.y * dx_ViewAdjust.w + "
-                        "dx_ViewAdjust.y * gl_Position.w);\n"
-                     << "    output.dx_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n"
+                        "dx_ViewAdjust.x * gl_Position.w;\n";
+
+        // If usesViewScale() is true and we're using the D3D11 renderer via Feature Level 9_*,
+        // then we need to multiply the gl_Position.y by the viewScale.
+        // usesViewScale() isn't supported when using the D3D9 renderer.
+        if (programMetadata.usesViewScale() &&
+            (shaderModel >= 4 && mRenderer->getShaderModelSuffix() != ""))
+        {
+            vertexStream << "    output.dx_Position.y = dx_ViewScale.y * (gl_Position.y * "
+                            "dx_ViewAdjust.w + dx_ViewAdjust.y * gl_Position.w);\n";
+        }
+        else
+        {
+            vertexStream << "    output.dx_Position.y = -(gl_Position.y * dx_ViewAdjust.w + "
+                            "dx_ViewAdjust.y * gl_Position.w);\n";
+        }
+
+        vertexStream << "    output.dx_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n"
                      << "    output.dx_Position.w = gl_Position.w;\n";
     }
 
@@ -523,11 +549,26 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
     if (useInstancedPointSpriteEmulation)
     {
         vertexStream << "\n"
-                     << "    gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);\n"
-                     << "    output.dx_Position.xyz += float3(input.spriteVertexPos.x * "
-                        "gl_PointSize / (dx_ViewCoords.x*2), input.spriteVertexPos.y * "
-                        "gl_PointSize / (dx_ViewCoords.y*2), input.spriteVertexPos.z) * "
-                        "output.dx_Position.w;\n";
+                     << "    gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);\n";
+
+        vertexStream << "    output.dx_Position.x += (input.spriteVertexPos.x * gl_PointSize / "
+                        "(dx_ViewCoords.x*2)) * output.dx_Position.w;";
+
+        if (programMetadata.usesViewScale())
+        {
+            // Multiply by ViewScale to invert the rendering when appropriate
+            vertexStream << "    output.dx_Position.y += (-dx_ViewScale.y * "
+                            "input.spriteVertexPos.y * gl_PointSize / (dx_ViewCoords.y*2)) * "
+                            "output.dx_Position.w;";
+        }
+        else
+        {
+            vertexStream << "    output.dx_Position.y += (input.spriteVertexPos.y * gl_PointSize / "
+                            "(dx_ViewCoords.y*2)) * output.dx_Position.w;";
+        }
+
+        vertexStream
+            << "    output.dx_Position.z += input.spriteVertexPos.z * output.dx_Position.w;\n";
 
         if (programMetadata.usesPointCoord())
         {
@@ -556,7 +597,7 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
     generateVaryingLinkHLSL(SHADER_PIXEL, varyingPacking, pixelStream);
     pixelStream << "\n";
 
-    pixelStream << PIXEL_OUTPUT_STUB_STRING + "\n";
+    pixelStream << std::string(PIXEL_OUTPUT_STUB_STRING) << "\n";
 
     if (fragmentShader->usesFrontFacing())
     {
@@ -606,6 +647,49 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
                            "dx_ViewCoords.w;\n";
         }
 
+        if (programMetadata.usesViewScale())
+        {
+            // For Feature Level 9_3 and below, we need to correct gl_FragCoord.y to account
+            // for dx_ViewScale. On Feature Level 10_0+, gl_FragCoord.y is calculated above using
+            // dx_ViewCoords and is always correct irrespective of dx_ViewScale's value.
+            // NOTE: usesViewScale() can only be true on D3D11 (i.e. Shader Model 4.0+).
+            if (shaderModel >= 4 && mRenderer->getShaderModelSuffix() == "")
+            {
+                // Some assumptions:
+                //  - dx_ViewScale.y = -1.0f when rendering to texture
+                //  - dx_ViewScale.y = +1.0f when rendering to the default framebuffer
+                //  - gl_FragCoord.y has been set correctly above.
+                //
+                // When rendering to the backbuffer, the code inverts gl_FragCoord's y coordinate.
+                // This involves subtracting the y coordinate from the height of the area being
+                // rendered to.
+                //
+                // First we calculate the height of the area being rendered to:
+                //    render_area_height = (2.0f / (1.0f - input.gl_FragCoord.y * rhw)) *
+                //    gl_FragCoord.y
+                //
+                // Note that when we're rendering to default FB, we want our output to be
+                // equivalent to:
+                //    "gl_FragCoord.y = render_area_height - gl_FragCoord.y"
+                //
+                // When we're rendering to a texture, we want our output to be equivalent to:
+                //    "gl_FragCoord.y = gl_FragCoord.y;"
+                //
+                // If we set scale_factor = ((1.0f + dx_ViewScale.y) / 2.0f), then notice that
+                //  - When rendering to default FB: scale_factor = 1.0f
+                //  - When rendering to texture:    scale_factor = 0.0f
+                //
+                // Therefore, we can get our desired output by setting:
+                //    "gl_FragCoord.y = scale_factor * render_area_height - dx_ViewScale.y *
+                //    gl_FragCoord.y"
+                //
+                // Simplifying, this becomes:
+                pixelStream
+                    << "    gl_FragCoord.y = (1.0f + dx_ViewScale.y) * gl_FragCoord.y /"
+                       "(1.0f - input.gl_FragCoord.y * rhw)  - dx_ViewScale.y * gl_FragCoord.y;\n";
+            }
+        }
+
         pixelStream << "    gl_FragCoord.z = (input.gl_FragCoord.z * rhw) * dx_DepthFront.x + "
                        "dx_DepthFront.y;\n"
                     << "    gl_FragCoord.w = rhw;\n";
@@ -636,7 +720,9 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
         ASSERT(!varying.isBuiltIn() && !varying.isStruct());
 
         // Don't reference VS-only transform feedback varyings in the PS.
-        if (registerInfo.packedVarying->vertexOnly)
+        // TODO: Consider updating the fragment shader's varyings with a parameter signaling that a
+        // varying is only used in the vertex shader in MergeVaryings
+        if (packedVarying.vertexOnly || (!varying.staticUse && !packedVarying.isStructField()))
             continue;
 
         pixelStream << "    ";
@@ -678,12 +764,6 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::Data &data,
                 UNREACHABLE();
         }
         pixelStream << ";\n";
-    }
-
-    if (fragmentShader->usesDeferredInit())
-    {
-        pixelStream << "\n"
-                    << "    initializeDeferredGlobals();\n";
     }
 
     pixelStream << "\n"
@@ -747,8 +827,9 @@ std::string DynamicHLSL::generateGeometryShaderPreamble(const VaryingPacking &va
 }
 
 std::string DynamicHLSL::generateGeometryShaderHLSL(gl::PrimitiveType primitiveType,
-                                                    const gl::Data &data,
-                                                    const gl::Program::Data &programData,
+                                                    const gl::ContextState &data,
+                                                    const gl::ProgramState &programData,
+                                                    const bool useViewScale,
                                                     const std::string &preambleString) const
 {
     ASSERT(mRenderer->getMajorShaderModel() >= 4);
@@ -799,8 +880,14 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(gl::PrimitiveType primitiveT
     {
         shaderStream << "#define ANGLE_POINT_SPRITE_SHADER\n"
                         "\n"
-                        "uniform float4 dx_ViewCoords : register(c1);\n"
-                        "\n"
+                        "uniform float4 dx_ViewCoords : register(c1);\n";
+
+        if (useViewScale)
+        {
+            shaderStream << "uniform float2 dx_ViewScale : register(c3);\n";
+        }
+
+        shaderStream << "\n"
                         "static float2 pointSpriteCorners[] = \n"
                         "{\n"
                         "    float2( 0.5f, -0.5f),\n"
@@ -818,10 +905,10 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(gl::PrimitiveType primitiveT
                         "};\n"
                         "\n"
                         "static float minPointSize = "
-                     << static_cast<int>(data.caps->minAliasedPointSize)
+                     << static_cast<int>(data.getCaps().minAliasedPointSize)
                      << ".0f;\n"
                         "static float maxPointSize = "
-                     << static_cast<int>(data.caps->maxAliasedPointSize) << ".0f;\n"
+                     << static_cast<int>(data.getCaps().maxAliasedPointSize) << ".0f;\n"
                      << "\n";
     }
 
@@ -870,9 +957,20 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(gl::PrimitiveType primitiveT
 
         for (int corner = 0; corner < 4; corner++)
         {
-            shaderStream << "\n"
-                            "    output.dx_Position = dx_Position + float4(pointSpriteCorners["
-                         << corner << "] * viewportScale * gl_PointSize, 0.0f, 0.0f);\n";
+            if (useViewScale)
+            {
+                shaderStream << "    \n"
+                                "    output.dx_Position = dx_Position + float4(1.0f, "
+                                "-dx_ViewScale.y, 1.0f, 1.0f)"
+                                "        * float4(pointSpriteCorners["
+                             << corner << "] * viewportScale * gl_PointSize, 0.0f, 0.0f);\n";
+            }
+            else
+            {
+                shaderStream << "\n"
+                                "    output.dx_Position = dx_Position + float4(pointSpriteCorners["
+                             << corner << "] * viewportScale * gl_PointSize, 0.0f, 0.0f);\n";
+            }
 
             if (usesPointCoord)
             {
@@ -933,8 +1031,8 @@ std::string DynamicHLSL::generateAttributeConversionHLSL(
     return attribString;
 }
 
-void DynamicHLSL::getPixelShaderOutputKey(const gl::Data &data,
-                                          const gl::Program::Data &programData,
+void DynamicHLSL::getPixelShaderOutputKey(const gl::ContextState &data,
+                                          const gl::ProgramState &programData,
                                           const ProgramD3DMetadata &metadata,
                                           std::vector<PixelShaderOutputVariable> *outPixelShaderKey)
 {
@@ -943,7 +1041,7 @@ void DynamicHLSL::getPixelShaderOutputKey(const gl::Data &data,
     // - with a 2.0 context, the output color is broadcast to all channels
     bool broadcast = metadata.usesBroadcast(data);
     const unsigned int numRenderTargets =
-        (broadcast || metadata.usesMultipleFragmentOuts() ? data.caps->maxDrawBuffers : 1);
+        (broadcast || metadata.usesMultipleFragmentOuts() ? data.getCaps().maxDrawBuffers : 1);
 
     if (metadata.getMajorShaderVersion() < 300)
     {

@@ -4,6 +4,7 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                xmlns:gecko="http://schemas.android.com/apk/res-auto"
                 android:id="@+id/root_layout"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
@@ -25,7 +26,26 @@
                         android:layout_below="@+id/tablet_tab_strip"
                         android:layout_above="@+id/find_in_page">
 
-            <include layout="@layout/shared_ui_components"/>
+            <fragment class="org.mozilla.gecko.GeckoViewFragment"
+                      android:id="@+id/layer_view"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:scrollbars="none"/>
+
+            <AbsoluteLayout android:id="@+id/plugin_container"
+                            android:background="@android:color/transparent"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"/>
+
+            <org.mozilla.gecko.FormAssistPopup android:id="@+id/form_assist_popup"
+                                               android:layout_width="match_parent"
+                                               android:layout_height="match_parent"
+                                               android:visibility="gone"/>
+
+            <view class="org.mozilla.gecko.media.VideoPlayer" android:id="@+id/video_player"
+                         android:layout_height="match_parent"
+                         android:layout_width="match_parent">
+            </view>
 
             <ViewStub android:id="@+id/zoomed_view_stub"
                       android:inflatedId="@+id/zoomed_view"
@@ -33,13 +53,18 @@
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content" />
 
-            <FrameLayout android:id="@+id/home_pager_container"
+            <FrameLayout android:id="@+id/home_screen_container"
                          android:layout_width="match_parent"
                          android:layout_height="match_parent"
                          android:visibility="gone">
 
                 <ViewStub android:id="@+id/home_pager_stub"
                           android:layout="@layout/home_pager"
+                          android:layout_width="match_parent"
+                          android:layout_height="match_parent"/>
+
+                <ViewStub android:id="@+id/activity_stream_stub"
+                          android:layout="@layout/activity_stream"
                           android:layout_width="match_parent"
                           android:layout_height="match_parent"/>
 
@@ -50,7 +75,7 @@
                           android:layout_gravity="bottom"/>
 
                 <ViewStub android:id="@+id/firstrun_pager_stub"
-                          android:layout="@layout/firstrun_pane"
+                          android:layout="@layout/firstrun_animation_container"
                           android:layout_width="match_parent"
                           android:layout_height="match_parent"/>
 
@@ -60,7 +85,6 @@
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
                   android:background="@color/dark_transparent_overlay"
-                  android:visibility="gone"
                   android:alpha="0"
                   android:layerType="hardware"/>
 
@@ -104,7 +128,7 @@
                       android:layout_height="@dimen/tablet_tab_strip_height"
                       android:visibility="gone"/>
 
-            <org.mozilla.gecko.widget.GeckoViewFlipper
+            <ViewFlipper
                 android:id="@+id/browser_actionbar"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/browser_toolbar_height_flipper"
@@ -123,9 +147,9 @@
                 <org.mozilla.gecko.ActionModeCompatView android:id="@+id/actionbar"
                                                         android:layout_height="match_parent"
                                                         android:layout_width="match_parent"
-                                                        style="@style/GeckoActionBar"/>
+                                                        style="@style/GeckoActionBar.ActionMode"/>
 
-            </org.mozilla.gecko.widget.GeckoViewFlipper>
+            </ViewFlipper>
 
         </LinearLayout>
 

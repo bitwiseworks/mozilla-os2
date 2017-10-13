@@ -22,14 +22,13 @@ function test() {
   let favIconErrorPageURI =
     NetUtil.newURI("chrome://global/skin/icons/warning-16.png");
   let favIconsResultCount = 0;
-  let pageURI;
 
   function testOnWindow(aOptions, aCallback) {
     whenNewWindowLoaded(aOptions, function(aWin) {
       windowsToClose.push(aWin);
       executeSoon(() => aCallback(aWin));
     });
-  };
+  }
 
   // This function is called after calling finish() on the test.
   registerCleanupFunction(function() {
@@ -42,15 +41,15 @@ function test() {
     let stmt = DBConn().createAsyncStatement("SELECT url FROM moz_favicons");
     stmt.executeAsync({
       handleResult: function final_handleResult(aResultSet) {
-        for (let row; (row = aResultSet.getNextRow()); ) {
+        while (aResultSet.getNextRow()) {
           favIconsResultCount++;
         }
       },
       handleError: function final_handleError(aError) {
-        throw("Unexpected error (" + aError.result + "): " + aError.message);
+        throw ("Unexpected error (" + aError.result + "): " + aError.message);
       },
       handleCompletion: function final_handleCompletion(aReason) {
-        //begin testing
+        // begin testing
         info("Previous records in moz_favicons: " + favIconsResultCount);
         if (aCallback) {
           aCallback();
@@ -65,7 +64,7 @@ function test() {
       aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(null, favIcon16URI,
         true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
         Services.scriptSecurityManager.getSystemPrincipal());
-      throw("Exception expected because aPageURI is null.");
+      throw ("Exception expected because aPageURI is null.");
     } catch (ex) {
       // We expected an exception.
       ok(true, "Exception expected because aPageURI is null");
@@ -82,7 +81,7 @@ function test() {
         NetUtil.newURI("http://example.com/null_faviconURI"), null,
         true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
         null, Services.scriptSecurityManager.getSystemPrincipal());
-      throw("Exception expected because aFaviconURI is null.");
+      throw ("Exception expected because aFaviconURI is null.");
     } catch (ex) {
       // We expected an exception.
       ok(true, "Exception expected because aFaviconURI is null.");
@@ -143,7 +142,6 @@ function test() {
 
   function testErrorIcon(aWindow, aCallback) {
     let pageURI = NetUtil.newURI("http://example.com/errorIcon");
-    let places = [{ uri: pageURI, transition: TRANSITION_TYPED }];
     addVisits({ uri: pageURI, transition: TRANSITION_TYPED }, aWindow,
       function () {
         aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI,
@@ -199,7 +197,7 @@ function test() {
             }
           },
           handleError: function final_handleError(aError) {
-            throw("Unexpected error (" + aError.result + "): " + aError.message);
+            throw ("Unexpected error (" + aError.result + "): " + aError.message);
           },
           handleCompletion: function final_handleCompletion(aReason) {
             is(Ci.mozIStorageStatementCallback.REASON_FINISHED, aReason,
@@ -228,20 +226,20 @@ function test() {
   checkFavIconsDBCount(function () {
     testOnWindow({}, function(aWin) {
       testNullPageURI(aWin, function () {
-        testOnWindow({}, function(aWin) {
-          testNullFavIconURI(aWin, function() {
-            testOnWindow({}, function(aWin) {
-              testAboutURI(aWin, function() {
-                testOnWindow({private: true}, function(aWin) {
-                  testPrivateBrowsingNonBookmarkedURI(aWin, function () {
-                    testOnWindow({}, function(aWin) {
-                      testDisabledHistory(aWin, function () {
-                        testOnWindow({}, function(aWin) {
-                          testErrorIcon(aWin, function() {
-                            testOnWindow({}, function(aWin) {
-                              testNonExistingPage(aWin, function() {
-                                testOnWindow({}, function(aWin) {
-                                  testFinalVerification(aWin, function() {
+        testOnWindow({}, function(aWin2) {
+          testNullFavIconURI(aWin2, function() {
+            testOnWindow({}, function(aWin3) {
+              testAboutURI(aWin3, function() {
+                testOnWindow({private: true}, function(aWin4) {
+                  testPrivateBrowsingNonBookmarkedURI(aWin4, function () {
+                    testOnWindow({}, function(aWin5) {
+                      testDisabledHistory(aWin5, function () {
+                        testOnWindow({}, function(aWin6) {
+                          testErrorIcon(aWin6, function() {
+                            testOnWindow({}, function(aWin7) {
+                              testNonExistingPage(aWin7, function() {
+                                testOnWindow({}, function(aWin8) {
+                                  testFinalVerification(aWin8, function() {
                                     finish();
                                   });
                                 });

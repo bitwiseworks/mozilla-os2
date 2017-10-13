@@ -110,7 +110,7 @@ txAttribute::execute(txExecutionState& aEs)
     nsCOMPtr<nsIAtom> prefix;
     uint32_t lnameStart = 0;
     if (colon) {
-        prefix = do_GetAtom(Substring(name.get(), colon));
+        prefix = NS_Atomize(Substring(name.get(), colon));
         lnameStart = colon - name.get() + 1;
     }
 
@@ -826,7 +826,7 @@ txStartElement::execute(txExecutionState& aEs)
     const char16_t* colon;
     if (XMLUtils::isValidQName(name, &colon)) {
         if (colon) {
-            prefix = do_GetAtom(Substring(name.get(), colon));
+            prefix = NS_Atomize(Substring(name.get(), colon));
             lnameStart = colon - name.get() + 1;
         }
 

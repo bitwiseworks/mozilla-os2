@@ -10,6 +10,8 @@
 
 #include <EGL/eglext.h>
 #include <algorithm>
+#include <cstring>
+#include <fstream>
 
 #include "common/debug.h"
 #include "libANGLE/Config.h"
@@ -17,6 +19,58 @@
 #include "libANGLE/Surface.h"
 #include "libANGLE/renderer/gl/glx/PbufferSurfaceGLX.h"
 #include "libANGLE/renderer/gl/glx/WindowSurfaceGLX.h"
+#include "libANGLE/renderer/gl/RendererGL.h"
+#include "libANGLE/renderer/gl/renderergl_utils.h"
+#include "third_party/libXNVCtrl/NVCtrl.h"
+#include "third_party/libXNVCtrl/NVCtrlLib.h"
+
+namespace
+{
+
+// Scan /etc/ati/amdpcsdb.default for "ReleaseVersion".
+// Return empty string on failing.
+egl::Error GetAMDDriverVersion(std::string *version)
+{
+    *version = "";
+
+    const char kAMDDriverInfoFileName[] = "/etc/ati/amdpcsdb.default";
+    std::ifstream file(kAMDDriverInfoFileName);
+
+    if (!file)
+    {
+        return egl::Error(EGL_SUCCESS);
+    }
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        static const char kReleaseVersion[] = "ReleaseVersion=";
+        if (line.compare(0, std::strlen(kReleaseVersion), kReleaseVersion) != 0)
+        {
+            continue;
+        }
+
+        const size_t begin = line.find_first_of("0123456789");
+        if (begin == std::string::npos)
+        {
+            continue;
+        }
+
+        const size_t end = line.find_first_not_of("0123456789.", begin);
+        if (end == std::string::npos)
+        {
+            *version = line.substr(begin);
+        }
+        else
+        {
+            *version = line.substr(begin, end - begin);
+        }
+        return egl::Error(EGL_SUCCESS);
+    }
+    return egl::Error(EGL_SUCCESS);
+}
+
+}  // anonymous namespace
 
 namespace rx
 {
@@ -41,9 +95,7 @@ class FunctionsGLGLX : public FunctionsGL
     {
     }
 
-    virtual ~FunctionsGLGLX()
-    {
-    }
+    ~FunctionsGLGLX() override {}
 
   private:
     void *loadProcAddress(const std::string &function) override
@@ -57,6 +109,7 @@ class FunctionsGLGLX : public FunctionsGL
 DisplayGLX::DisplayGLX()
     : DisplayGL(),
       mFunctionsGL(nullptr),
+      mRequestedVisual(-1),
       mContextConfig(nullptr),
       mContext(nullptr),
       mDummyPbuffer(0),
@@ -64,10 +117,14 @@ DisplayGLX::DisplayGLX()
       mIsMesa(false),
       mHasMultisample(false),
       mHasARBCreateContext(false),
+      mHasARBCreateContextProfile(false),
+      mHasARBCreateContextRobustness(false),
+      mHasEXTCreateContextES2Profile(false),
       mSwapControl(SwapControl::Absent),
       mMinSwapInterval(0),
       mMaxSwapInterval(0),
       mCurrentSwapInterval(-1),
+      mXDisplay(nullptr),
       mEGLDisplay(nullptr)
 {
 }
@@ -79,29 +136,36 @@ DisplayGLX::~DisplayGLX()
 egl::Error DisplayGLX::initialize(egl::Display *display)
 {
     mEGLDisplay = display;
-    Display *xDisplay = display->getNativeDisplayId();
+    mXDisplay             = display->getNativeDisplayId();
+    const auto &attribMap = display->getAttributeMap();
 
     // ANGLE_platform_angle allows the creation of a default display
     // using EGL_DEFAULT_DISPLAY (= nullptr). In this case just open
     // the display specified by the DISPLAY environment variable.
-    if (xDisplay == EGL_DEFAULT_DISPLAY)
+    if (mXDisplay == EGL_DEFAULT_DISPLAY)
     {
         mUsesNewXDisplay = true;
-        xDisplay = XOpenDisplay(NULL);
-        if (!xDisplay)
+        mXDisplay = XOpenDisplay(NULL);
+        if (!mXDisplay)
         {
             return egl::Error(EGL_NOT_INITIALIZED, "Could not open the default X display.");
         }
     }
 
     std::string glxInitError;
-    if (!mGLX.initialize(xDisplay, DefaultScreen(xDisplay), &glxInitError))
+    if (!mGLX.initialize(mXDisplay, DefaultScreen(mXDisplay), &glxInitError))
     {
         return egl::Error(EGL_NOT_INITIALIZED, glxInitError.c_str());
     }
 
     mHasMultisample      = mGLX.minorVersion > 3 || mGLX.hasExtension("GLX_ARB_multisample");
     mHasARBCreateContext = mGLX.hasExtension("GLX_ARB_create_context");
+    mHasARBCreateContextProfile    = mGLX.hasExtension("GLX_ARB_create_context_profile");
+    mHasARBCreateContextRobustness = mGLX.hasExtension("GLX_ARB_create_context_robustness");
+    mHasEXTCreateContextES2Profile = mGLX.hasExtension("GLX_EXT_create_context_es2_profile");
+
+    std::string clientVendor = mGLX.getClientString(GLX_VENDOR);
+    mIsMesa                  = clientVendor.find("Mesa") != std::string::npos;
 
     // Choose the swap_control extension to use, if any.
     // The EXT version is better as it allows glXSwapInterval to be called per
@@ -137,14 +201,42 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
         mMinSwapInterval = 1;
     }
 
-    // When glXMakeCurrent is called, the context and the surface must be
-    // compatible which in glX-speak means that their config have the same
-    // color buffer type, are both RGBA or ColorIndex, and their buffers have
-    // the same depth, if they exist.
-    // Since our whole EGL implementation is backed by only one GL context, this
-    // context must be compatible with all the GLXFBConfig corresponding to the
-    // EGLconfigs that we will be exposing.
+    if (attribMap.contains(EGL_X11_VISUAL_ID_ANGLE))
     {
+        mRequestedVisual = static_cast<EGLint>(attribMap.get(EGL_X11_VISUAL_ID_ANGLE, -1));
+
+        // There is no direct way to get the GLXFBConfig matching an X11 visual ID
+        // so we have to iterate over all the GLXFBConfigs to find the right one.
+        int nConfigs;
+        int attribList[] = {
+            None,
+        };
+        glx::FBConfig *allConfigs = mGLX.chooseFBConfig(attribList, &nConfigs);
+
+        for (int i = 0; i < nConfigs; ++i)
+        {
+            if (getGLXFBConfigAttrib(allConfigs[i], GLX_VISUAL_ID) == mRequestedVisual)
+            {
+                mContextConfig = allConfigs[i];
+                break;
+            }
+        }
+        XFree(allConfigs);
+
+        if (mContextConfig == nullptr)
+        {
+            return egl::Error(EGL_NOT_INITIALIZED, "Invalid visual ID requested.");
+        }
+    }
+    else
+    {
+        // When glXMakeCurrent is called, the context and the surface must be
+        // compatible which in glX-speak means that their config have the same
+        // color buffer type, are both RGBA or ColorIndex, and their buffers have
+        // the same depth, if they exist.
+        // Since our whole EGL implementation is backed by only one GL context, this
+        // context must be compatible with all the GLXFBConfig corresponding to the
+        // EGLconfigs that we will be exposing.
         int nConfigs;
         int attribList[] =
         {
@@ -168,7 +260,7 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
             GLX_CONFIG_CAVEAT, GLX_NONE,
             None
         };
-        glx::FBConfig* candidates = mGLX.chooseFBConfig(attribList, &nConfigs);
+        glx::FBConfig *candidates = mGLX.chooseFBConfig(attribList, &nConfigs);
         if (nConfigs == 0)
         {
             XFree(candidates);
@@ -178,17 +270,32 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
         XFree(candidates);
     }
 
+    const auto &eglAttributes = display->getAttributeMap();
     if (mHasARBCreateContext)
     {
-        mContext = initializeContext(mContextConfig, display->getAttributeMap());
+        egl::Error error = initializeContext(mContextConfig, eglAttributes, &mContext);
+        if (error.isError())
+        {
+            return error;
+        }
     }
     else
     {
+        if (eglAttributes.get(EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+                              EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE) ==
+            EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE)
+        {
+            return egl::Error(EGL_NOT_INITIALIZED,
+                              "Cannot create an OpenGL ES platform on GLX without the "
+                              "GLX_ARB_create_context extension.");
+        }
+
         XVisualInfo visualTemplate;
         visualTemplate.visualid = getGLXFBConfigAttrib(mContextConfig, GLX_VISUAL_ID);
 
         int numVisuals       = 0;
-        XVisualInfo *visuals = XGetVisualInfo(xDisplay, VisualIDMask, &visualTemplate, &numVisuals);
+        XVisualInfo *visuals =
+            XGetVisualInfo(mXDisplay, VisualIDMask, &visualTemplate, &numVisuals);
         if (numVisuals <= 0)
         {
             return egl::Error(EGL_NOT_INITIALIZED,
@@ -198,11 +305,13 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
 
         mContext = mGLX.createContext(&visuals[0], nullptr, true);
         XFree(visuals);
+
+        if (!mContext)
+        {
+            return egl::Error(EGL_NOT_INITIALIZED, "Could not create GL context.");
+        }
     }
-    if (!mContext)
-    {
-        return egl::Error(EGL_NOT_INITIALIZED, "Could not create GL context.");
-    }
+    ASSERT(mContext);
 
     // FunctionsGL and DisplayGL need to make a few GL calls, for example to
     // query the version of the context so we need to make the context current.
@@ -234,11 +343,19 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
     mFunctionsGL = new FunctionsGLGLX(mGLX.getProc);
     mFunctionsGL->initialize();
 
-    syncXCommands();
+    // TODO(cwallez, angleproject:1303) Disable the OpenGL ES backend on Linux NVIDIA and Intel as
+    // it has problems on our automated testing. An OpenGL ES backend might not trigger this test if
+    // there is no Desktop OpenGL support, but that's not the case in our automated testing.
+    VendorID vendor = GetVendorID(mFunctionsGL);
+    bool isOpenGLES =
+        eglAttributes.get(EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE) ==
+        EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE;
+    if (isOpenGLES && (IsIntel(vendor) || IsNvidia(vendor)))
+    {
+        return egl::Error(EGL_NOT_INITIALIZED, "Intel or NVIDIA OpenGL ES drivers are not supported.");
+    }
 
-    std::string rendererString =
-        reinterpret_cast<const char*>(mFunctionsGL->getString(GL_RENDERER));
-    mIsMesa = rendererString.find("Mesa") != std::string::npos;
+    syncXCommands();
 
     return DisplayGL::initialize(display);
 }
@@ -264,40 +381,45 @@ void DisplayGLX::terminate()
     SafeDelete(mFunctionsGL);
 }
 
-SurfaceImpl *DisplayGLX::createWindowSurface(const egl::Config *configuration,
+SurfaceImpl *DisplayGLX::createWindowSurface(const egl::SurfaceState &state,
+                                             const egl::Config *configuration,
                                              EGLNativeWindowType window,
                                              const egl::AttributeMap &attribs)
 {
     ASSERT(configIdToGLXConfig.count(configuration->configID) > 0);
     glx::FBConfig fbConfig = configIdToGLXConfig[configuration->configID];
 
-    return new WindowSurfaceGLX(mGLX, this, this->getRenderer(), window, mGLX.getDisplay(),
+    return new WindowSurfaceGLX(state, mGLX, this, getRenderer(), window, mGLX.getDisplay(),
                                 mContext, fbConfig);
 }
 
-SurfaceImpl *DisplayGLX::createPbufferSurface(const egl::Config *configuration,
+SurfaceImpl *DisplayGLX::createPbufferSurface(const egl::SurfaceState &state,
+                                              const egl::Config *configuration,
                                               const egl::AttributeMap &attribs)
 {
     ASSERT(configIdToGLXConfig.count(configuration->configID) > 0);
     glx::FBConfig fbConfig = configIdToGLXConfig[configuration->configID];
 
-    EGLint width = attribs.get(EGL_WIDTH, 0);
-    EGLint height = attribs.get(EGL_HEIGHT, 0);
+    EGLint width  = static_cast<EGLint>(attribs.get(EGL_WIDTH, 0));
+    EGLint height = static_cast<EGLint>(attribs.get(EGL_HEIGHT, 0));
     bool largest = (attribs.get(EGL_LARGEST_PBUFFER, EGL_FALSE) == EGL_TRUE);
 
-    return new PbufferSurfaceGLX(this->getRenderer(), width, height, largest, mGLX, mContext,
+    return new PbufferSurfaceGLX(state, getRenderer(), width, height, largest, mGLX, mContext,
                                  fbConfig);
 }
 
-SurfaceImpl* DisplayGLX::createPbufferFromClientBuffer(const egl::Config *configuration,
-                                                       EGLClientBuffer shareHandle,
+SurfaceImpl *DisplayGLX::createPbufferFromClientBuffer(const egl::SurfaceState &state,
+                                                       const egl::Config *configuration,
+                                                       EGLenum buftype,
+                                                       EGLClientBuffer clientBuffer,
                                                        const egl::AttributeMap &attribs)
 {
     UNIMPLEMENTED();
     return nullptr;
 }
 
-SurfaceImpl *DisplayGLX::createPixmapSurface(const egl::Config *configuration,
+SurfaceImpl *DisplayGLX::createPixmapSurface(const egl::SurfaceState &state,
+                                             const egl::Config *configuration,
                                              NativePixmapType nativePixmap,
                                              const egl::AttributeMap &attribs)
 {
@@ -311,84 +433,128 @@ egl::Error DisplayGLX::getDevice(DeviceImpl **device)
     return egl::Error(EGL_BAD_DISPLAY);
 }
 
-glx::Context DisplayGLX::initializeContext(glx::FBConfig config,
-                                           const egl::AttributeMap &eglAttributes)
+egl::Error DisplayGLX::initializeContext(glx::FBConfig config,
+                                         const egl::AttributeMap &eglAttributes,
+                                         glx::Context *context)
 {
-    // Create a context of the requested version, if any.
-    EGLint requestedMajorVersion =
-        eglAttributes.get(EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE, EGL_DONT_CARE);
-    EGLint requestedMinorVersion =
-        eglAttributes.get(EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE, EGL_DONT_CARE);
-    if (requestedMajorVersion != EGL_DONT_CARE && requestedMinorVersion != EGL_DONT_CARE)
+    int profileMask = 0;
+
+    EGLint requestedDisplayType = static_cast<EGLint>(
+        eglAttributes.get(EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE));
+    if (requestedDisplayType == EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE)
     {
-        std::vector<int> contextAttributes;
-        contextAttributes.push_back(GLX_CONTEXT_MAJOR_VERSION_ARB);
-        contextAttributes.push_back(requestedMajorVersion);
+        if (!mHasEXTCreateContextES2Profile)
+        {
+            return egl::Error(EGL_NOT_INITIALIZED,
+                              "Cannot create an OpenGL ES platform on GLX without the "
+                              "GLX_EXT_create_context_es_profile extension.");
+        }
 
-        contextAttributes.push_back(GLX_CONTEXT_MINOR_VERSION_ARB);
-        contextAttributes.push_back(requestedMinorVersion);
+        ASSERT(mHasARBCreateContextProfile);
+        profileMask |= GLX_CONTEXT_ES2_PROFILE_BIT_EXT;
+    }
 
-        contextAttributes.push_back(None);
-        return createContextAttribs(config, contextAttributes);
+    // Create a context of the requested version, if any.
+    gl::Version requestedVersion(static_cast<EGLint>(eglAttributes.get(
+                                     EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE, EGL_DONT_CARE)),
+                                 static_cast<EGLint>(eglAttributes.get(
+                                     EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE, EGL_DONT_CARE)));
+    if (static_cast<EGLint>(requestedVersion.major) != EGL_DONT_CARE &&
+        static_cast<EGLint>(requestedVersion.minor) != EGL_DONT_CARE)
+    {
+        if (!(profileMask & GLX_CONTEXT_ES2_PROFILE_BIT_EXT) &&
+            requestedVersion >= gl::Version(3, 2))
+        {
+            profileMask |= GLX_CONTEXT_CORE_PROFILE_BIT_ARB;
+        }
+        return createContextAttribs(config, requestedVersion, profileMask, context);
     }
 
     // It is commonly assumed that glXCreateContextAttrib will create a context
     // of the highest version possible but it is not specified in the spec and
-    // is not true on the Mesa drivers. Instead we try to create a context per
-    // desktop GL version until we succeed, starting from newer version.
+    // is not true on the Mesa drivers. On Mesa, Instead we try to create a
+    // context per GL version until we succeed, starting from newer version.
+    // On both Mesa and other drivers we try to create a desktop context and fall
+    // back to ES context.
+    // The code could be simpler if the Mesa code path was used for all drivers,
+    // however the cost of failing a context creation can be high (3 milliseconds
+    // for the NVIDIA driver). The good thing is that failed context creation only
+    // takes 0.1 milliseconds on Mesa.
+
+    struct ContextCreationInfo
+    {
+        EGLint displayType;
+        int profileFlag;
+        Optional<gl::Version> version;
+    };
+
     // clang-format off
-    const gl::Version desktopVersions[] = {
-        gl::Version(4, 5),
-        gl::Version(4, 4),
-        gl::Version(4, 3),
-        gl::Version(4, 2),
-        gl::Version(4, 1),
-        gl::Version(4, 0),
-        gl::Version(3, 3),
-        gl::Version(3, 2),
-        gl::Version(3, 1),
-        gl::Version(3, 0),
-        gl::Version(2, 0),
-        gl::Version(1, 5),
-        gl::Version(1, 4),
-        gl::Version(1, 3),
-        gl::Version(1, 2),
-        gl::Version(1, 1),
-        gl::Version(1, 0),
+    // For regular drivers we try to create a core, compatibility, then ES context.
+    // Without requiring any specific version (the Optional version is undefined).
+    const ContextCreationInfo contextsToTry[] = {
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, {} },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, {} },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, GLX_CONTEXT_ES2_PROFILE_BIT_EXT, {} },
+    };
+
+    // On Mesa we try to create a core context, except for versions below 3.2
+    // where it is not applicable. (and fallback to ES as well)
+    const ContextCreationInfo mesaContextsToTry[] = {
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 5) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 4) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 3) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 2) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 1) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(4, 0) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(3, 3) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, { gl::Version(3, 2) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(3, 1) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(3, 0) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(2, 0) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 5) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 4) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 3) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 2) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 1) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, { gl::Version(1, 0) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, GLX_CONTEXT_ES2_PROFILE_BIT_EXT, { gl::Version(3, 2) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, GLX_CONTEXT_ES2_PROFILE_BIT_EXT, { gl::Version(3, 1) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, GLX_CONTEXT_ES2_PROFILE_BIT_EXT, { gl::Version(3, 0) } },
+        { EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, GLX_CONTEXT_ES2_PROFILE_BIT_EXT, { gl::Version(2, 0) } },
     };
     // clang-format on
 
-    bool useProfile = mGLX.hasExtension("GLX_ARB_create_context_profile");
-    for (size_t i = 0; i < ArraySize(desktopVersions); ++i)
+    const ContextCreationInfo *toTry = contextsToTry;
+    size_t toTryLength = ArraySize(contextsToTry);
+    if (mIsMesa)
     {
-        const auto &version = desktopVersions[i];
+        toTry       = mesaContextsToTry;
+        toTryLength = ArraySize(mesaContextsToTry);
+    }
 
-        std::vector<int> contextAttributes;
-        contextAttributes.push_back(GLX_CONTEXT_MAJOR_VERSION_ARB);
-        contextAttributes.push_back(version.major);
-
-        contextAttributes.push_back(GLX_CONTEXT_MINOR_VERSION_ARB);
-        contextAttributes.push_back(version.minor);
-
-        if (useProfile && version >= gl::Version(3, 2))
+    // NOTE: below we return as soon as we're able to create a context so the
+    // "error" variable is EGL_SUCCESS when returned contrary to the common idiom
+    // of returning "error" when there is an actual error.
+    for (size_t i = 0; i < toTryLength; ++i)
+    {
+        const ContextCreationInfo &info = toTry[i];
+        if (requestedDisplayType != EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE &&
+            requestedDisplayType != info.displayType)
         {
-            contextAttributes.push_back(GLX_CONTEXT_PROFILE_MASK_ARB);
-            contextAttributes.push_back(GLX_CONTEXT_CORE_PROFILE_BIT_ARB);
+            continue;
         }
 
-        contextAttributes.push_back(None);
-        auto context = createContextAttribs(config, contextAttributes);
-
-        if (context)
+        egl::Error error = createContextAttribs(config, info.version, info.profileFlag, context);
+        if (!error.isError())
         {
-            return context;
+            return error;
         }
     }
 
-    return nullptr;
+    return egl::Error(EGL_NOT_INITIALIZED, "Could not create a backing OpenGL context.");
 }
 
-egl::ConfigSet DisplayGLX::generateConfigs() const
+egl::ConfigSet DisplayGLX::generateConfigs()
 {
     egl::ConfigSet configs;
     configIdToGLXConfig.clear();
@@ -434,6 +600,14 @@ egl::ConfigSet DisplayGLX::generateConfigs() const
         config.nativeVisualID = getGLXFBConfigAttrib(glxConfig, GLX_VISUAL_ID);
         config.nativeVisualType = getGLXFBConfigAttrib(glxConfig, GLX_X_VISUAL_TYPE);
         config.nativeRenderable = EGL_TRUE;
+
+        // When a visual ID has been specified with EGL_ANGLE_x11_visual we should
+        // only return configs with this visual: it will maximize performance by avoid
+        // blits in the driver when showing the window on the screen.
+        if (mRequestedVisual != -1 && config.nativeVisualID != mRequestedVisual)
+        {
+            continue;
+        }
 
         // Buffer sizes
         config.redSize = getGLXFBConfigAttrib(glxConfig, GLX_RED_SIZE);
@@ -555,21 +729,18 @@ egl::ConfigSet DisplayGLX::generateConfigs() const
     return configs;
 }
 
-bool DisplayGLX::isDeviceLost() const
-{
-    // UNIMPLEMENTED();
-    return false;
-}
-
 bool DisplayGLX::testDeviceLost()
 {
-    // UNIMPLEMENTED();
+    if (mHasARBCreateContextRobustness)
+    {
+        return getRenderer()->getResetStatus() != GL_NO_ERROR;
+    }
+
     return false;
 }
 
 egl::Error DisplayGLX::restoreLostDevice()
 {
-    UNIMPLEMENTED();
     return egl::Error(EGL_BAD_DISPLAY);
 }
 
@@ -581,7 +752,7 @@ bool DisplayGLX::isValidNativeWindow(EGLNativeWindowType window) const
     // fail if the window doesn't exist (the rational is that these function
     // are used by window managers). Out of these function we use XQueryTree
     // as it seems to be the simplest; a drawback is that it will allocate
-    // memory for the list of children, becasue we use a child window for
+    // memory for the list of children, because we use a child window for
     // WindowSurface.
     Window root;
     Window parent;
@@ -599,6 +770,63 @@ std::string DisplayGLX::getVendorString() const
 {
     // UNIMPLEMENTED();
     return "";
+}
+
+egl::Error DisplayGLX::waitClient() const
+{
+    mGLX.waitGL();
+    return egl::Error(EGL_SUCCESS);
+}
+
+egl::Error DisplayGLX::getDriverVersion(std::string *version) const
+{
+    VendorID vendor = GetVendorID(mFunctionsGL);
+
+    switch (vendor)
+    {
+        case VENDOR_ID_NVIDIA:
+            return getNVIDIADriverVersion(version);
+        case VENDOR_ID_AMD:
+            return GetAMDDriverVersion(version);
+        default:
+            *version = "";
+            return egl::Error(EGL_SUCCESS);
+    }
+}
+
+egl::Error DisplayGLX::waitNative(EGLint engine,
+                                  egl::Surface *drawSurface,
+                                  egl::Surface *readSurface) const
+{
+    // eglWaitNative is used to notice the driver of changes in X11 for the current surface, such as
+    // changes of the window size. We use this event to update the child window of WindowSurfaceGLX
+    // to match its parent window's size.
+    // Handling eglWaitNative this way helps the application control when resize happens. This is
+    // important because drivers have a tendency to clobber the back buffer when the windows are
+    // resized. See http://crbug.com/326995
+    if (drawSurface != nullptr)
+    {
+        SurfaceGLX *glxDrawSurface = GetImplAs<SurfaceGLX>(drawSurface);
+        egl::Error error = glxDrawSurface->checkForResize();
+        if (error.isError())
+        {
+            return error;
+        }
+    }
+
+    if (readSurface != drawSurface && readSurface != nullptr)
+    {
+        SurfaceGLX *glxReadSurface = GetImplAs<SurfaceGLX>(readSurface);
+        egl::Error error = glxReadSurface->checkForResize();
+        if (error.isError())
+        {
+            return error;
+        }
+    }
+
+    // We still need to forward the resizing of the child window to the driver.
+    mGLX.waitX();
+    return egl::Error(EGL_SUCCESS);
 }
 
 void DisplayGLX::syncXCommands() const
@@ -644,12 +872,17 @@ void DisplayGLX::setSwapInterval(glx::Drawable drawable, SwapControlData *data)
         {
             mGLX.swapIntervalMESA(data->targetSwapInterval);
         }
-        else if (mSwapControl == SwapControl::Mesa)
+        else if (mSwapControl == SwapControl::SGI)
         {
             mGLX.swapIntervalSGI(data->targetSwapInterval);
         }
         mCurrentSwapInterval = data->targetSwapInterval;
     }
+}
+
+bool DisplayGLX::isValidWindowVisualId(unsigned long visualId) const
+{
+    return mRequestedVisual == -1 || static_cast<unsigned long>(mRequestedVisual) == visualId;
 }
 
 const FunctionsGL *DisplayGLX::getFunctionsGL() const
@@ -659,12 +892,11 @@ const FunctionsGL *DisplayGLX::getFunctionsGL() const
 
 void DisplayGLX::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
-    outExtensions->createContext = true;
+    outExtensions->createContextRobustness = mHasARBCreateContextRobustness;
 }
 
 void DisplayGLX::generateCaps(egl::Caps *outCaps) const
 {
-    // UNIMPLEMENTED();
     outCaps->textureNPOT = true;
 }
 
@@ -675,15 +907,75 @@ int DisplayGLX::getGLXFBConfigAttrib(glx::FBConfig config, int attrib) const
     return result;
 }
 
-glx::Context DisplayGLX::createContextAttribs(glx::FBConfig, const std::vector<int> &attribs) const
+egl::Error DisplayGLX::createContextAttribs(glx::FBConfig,
+                                            const Optional<gl::Version> &version,
+                                            int profileMask,
+                                            glx::Context *context) const
 {
+    std::vector<int> attribs;
+
+    if (mHasARBCreateContextRobustness)
+    {
+        attribs.push_back(GLX_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB);
+        attribs.push_back(GLX_LOSE_CONTEXT_ON_RESET_ARB);
+    }
+
+    if (version.valid())
+    {
+        attribs.push_back(GLX_CONTEXT_MAJOR_VERSION_ARB);
+        attribs.push_back(version.value().major);
+
+        attribs.push_back(GLX_CONTEXT_MINOR_VERSION_ARB);
+        attribs.push_back(version.value().minor);
+    }
+
+    if (profileMask != 0 && mHasARBCreateContextProfile)
+    {
+        attribs.push_back(GLX_CONTEXT_PROFILE_MASK_ARB);
+        attribs.push_back(profileMask);
+    }
+
+    attribs.push_back(None);
+
     // When creating a context with glXCreateContextAttribsARB, a variety of X11 errors can
     // be generated. To prevent these errors from crashing our process, we simply ignore
     // them and only look if GLXContext was created.
+    // Process all events before setting the error handler to avoid desynchronizing XCB instances
+    // (the error handler is NOT per-display).
+    XSync(mXDisplay, False);
     auto oldErrorHandler = XSetErrorHandler(IgnoreX11Errors);
-    auto context = mGLX.createContextAttribsARB(mContextConfig, nullptr, True, attribs.data());
+    *context = mGLX.createContextAttribsARB(mContextConfig, nullptr, True, attribs.data());
     XSetErrorHandler(oldErrorHandler);
 
-    return context;
+    if (!*context)
+    {
+        return egl::Error(EGL_NOT_INITIALIZED, "Could not create GL context.");
+    }
+    return egl::Error(EGL_SUCCESS);
+}
+
+egl::Error DisplayGLX::getNVIDIADriverVersion(std::string *version) const
+{
+    *version = "";
+
+    int eventBase = 0;
+    int errorBase = 0;
+    if (XNVCTRLQueryExtension(mXDisplay, &eventBase, &errorBase))
+    {
+        int screenCount = ScreenCount(mXDisplay);
+        for (int screen = 0; screen < screenCount; ++screen)
+        {
+            char *buffer = nullptr;
+            if (XNVCTRLIsNvScreen(mXDisplay, screen) &&
+                XNVCTRLQueryStringAttribute(mXDisplay, screen, 0,
+                                            NV_CTRL_STRING_NVIDIA_DRIVER_VERSION, &buffer))
+            {
+                *version = buffer;
+                XFree(buffer);
+            }
+        }
+    }
+
+    return egl::Error(EGL_SUCCESS);
 }
 }

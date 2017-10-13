@@ -8,7 +8,7 @@
 
 #include "nsIDeviceContextSpec.h"
 #include "nsIPrintSettings.h"
-#include "nsIPrintOptions.h" 
+#include "nsIPrinterEnumerator.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
@@ -30,11 +30,12 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD GetSurfaceForPrinter(gfxASurface **surface) override;
+  virtual already_AddRefed<PrintTarget> MakePrintTarget() final;
 
   NS_IMETHOD Init(nsIWidget *aWidget, nsIPrintSettings* aPS,
                   bool aIsPrintPreview) override;
-  NS_IMETHOD BeginDocument(const nsAString& aTitle, char16_t * aPrintToFileName,
+  NS_IMETHOD BeginDocument(const nsAString& aTitle,
+                           const nsAString& aPrintToFileName,
                            int32_t aStartPage, int32_t aEndPage) override;
   NS_IMETHOD EndDocument() override;
   NS_IMETHOD BeginPage() override { return NS_OK; }

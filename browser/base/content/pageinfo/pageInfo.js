@@ -5,7 +5,7 @@
 Components.utils.import("resource://gre/modules/LoadContextInfo.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
-//******** define a js object to implement nsITreeView
+// define a js object to implement nsITreeView
 function pageInfoTreeView(treeid, copycol)
 {
   // copycol is the index number for the column that we want to add to
@@ -58,11 +58,8 @@ pageInfoTreeView.prototype = {
 
   addRows: function(rows)
   {
-    this.data = this.data.concat(rows);
-    this.rowCountChanged(this.rows, rows.length);
-    this.rows = this.data.length;
-    if (this.selection.count == 0 && this.rowCount && !gImageElement) {
-      this.selection.select(0);
+    for (let row of rows) {
+      this.addRow(row);
     }
   },
 
@@ -108,7 +105,7 @@ pageInfoTreeView.prototype = {
         this,
         this.data,
         treecol.index,
-        function textComparator(a, b) { return (a || "").toLowerCase().localeCompare((b || "").toLowerCase()); },
+        function textComparator(a, b) { return (a || "").toLowerCase().localeCompare((b || "").toLowerCase()); },
         this.sortcol,
         this.sortdir
       );
@@ -191,10 +188,9 @@ gImageView.getCellText = function(row, column) {
   if (column.index == COL_IMAGE_SIZE) {
     if (value == -1) {
       return gStrings.unknown;
-    } else {
-      var kbSize = Number(Math.round(value / 1024 * 100) / 100);
-      return gBundle.getFormattedString("mediaFileSize", [kbSize]);
     }
+    var kbSize = Number(Math.round(value / 1024 * 100) / 100);
+    return gBundle.getFormattedString("mediaFileSize", [kbSize]);
   }
   return value || "";
 };
@@ -266,8 +262,9 @@ const CERTIFICATEDIALOGS_CONTRACTID = "@mozilla.org/nsCertificateDialogs;1"
 function getClipboardHelper() {
     try {
         return Components.classes["@mozilla.org/widget/clipboardhelper;1"].getService(Components.interfaces.nsIClipboardHelper);
-    } catch(e) {
+    } catch (e) {
         // do nothing, later code will handle the error
+        return null;
     }
 }
 const gClipboardHelper = getClipboardHelper();
@@ -349,9 +346,10 @@ function onLoadPageInfo()
             .notifyObservers(window, "page-info-dialog-loaded", null);
 }
 
-function loadPageInfo(frameOuterWindowID, imageElement)
+function loadPageInfo(frameOuterWindowID, imageElement, browser)
 {
-  let mm = window.opener.gBrowser.selectedBrowser.messageManager;
+  browser = browser || window.opener.gBrowser.selectedBrowser;
+  let mm = browser.messageManager;
 
   gStrings["application/rss+xml"]  = gBundle.getString("feedRss");
   gStrings["application/atom+xml"] = gBundle.getString("feedAtom");
@@ -374,6 +372,7 @@ function loadPageInfo(frameOuterWindowID, imageElement)
     let windowInfo = pageInfoData.windowInfo;
     let uri = makeURI(docInfo.documentURIObject.spec,
                       docInfo.documentURIObject.originCharset);
+    let principal = docInfo.principal;
     gDocInfo = docInfo;
 
     gImageElement = pageInfoData.imageInfo;
@@ -386,7 +385,7 @@ function loadPageInfo(frameOuterWindowID, imageElement)
 
     makeGeneralTab(pageInfoData.metaViewRows, docInfo);
     initFeedTab(pageInfoData.feeds);
-    onLoadPermission(uri);
+    onLoadPermission(uri, principal);
     securityOnLoad(uri, windowInfo);
   });
 
@@ -405,7 +404,10 @@ function loadPageInfo(frameOuterWindowID, imageElement)
       return;
     }
 
-    addImage(message.data.imageViewRow);
+    for (let item of message.data.mediaItems) {
+      addImage(item);
+    }
+
     selectImage();
   });
 
@@ -481,11 +483,11 @@ function loadTab(args)
   // If the "View Image Info" context menu item was used, the related image
   // element is provided as an argument. This can't be a background image.
   let imageElement = args && args.imageElement;
-
   let frameOuterWindowID = args && args.frameOuterWindowID;
+  let browser = args && args.browser;
 
   /* Load the page info */
-  loadPageInfo(frameOuterWindowID, imageElement);
+  loadPageInfo(frameOuterWindowID, imageElement, browser);
 
   var initialTab = (args && args.initialTab) || "generalTab";
   var radioGroup = document.getElementById("viewGroup");
@@ -527,7 +529,7 @@ function openCacheEntry(key, cb)
 
 function makeGeneralTab(metaViewRows, docInfo)
 {
-  var title = (docInfo.title) ? gBundle.getFormattedString("pageTitle", [docInfo.title]) : gBundle.getString("noPageTitle");
+  var title = (docInfo.title) ? docInfo.title : gBundle.getString("noPageTitle");
   document.getElementById("titletext").value = title;
 
   var url = docInfo.location;
@@ -634,14 +636,14 @@ function addImage(imageViewRow)
   }
 }
 
-//******** Link Stuff
+// Link Stuff
 function openURL(target)
 {
   var url = target.parentNode.childNodes[2].value;
   window.open(url, "_blank", "chrome");
 }
 
-function onBeginLinkDrag(event,urlField,descField)
+function onBeginLinkDrag(event, urlField, descField)
 {
   if (event.originalTarget.localName != "treechildren")
     return;
@@ -666,7 +668,7 @@ function onBeginLinkDrag(event,urlField,descField)
   dt.setData("text/plain", url);
 }
 
-//******** Image Stuff
+// Image Stuff
 function getSelectedRows(tree)
 {
   var start = { };
@@ -757,7 +759,7 @@ function saveMedia()
           try {
             uri.QueryInterface(Components.interfaces.nsIURL);
             dir.append(decodeURIComponent(uri.fileName));
-          } catch(ex) {
+          } catch (ex) {
             // data:/blob: uris
             // Supply a dummy filename, otherwise Download Manager
             // will try to delete the base directory on failure.
@@ -822,7 +824,6 @@ function onImageSelect()
 // Makes the media preview (image, video, etc) for the selected row on the media tab.
 function makePreview(row)
 {
-  var imageTree = document.getElementById("imagetree");
   var item = gImageView.data[row][COL_IMAGE_NODE];
   var url = gImageView.data[row][COL_IMAGE_ADDRESS];
   var isBG = gImageView.data[row][COL_IMAGE_BG];
@@ -1013,7 +1014,6 @@ var imagePermissionObserver = {
       if (permission.type == "image") {
         var imageTree = document.getElementById("imagetree");
         var row = getSelectedRow(imageTree);
-        var item = gImageView.data[row][COL_IMAGE_NODE];
         var url = gImageView.data[row][COL_IMAGE_ADDRESS];
         if (permission.matchesURI(makeURI(url), true)) {
           makeBlockImage(url);
@@ -1051,18 +1051,16 @@ function formatNumber(number)
 
 function formatDate(datestr, unknown)
 {
-  // scriptable date formatter, for pretty printing dates
-  var dateService = Components.classes["@mozilla.org/intl/scriptabledateformat;1"]
-                              .getService(Components.interfaces.nsIScriptableDateFormat);
-
   var date = new Date(datestr);
   if (!date.valueOf())
     return unknown;
 
-  return dateService.FormatDateTime("", dateService.dateFormatLong,
-                                    dateService.timeFormatSeconds,
-                                    date.getFullYear(), date.getMonth()+1, date.getDate(),
-                                    date.getHours(), date.getMinutes(), date.getSeconds());
+  const locale = Components.classes["@mozilla.org/chrome/chrome-registry;1"]
+                 .getService(Components.interfaces.nsIXULChromeRegistry)
+                 .getSelectedLocale("global", true);
+  const dtOptions = { year: 'numeric', month: 'long', day: 'numeric',
+                      hour: 'numeric', minute: 'numeric', second: 'numeric' };
+  return date.toLocaleString(locale, dtOptions);
 }
 
 function doCopy()

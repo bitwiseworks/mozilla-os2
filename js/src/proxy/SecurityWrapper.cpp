@@ -14,7 +14,7 @@ using namespace js;
 static void
 ReportUnwrapDenied(JSContext *cx)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNWRAP_DENIED);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_UNWRAP_DENIED);
 }
 
 template <class Base>
@@ -77,9 +77,9 @@ SecurityWrapper<Base>::isExtensible(JSContext* cx, HandleObject wrapper, bool* e
 template <class Base>
 bool
 SecurityWrapper<Base>::getBuiltinClass(JSContext* cx, HandleObject wrapper,
-                                       ESClassValue* classValue) const
+                                       ESClass* cls) const
 {
-    *classValue = ESClass_Other;
+    *cls = ESClass::Other;
     return true;
 }
 

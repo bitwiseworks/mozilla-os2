@@ -44,8 +44,8 @@ nsSVGMarkerFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
 
-  return nsSVGMarkerFrameBase::AttributeChanged(aNameSpaceID,
-                                                aAttribute, aModType);
+  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
+                                               aAttribute, aModType);
 }
 
 #ifdef DEBUG
@@ -56,7 +56,7 @@ nsSVGMarkerFrame::Init(nsIContent*       aContent,
 {
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::marker), "Content is not an SVG marker");
 
-  nsSVGMarkerFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -95,7 +95,7 @@ nsSVGMarkerFrame::GetCanvasTM()
 static nsIFrame*
 GetAnonymousChildFrame(nsIFrame* aFrame)
 {
-  nsIFrame* kid = aFrame->GetFirstPrincipalChild();
+  nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
   MOZ_ASSERT(kid && kid->GetType() == nsGkAtoms::svgMarkerAnonChildFrame,
              "expected to find anonymous child of marker frame");
   return kid;
@@ -154,12 +154,12 @@ nsSVGMarkerFrame::PaintMark(gfxContext& aContext,
   nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
   // The CTM of each frame referencing us may be different.
   SVGFrame->NotifySVGChanged(nsISVGChildFrame::TRANSFORM_CHANGED);
-  nsSVGUtils::PaintFrameWithEffects(kid, aContext, markTM);
+  DrawResult result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, markTM);
 
   if (StyleDisplay()->IsScrollableOverflow())
     aContext.Restore();
 
-  return NS_OK;
+  return (result == DrawResult::SUCCESS) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 SVGBBox
@@ -267,7 +267,7 @@ nsSVGMarkerAnonChildFrame::Init(nsIContent*       aContent,
 {
   MOZ_ASSERT(aParent->GetType() == nsGkAtoms::svgMarkerFrame,
              "Unexpected parent");
-  nsSVGMarkerAnonChildFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif
 

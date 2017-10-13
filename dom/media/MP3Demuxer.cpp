@@ -10,23 +10,25 @@
 #include <algorithm>
 
 #include "mozilla/Assertions.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
+#include "nsAutoPtr.h"
 #include "VideoUtils.h"
 #include "TimeUnits.h"
 #include "prenv.h"
 
 #ifdef PR_LOGGING
-mozilla::LazyLogModule gMP3DemuxerLog("MP3Demuxer");
+extern mozilla::LazyLogModule gMediaDemuxerLog;
 #define MP3LOG(msg, ...) \
-  MOZ_LOG(gMP3DemuxerLog, LogLevel::Debug, ("MP3Demuxer " msg, ##__VA_ARGS__))
+  MOZ_LOG(gMediaDemuxerLog, LogLevel::Debug, ("MP3Demuxer " msg, ##__VA_ARGS__))
 #define MP3LOGV(msg, ...) \
-  MOZ_LOG(gMP3DemuxerLog, LogLevel::Verbose, ("MP3Demuxer " msg, ##__VA_ARGS__))
+  MOZ_LOG(gMediaDemuxerLog, LogLevel::Verbose, ("MP3Demuxer " msg, ##__VA_ARGS__))
 #else
 #define MP3LOG(msg, ...)
 #define MP3LOGV(msg, ...)
 #endif
 
 using mozilla::media::TimeUnit;
+using mozilla::media::TimeInterval;
 using mozilla::media::TimeIntervals;
 using mp4_demuxer::ByteReader;
 
@@ -53,7 +55,7 @@ MP3Demuxer::Init() {
     MP3LOG("MP3Demuxer::Init() failure: waiting for data");
 
     return InitPromise::CreateAndReject(
-      DemuxerFailureReason::DEMUXER_ERROR, __func__);
+      NS_ERROR_DOM_MEDIA_METADATA_ERR, __func__);
   }
 
   MP3LOG("MP3Demuxer::Init() successful");
@@ -119,7 +121,7 @@ MP3TrackDemuxer::Init() {
   Reset();
   FastSeek(TimeUnit());
   // Read the first frame to fetch sample rate and other meta data.
-  RefPtr<MediaRawData> frame(GetNextFrame(FindNextFrame()));
+  RefPtr<MediaRawData> frame(GetNextFrame(FindFirstFrame()));
 
   MP3LOG("Init StreamLength()=%" PRId64 " first-frame-found=%d",
          StreamLength(), !!frame);
@@ -157,7 +159,6 @@ MP3TrackDemuxer::SeekPosition() const {
   return pos;
 }
 
-#ifdef ENABLE_TESTS
 const FrameParser::Frame&
 MP3TrackDemuxer::LastFrame() const {
   return mParser.PrevFrame();
@@ -167,7 +168,6 @@ RefPtr<MediaRawData>
 MP3TrackDemuxer::DemuxSample() {
   return GetNextFrame(FindNextFrame());
 }
-#endif
 
 const ID3Parser::ID3Header&
 MP3TrackDemuxer::ID3Header() const {
@@ -198,13 +198,14 @@ TimeUnit
 MP3TrackDemuxer::FastSeek(const TimeUnit& aTime) {
   MP3LOG("FastSeek(%" PRId64 ") avgFrameLen=%f mNumParsedFrames=%" PRIu64
          " mFrameIndex=%" PRId64 " mOffset=%" PRIu64,
-         aTime, AverageFrameLength(), mNumParsedFrames, mFrameIndex, mOffset);
+         aTime.ToMicroseconds(), AverageFrameLength(), mNumParsedFrames,
+         mFrameIndex, mOffset);
 
   const auto& vbr = mParser.VBRInfo();
   if (!aTime.ToMicroseconds()) {
     // Quick seek to the beginning of the stream.
     mFrameIndex = 0;
-  } else if (vbr.IsTOCPresent()) {
+  } else if (vbr.IsTOCPresent() && Duration().ToMicroseconds() > 0) {
     // Use TOC for more precise seeking.
     const float durationFrac = static_cast<float>(aTime.ToMicroseconds()) /
                                                   Duration().ToMicroseconds();
@@ -234,7 +235,8 @@ TimeUnit
 MP3TrackDemuxer::ScanUntil(const TimeUnit& aTime) {
   MP3LOG("ScanUntil(%" PRId64 ") avgFrameLen=%f mNumParsedFrames=%" PRIu64
          " mFrameIndex=%" PRId64 " mOffset=%" PRIu64,
-         aTime, AverageFrameLength(), mNumParsedFrames, mFrameIndex, mOffset);
+         aTime.ToMicroseconds(), AverageFrameLength(), mNumParsedFrames,
+         mFrameIndex, mOffset);
 
   if (!aTime.ToMicroseconds()) {
     return FastSeek(aTime);
@@ -253,13 +255,13 @@ MP3TrackDemuxer::ScanUntil(const TimeUnit& aTime) {
     nextRange = FindNextFrame();
     MP3LOGV("ScanUntil* avgFrameLen=%f mNumParsedFrames=%" PRIu64
             " mFrameIndex=%" PRId64 " mOffset=%" PRIu64 " Duration=%" PRId64,
-            aTime, AverageFrameLength(), mNumParsedFrames, mFrameIndex,
-            mOffset, Duration(mFrameIndex + 1));
+            AverageFrameLength(), mNumParsedFrames,
+            mFrameIndex, mOffset, Duration(mFrameIndex + 1).ToMicroseconds());
   }
 
   MP3LOG("ScanUntil End avgFrameLen=%f mNumParsedFrames=%" PRIu64
          " mFrameIndex=%" PRId64 " mOffset=%" PRIu64,
-         aTime, AverageFrameLength(), mNumParsedFrames, mFrameIndex, mOffset);
+         AverageFrameLength(), mNumParsedFrames, mFrameIndex, mOffset);
 
   return SeekPosition();
 }
@@ -274,7 +276,7 @@ MP3TrackDemuxer::GetSamples(int32_t aNumSamples) {
 
   if (!aNumSamples) {
     return SamplesPromise::CreateAndReject(
-        DemuxerFailureReason::DEMUXER_ERROR, __func__);
+        NS_ERROR_DOM_MEDIA_DEMUXER_ERR, __func__);
   }
 
   RefPtr<SamplesHolder> frames = new SamplesHolder();
@@ -298,7 +300,7 @@ MP3TrackDemuxer::GetSamples(int32_t aNumSamples) {
 
   if (frames->mSamples.IsEmpty()) {
     return SamplesPromise::CreateAndReject(
-        DemuxerFailureReason::END_OF_STREAM, __func__);
+        NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
   }
   return SamplesPromise::CreateAndResolve(frames, __func__);
 }
@@ -315,7 +317,7 @@ RefPtr<MP3TrackDemuxer::SkipAccessPointPromise>
 MP3TrackDemuxer::SkipToNextRandomAccessPoint(TimeUnit aTimeThreshold) {
   // Will not be called for audio-only resources.
   return SkipAccessPointPromise::CreateAndReject(
-    SkipFailureHolder(DemuxerFailureReason::DEMUXER_ERROR, 0), __func__);
+    SkipFailureHolder(NS_ERROR_DOM_MEDIA_DEMUXER_ERR, 0), __func__);
 }
 
 int64_t
@@ -325,13 +327,33 @@ MP3TrackDemuxer::GetResourceOffset() const {
 
 TimeIntervals
 MP3TrackDemuxer::GetBuffered() {
-  TimeUnit duration = Duration();
-
-  if (duration <= TimeUnit()) {
-    return TimeIntervals();
-  }
   AutoPinned<MediaResource> stream(mSource.GetResource());
-  return GetEstimatedBufferedTimeRanges(stream, duration.ToMicroseconds());
+  TimeIntervals buffered;
+
+  if (Duration() > TimeUnit() && stream->IsDataCachedToEndOfResource(0)) {
+    // Special case completely cached files. This also handles local files.
+    buffered += TimeInterval(TimeUnit(), Duration());
+    MP3LOGV("buffered = [[%" PRId64 ", %" PRId64 "]]",
+            TimeUnit().ToMicroseconds(), Duration().ToMicroseconds());
+    return buffered;
+  }
+
+  MediaByteRangeSet ranges;
+  nsresult rv = stream->GetCachedRanges(ranges);
+  NS_ENSURE_SUCCESS(rv, buffered);
+
+  for (const auto& range: ranges) {
+    if (range.IsEmpty()) {
+      continue;
+    }
+    TimeUnit start = Duration(FrameIndexFromOffset(range.mStart));
+    TimeUnit end = Duration(FrameIndexFromOffset(range.mEnd));
+    MP3LOGV("buffered += [%" PRId64 ", %" PRId64 "]",
+            start.ToMicroseconds(), end.ToMicroseconds());
+    buffered += TimeInterval(start, end);
+  }
+
+  return buffered;
 }
 
 int64_t
@@ -347,7 +369,7 @@ MP3TrackDemuxer::Duration() const {
 
   int64_t numFrames = 0;
   const auto numAudioFrames = mParser.VBRInfo().NumAudioFrames();
-  if (numAudioFrames) {
+  if (mParser.VBRInfo().IsValid() && numAudioFrames.valueOr(0) + 1 > 1) {
     // VBR headers don't include the VBR header frame.
     numFrames = numAudioFrames.value() + 1;
   } else {
@@ -356,7 +378,9 @@ MP3TrackDemuxer::Duration() const {
       // Unknown length, we can't estimate duration.
       return TimeUnit::FromMicroseconds(-1);
     }
-    numFrames = (streamLen - mFirstFrameOffset) / AverageFrameLength();
+    if (AverageFrameLength() > 0) {
+      numFrames = (streamLen - mFirstFrameOffset) / AverageFrameLength();
+    }
   }
   return Duration(numFrames);
 }
@@ -369,6 +393,53 @@ MP3TrackDemuxer::Duration(int64_t aNumFrames) const {
 
   const double usPerFrame = USECS_PER_S * mSamplesPerFrame / mSamplesPerSecond;
   return TimeUnit::FromMicroseconds(aNumFrames * usPerFrame);
+}
+
+MediaByteRange
+MP3TrackDemuxer::FindFirstFrame() {
+  static const int MIN_SUCCESSIVE_FRAMES = 4;
+
+  MediaByteRange candidateFrame = FindNextFrame();
+  int numSuccFrames = candidateFrame.Length() > 0;
+  MediaByteRange currentFrame = candidateFrame;
+  MP3LOGV("FindFirst() first candidate frame: mOffset=%" PRIu64 " Length()=%" PRIu64,
+          candidateFrame.mStart, candidateFrame.Length());
+
+  while (candidateFrame.Length() && numSuccFrames < MIN_SUCCESSIVE_FRAMES) {
+    mParser.EndFrameSession();
+    mOffset = currentFrame.mEnd;
+    const MediaByteRange prevFrame = currentFrame;
+
+    // FindNextFrame() here will only return frames consistent with our candidate frame.
+    currentFrame = FindNextFrame();
+    numSuccFrames += currentFrame.Length() > 0;
+    // Multiple successive false positives, which wouldn't be caught by the consistency
+    // checks alone, can be detected by wrong alignment (non-zero gap between frames).
+    const int64_t frameSeparation = currentFrame.mStart - prevFrame.mEnd;
+
+    if (!currentFrame.Length() || frameSeparation != 0) {
+      MP3LOGV("FindFirst() not enough successive frames detected, "
+              "rejecting candidate frame: successiveFrames=%d, last Length()=%" PRIu64
+              ", last frameSeparation=%" PRId64, numSuccFrames, currentFrame.Length(),
+              frameSeparation);
+
+      mParser.ResetFrameData();
+      mOffset = candidateFrame.mStart + 1;
+      candidateFrame = FindNextFrame();
+      numSuccFrames = candidateFrame.Length() > 0;
+      currentFrame = candidateFrame;
+      MP3LOGV("FindFirst() new candidate frame: mOffset=%" PRIu64 " Length()=%" PRIu64,
+              candidateFrame.mStart, candidateFrame.Length());
+    }
+  }
+
+  if (numSuccFrames >= MIN_SUCCESSIVE_FRAMES) {
+    MP3LOG("FindFirst() accepting candidate frame: "
+            "successiveFrames=%d", numSuccFrames);
+  } else {
+    MP3LOG("FindFirst() no suitable first frame found");
+  }
+  return candidateFrame;
 }
 
 static bool
@@ -422,7 +493,6 @@ MP3TrackDemuxer::FindNextFrame() {
     // If we've found neither an MPEG frame header nor an ID3v2 tag,
     // the reader shouldn't have any bytes remaining.
     MOZ_ASSERT(foundFrame || bytesToSkip || !reader.Remaining());
-    reader.DiscardRemaining();
 
     if (foundFrame && mParser.FirstFrame().Length() &&
         !VerifyFrameConsistency(mParser.FirstFrame(), mParser.CurrentFrame())) {
@@ -511,10 +581,8 @@ MP3TrackDemuxer::GetNextFrame(const MediaByteRange& aRange) {
 
   if (mNumParsedFrames == 1) {
     // First frame parsed, let's read VBR info if available.
-    // TODO: read info that helps with seeking (bug 1163667).
     ByteReader reader(frame->Data(), frame->Size());
     mParser.ParseVBRHeader(&reader);
-    reader.DiscardRemaining();
     mFirstFrameOffset = frame->mOffset;
   }
 
@@ -532,7 +600,7 @@ MP3TrackDemuxer::OffsetFromFrameIndex(int64_t aFrameIndex) const {
   int64_t offset = 0;
   const auto& vbr = mParser.VBRInfo();
 
-  if (vbr.NumBytes() && vbr.NumAudioFrames()) {
+  if (vbr.IsComplete()) {
     offset = mFirstFrameOffset + aFrameIndex * vbr.NumBytes().value() /
              vbr.NumAudioFrames().value();
   } else if (AverageFrameLength() > 0) {
@@ -548,7 +616,7 @@ MP3TrackDemuxer::FrameIndexFromOffset(int64_t aOffset) const {
   int64_t frameIndex = 0;
   const auto& vbr = mParser.VBRInfo();
 
-  if (vbr.NumBytes() && vbr.NumAudioFrames()) {
+  if (vbr.IsComplete()) {
     frameIndex = static_cast<float>(aOffset - mFirstFrameOffset) /
                  vbr.NumBytes().value() * vbr.NumAudioFrames().value();
     frameIndex = std::min<int64_t>(vbr.NumAudioFrames().value(), frameIndex);
@@ -624,7 +692,7 @@ MP3TrackDemuxer::AverageFrameLength() const {
     return static_cast<double>(mTotalFrameLen) / mNumParsedFrames;
   }
   const auto& vbr = mParser.VBRInfo();
-  if (vbr.NumBytes() && vbr.NumAudioFrames()) {
+  if (vbr.IsComplete() && vbr.NumAudioFrames().value() + 1) {
     return static_cast<double>(vbr.NumBytes().value()) /
            (vbr.NumAudioFrames().value() + 1);
   }
@@ -652,14 +720,19 @@ FrameParser::Reset() {
 }
 
 void
+FrameParser::ResetFrameData() {
+  mFrame.Reset();
+  mFirstFrame.Reset();
+  mPrevFrame.Reset();
+}
+
+void
 FrameParser::EndFrameSession() {
   if (!mID3Parser.Header().IsValid()) {
     // Reset ID3 tags only if we have not parsed a valid ID3 header yet.
     mID3Parser.Reset();
   }
-#ifdef ENABLE_TESTS
   mPrevFrame = mFrame;
-#endif
   mFrame.Reset();
 }
 
@@ -668,12 +741,10 @@ FrameParser::CurrentFrame() const {
   return mFrame;
 }
 
-#ifdef ENABLE_TESTS
 const FrameParser::Frame&
 FrameParser::PrevFrame() const {
   return mPrevFrame;
 }
-#endif
 
 const FrameParser::Frame&
 FrameParser::FirstFrame() const {
@@ -960,6 +1031,21 @@ FrameParser::VBRHeader::IsTOCPresent() const {
   return mTOC.size() == vbr_header::TOC_SIZE;
 }
 
+bool
+FrameParser::VBRHeader::IsValid() const {
+  return mType != NONE;
+}
+
+bool
+FrameParser::VBRHeader::IsComplete() const {
+  return IsValid() &&
+         mNumAudioFrames.valueOr(0) > 0 &&
+         mNumBytes.valueOr(0) > 0 &&
+         // We don't care about the scale for any computations here.
+         // mScale < 101 &&
+         true;
+}
+
 int64_t
 FrameParser::VBRHeader::Offset(float aDurationFac) const {
   if (!IsTOCPresent()) {
@@ -1047,7 +1133,7 @@ FrameParser::VBRHeader::ParseVBRI(ByteReader* aReader) {
   MOZ_ASSERT(aReader);
   // ParseVBRI assumes that the ByteReader offset points to the beginning of a frame,
   // therefore as a simple check, we look for the presence of a frame sync at that position.
-  MOZ_ASSERT(aReader->PeekU16() & 0xFFE0);
+  MOZ_ASSERT((aReader->PeekU16() & 0xFFE0) == 0xFFE0);
   const size_t prevReaderOffset = aReader->Offset();
 
   // VBRI have a fixed relative position, so let's check for it there.

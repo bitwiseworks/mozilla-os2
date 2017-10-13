@@ -16,6 +16,7 @@
 #include "android/log.h"
 #include "GLContext.h"
 #include "gfxPrefs.h"
+#include "gfxUtils.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Hal.h"
@@ -26,7 +27,9 @@
 #include "HwcComposer2D.h"
 #include "VsyncSource.h"
 #include "nsWindow.h"
-#include "mozilla/layers/CompositorParent.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/Services.h"
 #include "mozilla/ProcessPriorityManager.h"
 #include "nsIdleService.h"
@@ -36,6 +39,7 @@
 #include "nsTArray.h"
 #include "pixelflinger/format.h"
 #include "nsIDisplayInfo.h"
+#include "base/task.h"
 
 #if ANDROID_VERSION >= 17
 #include "libdisplay/DisplaySurface.h"
@@ -54,19 +58,19 @@ using namespace mozilla::dom;
 
 namespace {
 
-class ScreenOnOffEvent : public nsRunnable {
+class ScreenOnOffEvent : public mozilla::Runnable {
 public:
     ScreenOnOffEvent(bool on)
         : mIsOn(on)
     {}
 
-    NS_IMETHOD Run() {
+    NS_IMETHOD Run() override {
         // Notify observers that the screen state has just changed.
         nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
         if (observerService) {
           observerService->NotifyObservers(
             nullptr, "screen-state-changed",
-            mIsOn ? MOZ_UTF16("on") : MOZ_UTF16("off")
+            mIsOn ? u"on" : u"off"
           );
         }
 
@@ -129,6 +133,8 @@ nsScreenGonk::nsScreenGonk(uint32_t aId,
     , mEGLDisplay(EGL_NO_DISPLAY)
     , mEGLSurface(EGL_NO_SURFACE)
     , mGLContext(nullptr)
+    , mFramebuffer(nullptr)
+    , mMappedBuffer(nullptr)
 {
     if (mNativeWindow->query(mNativeWindow.get(), NATIVE_WINDOW_WIDTH, &mVirtualBounds.width) ||
         mNativeWindow->query(mNativeWindow.get(), NATIVE_WINDOW_HEIGHT, &mVirtualBounds.height) ||
@@ -148,8 +154,9 @@ nsScreenGonk::nsScreenGonk(uint32_t aId,
 }
 
 static void
-ReleaseGLContextSync(mozilla::gl::GLContext* aGLContext) {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+ReleaseGLContextSync(mozilla::gl::GLContext* aGLContext)
+{
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     aGLContext->Release();
 }
 
@@ -157,8 +164,7 @@ nsScreenGonk::~nsScreenGonk()
 {
     // Release GLContext on compositor thread
     if (mGLContext) {
-        CompositorParent::CompositorLoop()->PostTask(
-            FROM_HERE,
+        CompositorThreadHolder::Loop()->PostTask(
             NewRunnableFunction(&ReleaseGLContextSync,
                                 mGLContext.forget().take()));
         mGLContext = nullptr;
@@ -368,6 +374,126 @@ nsScreenGonk::BringToTop(nsWindow* aWindow)
     mTopWindows.InsertElementAt(0, aWindow);
 }
 
+static gralloc_module_t const*
+gralloc_module()
+{
+    hw_module_t const *module;
+    if (hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &module)) {
+        return nullptr;
+    }
+    return reinterpret_cast<gralloc_module_t const*>(module);
+}
+
+static SurfaceFormat
+HalFormatToSurfaceFormat(int aHalFormat)
+{
+    switch (aHalFormat) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+        // Needs RB swap
+        return SurfaceFormat::B8G8R8A8;
+    case HAL_PIXEL_FORMAT_RGBX_8888:
+        // Needs RB swap
+        return SurfaceFormat::B8G8R8X8;
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+        return SurfaceFormat::B8G8R8A8;
+    case HAL_PIXEL_FORMAT_RGB_565:
+        return SurfaceFormat::R5G6B5_UINT16;
+    default:
+        MOZ_CRASH("Unhandled HAL pixel format");
+        return SurfaceFormat::UNKNOWN; // not reached
+    }
+}
+
+static bool
+NeedsRBSwap(int aHalFormat)
+{
+    switch (aHalFormat) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+        return true;
+    case HAL_PIXEL_FORMAT_RGBX_8888:
+        return true;
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+        return false;
+    case HAL_PIXEL_FORMAT_RGB_565:
+        return false;
+    default:
+        MOZ_CRASH("Unhandled HAL pixel format");
+        return false; // not reached
+    }
+}
+
+already_AddRefed<DrawTarget>
+nsScreenGonk::StartRemoteDrawing()
+{
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+    MOZ_ASSERT(!mFramebuffer);
+    MOZ_ASSERT(!mMappedBuffer);
+
+    mFramebuffer = DequeueBuffer();
+    int width = mFramebuffer->width, height = mFramebuffer->height;
+    if (gralloc_module()->lock(gralloc_module(), mFramebuffer->handle,
+                               GRALLOC_USAGE_SW_READ_NEVER |
+                               GRALLOC_USAGE_SW_WRITE_OFTEN |
+                               GRALLOC_USAGE_HW_FB,
+                               0, 0, width, height,
+                               reinterpret_cast<void**>(&mMappedBuffer))) {
+        EndRemoteDrawing();
+        return nullptr;
+    }
+    SurfaceFormat format = HalFormatToSurfaceFormat(GetSurfaceFormat());
+    mFramebufferTarget = Factory::CreateDrawTargetForData(
+        BackendType::CAIRO,
+        mMappedBuffer,
+        IntSize(width, height),
+        mFramebuffer->stride * gfx::BytesPerPixel(format),
+        format);
+    if (!mFramebufferTarget) {
+        MOZ_CRASH("nsWindow::StartRemoteDrawing failed in CreateDrawTargetForData");
+    }
+    if (!mBackBuffer ||
+        mBackBuffer->GetSize() != mFramebufferTarget->GetSize() ||
+        mBackBuffer->GetFormat() != mFramebufferTarget->GetFormat()) {
+        mBackBuffer = mFramebufferTarget->CreateSimilarDrawTarget(
+            mFramebufferTarget->GetSize(), mFramebufferTarget->GetFormat());
+    }
+    RefPtr<DrawTarget> buffer(mBackBuffer);
+    return buffer.forget();
+}
+
+void
+nsScreenGonk::EndRemoteDrawing()
+{
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+
+    if (mFramebufferTarget && mFramebuffer) {
+        IntSize size = mFramebufferTarget->GetSize();
+        Rect rect(0, 0, size.width, size.height);
+        RefPtr<SourceSurface> source = mBackBuffer->Snapshot();
+        mFramebufferTarget->DrawSurface(source, rect, rect);
+
+        // Convert from BGR to RGB
+        // XXX this is a temporary solution. It consumes extra cpu cycles,
+        // it should not be used on product device.
+        if (NeedsRBSwap(GetSurfaceFormat())) {
+            LOGE("Very slow composition path, it should not be used on product!!!");
+            SurfaceFormat format = HalFormatToSurfaceFormat(GetSurfaceFormat());
+            gfxUtils::ConvertBGRAtoRGBA(
+                mMappedBuffer,
+                mFramebuffer->stride * mFramebuffer->height * gfx::BytesPerPixel(format));
+        }
+    }
+    if (mMappedBuffer) {
+        MOZ_ASSERT(mFramebuffer);
+        gralloc_module()->unlock(gralloc_module(), mFramebuffer->handle);
+        mMappedBuffer = nullptr;
+    }
+    if (mFramebuffer) {
+        QueueBuffer(mFramebuffer);
+    }
+    mFramebuffer = nullptr;
+    mFramebufferTarget = nullptr;
+}
+
 ANativeWindowBuffer*
 nsScreenGonk::DequeueBuffer()
 {
@@ -401,6 +527,63 @@ nsScreenGonk::QueueBuffer(ANativeWindowBuffer* buf)
 #endif
 }
 
+nsresult
+nsScreenGonk::MakeSnapshot(ANativeWindowBuffer* aBuffer)
+{
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+    MOZ_ASSERT(aBuffer);
+
+    layers::CompositorBridgeParent* compositorParent = mCompositorBridgeParent;
+    if (!compositorParent) {
+        return NS_ERROR_FAILURE;
+    }
+
+    int width = aBuffer->width, height = aBuffer->height;
+    uint8_t* mappedBuffer = nullptr;
+    if (gralloc_module()->lock(gralloc_module(), aBuffer->handle,
+                               GRALLOC_USAGE_SW_READ_OFTEN |
+                               GRALLOC_USAGE_SW_WRITE_OFTEN,
+                               0, 0, width, height,
+                               reinterpret_cast<void**>(&mappedBuffer))) {
+        return NS_ERROR_FAILURE;
+    }
+
+    SurfaceFormat format = HalFormatToSurfaceFormat(GetSurfaceFormat());
+    RefPtr<DrawTarget> mTarget =
+        Factory::CreateDrawTargetForData(
+            BackendType::CAIRO,
+            mappedBuffer,
+            IntSize(width, height),
+            aBuffer->stride * gfx::BytesPerPixel(format),
+            format);
+    if (!mTarget) {
+        return NS_ERROR_FAILURE;
+    }
+
+    gfx::IntRect rect = GetRect().ToUnknownRect();
+    compositorParent->ForceComposeToTarget(mTarget, &rect);
+
+    // Convert from BGR to RGB
+    // XXX this is a temporary solution. It consumes extra cpu cycles,
+    if (NeedsRBSwap(GetSurfaceFormat())) {
+        LOGE("Slow path of making Snapshot!!!");
+        SurfaceFormat format = HalFormatToSurfaceFormat(GetSurfaceFormat());
+        gfxUtils::ConvertBGRAtoRGBA(
+            mappedBuffer,
+            aBuffer->stride * aBuffer->height * gfx::BytesPerPixel(format));
+        mappedBuffer = nullptr;
+    }
+    gralloc_module()->unlock(gralloc_module(), aBuffer->handle);
+    return NS_OK;
+}
+
+void
+nsScreenGonk::SetCompositorBridgeParent(layers::CompositorBridgeParent* aCompositorBridgeParent)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+    mCompositorBridgeParent = aCompositorBridgeParent;
+}
+
 #if ANDROID_VERSION >= 17
 android::DisplaySurface*
 nsScreenGonk::GetDisplaySurface()
@@ -429,7 +612,7 @@ nsScreenGonk::SetEGLInfo(hwc_display_t aDisplay,
                          hwc_surface_t aSurface,
                          gl::GLContext* aGLContext)
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     mEGLDisplay = aDisplay;
     mEGLSurface = aSurface;
     mGLContext = aGLContext;
@@ -438,21 +621,21 @@ nsScreenGonk::SetEGLInfo(hwc_display_t aDisplay,
 hwc_display_t
 nsScreenGonk::GetEGLDisplay()
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     return mEGLDisplay;
 }
 
 hwc_surface_t
 nsScreenGonk::GetEGLSurface()
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     return mEGLSurface;
 }
 
 already_AddRefed<mozilla::gl::GLContext>
 nsScreenGonk::GetGLContext()
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     RefPtr<mozilla::gl::GLContext>glContext = mGLContext;
     return glContext.forget();
 }
@@ -460,7 +643,7 @@ nsScreenGonk::GetGLContext()
 static void
 UpdateMirroringWidgetSync(nsMainThreadPtrHandle<nsScreenGonk>&& aScreen, nsWindow* aWindow)
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     already_AddRefed<nsWindow> window(aWindow);
     aScreen->UpdateMirroringWidget(window);
 }
@@ -481,14 +664,14 @@ nsScreenGonk::EnableMirroring()
     nsWidgetInitData initData;
     initData.mScreenId = mId;
     RefPtr<nsWindow> window = new nsWindow();
-    window->Create(nullptr, nullptr, mNaturalBounds, &initData);
+    nsresult rv = window->Create(nullptr, nullptr, mNaturalBounds, &initData);
+    NS_ENSURE_SUCCESS(rv, false);
     MOZ_ASSERT(static_cast<nsWindow*>(window)->GetScreen() == this);
 
     // Update mMirroringWidget on compositor thread
     nsMainThreadPtrHandle<nsScreenGonk> primary =
       nsMainThreadPtrHandle<nsScreenGonk>(new nsMainThreadPtrHolder<nsScreenGonk>(primaryScreen, false));
-    CompositorParent::CompositorLoop()->PostTask(
-        FROM_HERE,
+    CompositorThreadHolder::Loop()->PostTask(
         NewRunnableFunction(&UpdateMirroringWidgetSync,
                             primary,
                             window.forget().take()));
@@ -513,8 +696,7 @@ nsScreenGonk::DisableMirroring()
     // Update mMirroringWidget on compositor thread
     nsMainThreadPtrHandle<nsScreenGonk> primary =
       nsMainThreadPtrHandle<nsScreenGonk>(new nsMainThreadPtrHolder<nsScreenGonk>(primaryScreen, false));
-    CompositorParent::CompositorLoop()->PostTask(
-        FROM_HERE,
+    CompositorThreadHolder::Loop()->PostTask(
         NewRunnableFunction(&UpdateMirroringWidgetSync,
                             primary,
                             nullptr));
@@ -550,12 +732,12 @@ nsScreenGonk::ClearMirroringScreen(nsScreenGonk* aScreen)
 void
 nsScreenGonk::UpdateMirroringWidget(already_AddRefed<nsWindow>& aWindow)
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     MOZ_ASSERT(IsPrimaryScreen());
 
     if (mMirroringWidget) {
         nsCOMPtr<nsIWidget> widget = mMirroringWidget.forget();
-        NS_ReleaseOnMainThread(widget);
+        NS_ReleaseOnMainThread(widget.forget());
     }
     mMirroringWidget = aWindow;
 }
@@ -563,7 +745,7 @@ nsScreenGonk::UpdateMirroringWidget(already_AddRefed<nsWindow>& aWindow)
 nsWindow*
 nsScreenGonk::GetMirroringWidget()
 {
-    MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+    MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
     MOZ_ASSERT(IsPrimaryScreen());
 
     return mMirroringWidget;
@@ -573,6 +755,9 @@ NS_IMPL_ISUPPORTS(nsScreenManagerGonk, nsIScreenManager)
 
 nsScreenManagerGonk::nsScreenManagerGonk()
     : mInitialized(false)
+#if ANDROID_VERSION >= 19
+    , mDisplayEnabled(false)
+#endif
 {
 }
 
@@ -580,19 +765,33 @@ nsScreenManagerGonk::~nsScreenManagerGonk()
 {
 }
 
+static StaticRefPtr<nsScreenManagerGonk> sScreenManagerGonk;
+
 /* static */ already_AddRefed<nsScreenManagerGonk>
 nsScreenManagerGonk::GetInstance()
 {
-    nsCOMPtr<nsIScreenManager> manager;
-    manager = do_GetService("@mozilla.org/gfx/screenmanager;1");
-    MOZ_ASSERT(manager);
-    return already_AddRefed<nsScreenManagerGonk>(
-        static_cast<nsScreenManagerGonk*>(manager.forget().take()));
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Avoid creating nsScreenManagerGonk from content process.
+    if (!XRE_IsParentProcess()) {
+        MOZ_CRASH("Non-chrome processes should not get here.");
+    }
+
+    // Avoid creating multiple nsScreenManagerGonk instance inside main process.
+    if (!sScreenManagerGonk) {
+      sScreenManagerGonk = new nsScreenManagerGonk();
+      ClearOnShutdown(&sScreenManagerGonk);
+    }
+
+    RefPtr<nsScreenManagerGonk> screenMgr = sScreenManagerGonk.get();
+    return screenMgr.forget();
 }
 
 /* static */ already_AddRefed< nsScreenGonk>
 nsScreenManagerGonk::GetPrimaryScreen()
 {
+    MOZ_ASSERT(NS_IsMainThread());
+
     RefPtr<nsScreenManagerGonk> manager = nsScreenManagerGonk::GetInstance();
     nsCOMPtr<nsIScreen> screen;
     manager->GetPrimaryScreen(getter_AddRefs(screen));
@@ -621,6 +820,19 @@ nsScreenManagerGonk::Initialize()
 void
 nsScreenManagerGonk::DisplayEnabled(bool aEnabled)
 {
+    MOZ_ASSERT(NS_IsMainThread());
+
+#if ANDROID_VERSION >= 19
+    /* Bug 1244044
+     * This function could be called before |mCompositorVsyncScheduler| is set.
+     * To avoid this issue, keep the value stored in |mDisplayEnabled|.
+     */
+    mDisplayEnabled = aEnabled;
+    if (mCompositorVsyncScheduler) {
+        mCompositorVsyncScheduler->SetDisplay(mDisplayEnabled);
+    }
+#endif
+
     VsyncControl(aEnabled);
     NS_DispatchToMainThread(aEnabled ? mScreenOnEvent : mScreenOffEvent);
 }
@@ -692,9 +904,9 @@ nsScreenManagerGonk::VsyncControl(bool aEnabled)
 {
     if (!NS_IsMainThread()) {
         NS_DispatchToMainThread(
-            NS_NewRunnableMethodWithArgs<bool>(this,
-                                               &nsScreenManagerGonk::VsyncControl,
-                                               aEnabled));
+            NewRunnableMethod<bool>(this,
+                                    &nsScreenManagerGonk::VsyncControl,
+                                    aEnabled));
         return;
     }
 
@@ -763,14 +975,14 @@ private:
 
 NS_IMPL_ISUPPORTS(DisplayInfo, nsIDisplayInfo, nsISupports)
 
-class NotifyTask : public nsRunnable {
+class NotifyTask : public mozilla::Runnable {
 public:
     NotifyTask(uint32_t aId, bool aConnected)
         : mDisplayInfo(new DisplayInfo(aId, aConnected))
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
         if (os) {
@@ -853,3 +1065,17 @@ nsScreenManagerGonk::RemoveScreen(GonkDisplay::DisplayType aDisplayType)
     }
     return NS_OK;
 }
+
+#if ANDROID_VERSION >= 19
+void
+nsScreenManagerGonk::SetCompositorVsyncScheduler(mozilla::layers::CompositorVsyncScheduler *aObserver)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // We assume on b2g that there is only 1 CompositorBridgeParent
+    MOZ_ASSERT(mCompositorVsyncScheduler == nullptr);
+    MOZ_ASSERT(aObserver);
+    mCompositorVsyncScheduler = aObserver;
+    mCompositorVsyncScheduler->SetDisplay(mDisplayEnabled);
+}
+#endif

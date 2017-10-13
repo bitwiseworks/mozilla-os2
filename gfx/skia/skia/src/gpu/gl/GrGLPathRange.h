@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2014 Google Inc.
  *
@@ -10,9 +9,10 @@
 #define GrGLPathRange_DEFINED
 
 #include "../GrPathRange.h"
-#include "gl/GrGLFunctions.h"
+#include "GrStyle.h"
+#include "gl/GrGLTypes.h"
 
-class GrGpuGL;
+class GrGLGpu;
 
 /**
  * Currently this represents a range of GL_NV_path_rendering Path IDs. If we
@@ -22,25 +22,43 @@ class GrGpuGL;
 
 class GrGLPathRange : public GrPathRange {
 public:
-    GrGLPathRange(GrGpu*, size_t size, const SkStrokeRec&);
-    virtual ~GrGLPathRange();
+    /**
+     * Initialize a GL path range from a PathGenerator. This class will allocate
+     * the GPU path objects and initialize them lazily.
+     */
+    GrGLPathRange(GrGLGpu*, PathGenerator*, const GrStyle&);
+
+    /**
+     * Initialize a GL path range from an existing range of pre-initialized GPU
+     * path objects. This class assumes ownership of the GPU path objects and
+     * will delete them when done.
+     */
+    GrGLPathRange(GrGLGpu*,
+                  GrGLuint basePathID,
+                  int numPaths,
+                  size_t gpuMemorySize,
+                  const GrStyle&);
 
     GrGLuint basePathID() const { return fBasePathID; }
 
-    virtual void initAt(size_t index, const SkPath&);
-
-    // TODO: Use a better approximation for the individual path sizes.
-    virtual size_t gpuMemorySize() const SK_OVERRIDE {
-        return 100 * fNumDefinedPaths;
-    }
+    bool shouldStroke() const { return fShouldStroke; }
+    bool shouldFill() const { return fShouldFill; }
 
 protected:
-    virtual void onRelease() SK_OVERRIDE;
-    virtual void onAbandon() SK_OVERRIDE;
+    void onInitPath(int index, const SkPath&) const override;
+
+    void onRelease() override;
+    void onAbandon() override;
 
 private:
+    void init();
+    size_t onGpuMemorySize() const override { return fGpuMemorySize; }
+
+    const GrStyle fStyle;
     GrGLuint fBasePathID;
-    size_t fNumDefinedPaths;
+    mutable size_t fGpuMemorySize;
+    bool fShouldStroke;
+    bool fShouldFill;
 
     typedef GrPathRange INHERITED;
 };

@@ -46,7 +46,11 @@ struct Register {
         Register r = { Encoding(code) };
         return r;
     }
-    MOZ_CONSTEXPR Code code() const {
+    static Register Invalid() {
+        Register r = { Encoding(Codes::Invalid) };
+        return r;
+    }
+    constexpr Code code() const {
         return Code(reg_);
     }
     Encoding encoding() const {
@@ -95,6 +99,11 @@ struct Register {
     }
 };
 
+#if defined(JS_NUNBOX32)
+static const uint32_t INT64LOW_OFFSET = 0 * sizeof(int32_t);
+static const uint32_t INT64HIGH_OFFSET = 1 * sizeof(int32_t);
+#endif
+
 struct Register64
 {
 #ifdef JS_PUNBOX64
@@ -105,13 +114,31 @@ struct Register64
 #endif
 
 #ifdef JS_PUNBOX64
-    explicit MOZ_CONSTEXPR Register64(Register r)
+    explicit constexpr Register64(Register r)
       : reg(r)
     {}
+    bool operator ==(Register64 other) const {
+        return reg == other.reg;
+    }
+    bool operator !=(Register64 other) const {
+        return reg != other.reg;
+    }
+    static Register64 Invalid() {
+        return Register64(Register::Invalid());
+    }
 #else
-    MOZ_CONSTEXPR Register64(Register h, Register l)
+    constexpr Register64(Register h, Register l)
       : high(h), low(l)
     {}
+    bool operator ==(Register64 other) const {
+        return high == other.high && low == other.low;
+    }
+    bool operator !=(Register64 other) const {
+        return high != other.high || low != other.low;
+    }
+    static Register64 Invalid() {
+        return Register64(Register::Invalid(), Register::Invalid());
+    }
 #endif
 };
 
@@ -146,9 +173,9 @@ class MachineState
   public:
     MachineState() {
 #ifndef JS_CODEGEN_NONE
-        for (unsigned i = 0; i < Registers::Total; i++)
+        for (uintptr_t i = 0; i < Registers::Total; i++)
             regs_[i] = reinterpret_cast<Registers::RegisterContent*>(i + 0x100);
-        for (unsigned i = 0; i < FloatRegisters::Total; i++)
+        for (uintptr_t i = 0; i < FloatRegisters::Total; i++)
             fpregs_[i] = reinterpret_cast<FloatRegisters::RegisterContent*>(i + 0x200);
 #endif
     }
@@ -208,7 +235,7 @@ struct AutoGenericRegisterScope : public RegisterType
     explicit AutoGenericRegisterScope(MacroAssembler& masm, RegisterType reg);
     ~AutoGenericRegisterScope();
 #else
-    MOZ_CONSTEXPR explicit AutoGenericRegisterScope(MacroAssembler& masm, RegisterType reg)
+    constexpr explicit AutoGenericRegisterScope(MacroAssembler& masm, RegisterType reg)
       : RegisterType(reg)
     { }
 #endif

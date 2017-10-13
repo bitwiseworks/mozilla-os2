@@ -80,6 +80,8 @@ IdentityProviderService.prototype = {
     if (typeof aErrBack === 'function') {
       aErrBack(err);
     }
+
+    return undefined;
   },
 
   shutdown: function RP_shutdown() {
@@ -100,7 +102,7 @@ IdentityProviderService.prototype = {
   },
 
   get certDuration() {
-    switch(this.securityLevel) {
+    switch (this.securityLevel) {
       default:
         return 3600;
     }

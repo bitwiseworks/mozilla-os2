@@ -1,69 +1,52 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests that source URLs in the Web Console can be clicked to display the
-// standard View Source window.
+// standard View Source window. As JS exceptions and console.log() messages always
+// have their locations opened in Debugger, we need to test a security message in
+// order to have it opened in the standard View Source window.
 
 "use strict";
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/test-error.html";
+const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
+                 "test/test-mixedcontent-securityerrors.html";
 
-var getItemForAttachment;
-var Sources;
-var getItemInvoked = false;
+add_task(function* () {
+  yield actuallyTest();
+});
 
-add_task(function*() {
+add_task(function* () {
+  Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
+  yield actuallyTest();
+  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
+});
+
+var actuallyTest = Task.async(function*() {
   yield loadTab(TEST_URI);
   let hud = yield openConsole(null);
   info("console opened");
 
-  let button = content.document.querySelector("button");
-  ok(button, "we have the button on the page");
-
-  // On e10s, the exception is triggered in child process
-  // and is ignored by test harness
-  if (!Services.appinfo.browserTabsRemoteAutostart) {
-    expectUncaughtException();
-  }
-  EventUtils.sendMouseEvent({ type: "click" }, button, content);
-
-  let { panelWin: { DebuggerView } } = yield openDebugger();
-  info("debugger opened");
-  Sources = DebuggerView.Sources;
-  hud = yield openConsole();
-  info("console opened again");
-
   let [result] = yield waitForMessages({
     webconsole: hud,
     messages: [{
-      text: "fooBazBaz is not defined",
-      category: CATEGORY_JS,
+      text: "Blocked loading mixed active content",
+      category: CATEGORY_SECURITY,
       severity: SEVERITY_ERROR,
     }],
   });
 
   let msg = [...result.matched][0];
   ok(msg, "error message");
-  let locationNode = msg.querySelector(".message-location");
+  let locationNode = msg.querySelector(".message-location .frame-link-filename");
   ok(locationNode, "location node");
 
   let onTabOpen = waitForTab();
 
-  getItemForAttachment = Sources.getItemForAttachment;
-  Sources.getItemForAttachment = () => {
-    getItemInvoked = true;
-    return false;
-  };
-
   EventUtils.sendMouseEvent({ type: "click" }, locationNode);
 
   let tab = yield onTabOpen;
-  ok(true, "the view source tab was opened in response to clicking " +
-           "the location node");
+  ok(true, "the view source tab was opened in response to clicking the location node");
   gBrowser.removeTab(tab);
-
-  ok(getItemInvoked, "custom getItemForAttachment() was invoked");
-  Sources.getItemForAttachment = getItemForAttachment;
-  Sources = getItemForAttachment = null;
 });

@@ -33,18 +33,19 @@ public:
     NS_DECL_NSIOBSERVER
 
     // LoadNotificationCallback interface
-    virtual void LoadChanged(float aSystemLoad, float aProcessLoad) override;
+    void LoadChanged(float aSystemLoad, float aProcessLoad) override;
     // CpuOveruseObserver interface
     // Called as soon as an overuse is detected.
-    virtual void OveruseDetected() override;
+    void OveruseDetected() override;
     // Called periodically when the system is not overused any longer.
-    virtual void NormalUsage() override;
+    void NormalUsage() override;
     // CPULoadStateCallbackInvoker interface
-    virtual void AddObserver(webrtc::CPULoadStateObserver * aObserver) override;
-    virtual void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) override;
+    void AddObserver(webrtc::CPULoadStateObserver * aObserver) override;
+    void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) override;
 
 private:
-    LoadManagerSingleton(int aLoadMeasurementInterval,
+    LoadManagerSingleton(bool aEncoderOnly,
+                         int aLoadMeasurementInterval,
                          int aAveragingMeasurements,
                          float aHighLoadThreshold,
                          float aLowLoadThreshold);
@@ -102,7 +103,7 @@ public:
     }
 
 private:
-    LoadManagerSingleton* mManager;
+    RefPtr<LoadManagerSingleton> mManager;
 };
 
 } //namespace

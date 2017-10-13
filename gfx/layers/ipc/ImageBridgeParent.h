@@ -14,9 +14,8 @@
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
-#include "mozilla/layers/CompositorParent.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/PImageBridgeParent.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsISupportsImpl.h"
 #include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
 
@@ -39,26 +38,37 @@ namespace layers {
  * interesting stuff is in ImageContainerParent.
  */
 class ImageBridgeParent final : public PImageBridgeParent,
-                                public CompositableParentManager
+                                public CompositableParentManager,
+                                public ShmemAllocator
 {
 public:
   typedef InfallibleTArray<CompositableOperation> EditArray;
+  typedef InfallibleTArray<OpDestroy> OpDestroyArray;
   typedef InfallibleTArray<EditReply> EditReplyArray;
-  typedef InfallibleTArray<AsyncChildMessageData> AsyncChildMessageArray;
 
-  ImageBridgeParent(MessageLoop* aLoop, Transport* aTransport, ProcessId aChildProcessId);
+protected:
+  ImageBridgeParent(MessageLoop* aLoop, ProcessId aChildProcessId);
+
+public:
   ~ImageBridgeParent();
+
+  /**
+   * Creates the globals of ImageBridgeParent.
+   */
+  static void Setup();
+
+  static ImageBridgeParent* CreateSameProcess();
+  static bool CreateForGPUProcess(Endpoint<PImageBridgeParent>&& aEndpoint);
+  static bool CreateForContent(Endpoint<PImageBridgeParent>&& aEndpoint);
+
+  virtual ShmemAllocator* AsShmemAllocator() override { return this; }
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  static PImageBridgeParent*
-  Create(Transport* aTransport, ProcessId aChildProcessId);
-
   // CompositableParentManager
-  virtual void SendFenceHandleIfPresent(PTextureParent* aTexture,
-                                        CompositableHost* aCompositableHost) override;
-
   virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
+
+  virtual void NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId) override;
 
   virtual base::ProcessId GetChildProcessId() override
   {
@@ -67,10 +77,11 @@ public:
 
   // PImageBridge
   virtual bool RecvImageBridgeThreadId(const PlatformThreadId& aThreadId) override;
-  virtual bool RecvUpdate(EditArray&& aEdits, EditReplyArray* aReply) override;
-  virtual bool RecvUpdateNoSwap(EditArray&& aEdits) override;
-
-  virtual bool IsAsync() const override { return true; }
+  virtual bool RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                          const uint64_t& aFwdTransactionId,
+                          EditReplyArray* aReply) override;
+  virtual bool RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                                const uint64_t& aFwdTransactionId) override;
 
   PCompositableParent* AllocPCompositableParent(const TextureInfo& aInfo,
                                                 PImageContainerParent* aImageContainer,
@@ -79,7 +90,8 @@ public:
 
   virtual PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                               const LayersBackend& aLayersBackend,
-                                              const TextureFlags& aFlags) override;
+                                              const TextureFlags& aFlags,
+                                              const uint64_t& aSerial) override;
   virtual bool DeallocPTextureParent(PTextureParent* actor) override;
 
   PMediaSystemResourceManagerParent* AllocPMediaSystemResourceManagerParent() override;
@@ -87,18 +99,12 @@ public:
   virtual PImageContainerParent* AllocPImageContainerParent() override;
   virtual bool DeallocPImageContainerParent(PImageContainerParent* actor) override;
 
-  virtual bool
-  RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessageData>&& aMessages) override;
-
   // Shutdown step 1
-  virtual bool RecvWillStop() override;
-  // Shutdown step 2
-  virtual bool RecvStop() override;
+  virtual bool RecvWillClose() override;
 
-  virtual MessageLoop* GetMessageLoop() const override;
+  MessageLoop* GetMessageLoop() const { return mMessageLoop; }
 
-
-  // ISurfaceAllocator
+  // ShmemAllocator
 
   virtual bool AllocShmem(size_t aSize,
                           ipc::SharedMemory::SharedMemoryType aType,
@@ -112,55 +118,33 @@ public:
 
   virtual bool IsSameProcess() const override;
 
-  virtual void ReplyRemoveTexture(const OpReplyRemoveTexture& aReply) override;
-
-  static void ReplyRemoveTexture(base::ProcessId aChildProcessId,
-                                 const OpReplyRemoveTexture& aReply);
-
-  void AppendDeliverFenceMessage(uint64_t aDestHolderId,
-                                 uint64_t aTransactionId,
-                                 PTextureParent* aTexture,
-                                 CompositableHost* aCompositableHost);
-
-  static void AppendDeliverFenceMessage(base::ProcessId aChildProcessId,
-                                        uint64_t aDestHolderId,
-                                        uint64_t aTransactionId,
-                                        PTextureParent* aTexture,
-                                        CompositableHost* aCompositableHost);
-
-  using CompositableParentManager::SendPendingAsyncMessages;
-  static void SendPendingAsyncMessages(base::ProcessId aChildProcessId);
-
-  static ImageBridgeParent* GetInstance(ProcessId aId);
+  static RefPtr<ImageBridgeParent> GetInstance(ProcessId aId);
 
   static bool NotifyImageComposites(nsTArray<ImageCompositeNotification>& aNotifications);
 
-  // Overriden from IToplevelProtocol
-  IToplevelProtocol*
-  CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
-                base::ProcessHandle aPeerProcess,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override;
+  virtual bool UsesImageBridge() const override { return true; }
+
+  virtual bool IPCOpen() const override { return !mClosed; }
 
 protected:
   void OnChannelConnected(int32_t pid) override;
 
+  void Bind(Endpoint<PImageBridgeParent>&& aEndpoint);
+
 private:
   void DeferredDestroy();
   MessageLoop* mMessageLoop;
-  Transport* mTransport;
   // This keeps us alive until ActorDestroy(), at which point we do a
   // deferred destruction of ourselves.
   RefPtr<ImageBridgeParent> mSelfRef;
 
   bool mSetChildThreadPriority;
-  bool mStopped;
+  bool mClosed;
 
   /**
    * Map of all living ImageBridgeParent instances
    */
   static std::map<base::ProcessId, ImageBridgeParent*> sImageBridges;
-
-  static MessageLoop* sMainLoop;
 
   RefPtr<CompositorThreadHolder> mCompositorThreadHolder;
 };

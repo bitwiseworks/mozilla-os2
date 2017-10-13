@@ -11,7 +11,6 @@
 #include "mozilla/Attributes.h"
 #include "nsDOMCSSDeclaration.h"
 
-#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace dom {
@@ -31,19 +30,19 @@ public:
 
   // If GetCSSDeclaration returns non-null, then the decl it returns
   // is owned by our current style rule.
-  virtual mozilla::css::Declaration* GetCSSDeclaration(Operation aOperation) override;
+  virtual mozilla::DeclarationBlock* GetCSSDeclaration(Operation aOperation) override;
   virtual void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv) override;
   NS_IMETHOD GetParentRule(nsIDOMCSSRule **aParent) override;
 
   virtual nsINode* GetParentObject() override;
 
-  NS_IMETHOD SetPropertyValue(const nsCSSProperty aPropID,
+  NS_IMETHOD SetPropertyValue(const nsCSSPropertyID aPropID,
                               const nsAString& aValue) override;
 
 protected:
   ~nsDOMCSSAttributeDeclaration();
 
-  virtual nsresult SetCSSDeclaration(mozilla::css::Declaration* aDecl) override;
+  virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl) override;
   virtual nsIDocument* DocToUpdate() override;
 
   RefPtr<Element> mElement;

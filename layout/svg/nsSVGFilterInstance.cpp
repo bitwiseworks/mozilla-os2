@@ -10,6 +10,7 @@
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
 #include "nsISVGChildFrame.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/SVGFilterElement.h"
 #include "nsReferencedElement.h"
 #include "nsSVGFilterFrame.h"
@@ -23,6 +24,7 @@ using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
 nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
+                                         nsIFrame* aTargetFrame,
                                          nsIContent* aTargetContent,
                                          const UserSpaceMetrics& aMetrics,
                                          const gfxRect& aTargetBBox,
@@ -38,7 +40,7 @@ nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
   mInitialized(false) {
 
   // Get the filter frame.
-  mFilterFrame = GetFilterFrame();
+  mFilterFrame = GetFilterFrame(aTargetFrame);
   if (!mFilterFrame) {
     return;
   }
@@ -112,22 +114,27 @@ nsSVGFilterInstance::ComputeBounds()
 }
 
 nsSVGFilterFrame*
-nsSVGFilterInstance::GetFilterFrame()
+nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
 {
   if (mFilter.GetType() != NS_STYLE_FILTER_URL) {
     // The filter is not an SVG reference filter.
     return nullptr;
   }
 
-  nsIURI* url = mFilter.GetURL();
-  if (!url) {
-    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
-    return nullptr;
-  }
-
   // Get the target element to use as a point of reference for looking up the
   // filter element.
   if (!mTargetContent) {
+    return nullptr;
+  }
+
+  // aTargetFrame can be null if this filter belongs to a
+  // CanvasRenderingContext2D.
+  nsCOMPtr<nsIURI> url = aTargetFrame
+    ? nsSVGEffects::GetFilterURI(aTargetFrame, mFilter)
+    : mFilter.GetURL()->ResolveLocalRef(mTargetContent);
+
+  if (!url) {
+    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
     return nullptr;
   }
 
@@ -262,13 +269,13 @@ nsSVGFilterInstance::ComputeFilterPrimitiveSubregion(nsSVGFE* aFilterElement,
 void
 nsSVGFilterInstance::GetInputsAreTainted(const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
                                          const nsTArray<int32_t>& aInputIndices,
+                                         bool aFilterInputIsTainted,
                                          nsTArray<bool>& aOutInputsAreTainted)
 {
   for (uint32_t i = 0; i < aInputIndices.Length(); i++) {
     int32_t inputIndex = aInputIndices[i];
     if (inputIndex < 0) {
-      // SourceGraphic, SourceAlpha, FillPaint and StrokePaint are tainted.
-      aOutInputsAreTainted.AppendElement(true);
+      aOutInputsAreTainted.AppendElement(aFilterInputIsTainted);
     } else {
       aOutInputsAreTainted.AppendElement(aPrimitiveDescrs[inputIndex].IsTainted());
     }
@@ -327,7 +334,7 @@ nsSVGFilterInstance::GetSourceIndices(nsSVGFE* aPrimitiveElement,
                                       const nsDataHashtable<nsStringHashKey, int32_t>& aImageTable,
                                       nsTArray<int32_t>& aSourceIndices)
 {
-  nsAutoTArray<nsSVGStringInfo,2> sources;
+  AutoTArray<nsSVGStringInfo,2> sources;
   aPrimitiveElement->GetSourceImageNames(sources);
 
   for (uint32_t j = 0; j < sources.Length(); j++) {
@@ -361,7 +368,8 @@ nsSVGFilterInstance::GetSourceIndices(nsSVGFE* aPrimitiveElement,
 
 nsresult
 nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
-                                     nsTArray<RefPtr<SourceSurface>>& aInputImages)
+                                     nsTArray<RefPtr<SourceSurface>>& aInputImages,
+                                     bool aInputIsTainted)
 {
   mSourceGraphicIndex = GetLastResultIndex(aPrimitiveDescrs);
 
@@ -394,7 +402,7 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
        ++primitiveElementIndex) {
     nsSVGFE* filter = primitives[primitiveElementIndex];
 
-    nsAutoTArray<int32_t,2> sourceIndices;
+    AutoTArray<int32_t,2> sourceIndices;
     nsresult rv = GetSourceIndices(filter, aPrimitiveDescrs, imageTable, sourceIndices);
     if (NS_FAILED(rv)) {
       return rv;
@@ -404,7 +412,7 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
       ComputeFilterPrimitiveSubregion(filter, aPrimitiveDescrs, sourceIndices);
 
     nsTArray<bool> sourcesAreTainted;
-    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, sourcesAreTainted);
+    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, aInputIsTainted, sourcesAreTainted);
 
     FilterPrimitiveDescription descr =
       filter->GetPrimitiveDescription(this, primitiveSubregion, sourcesAreTainted, aInputImages);

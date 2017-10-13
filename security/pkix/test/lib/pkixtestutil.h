@@ -39,6 +39,13 @@ typedef std::basic_string<uint8_t> ByteString;
 
 inline bool ENCODING_FAILED(const ByteString& bs) { return bs.empty(); }
 
+template <size_t L>
+inline ByteString
+BytesToByteString(const uint8_t (&bytes)[L])
+{
+  return ByteString(bytes, L);
+}
+
 // XXX: Ideally, we should define this instead:
 //
 //   template <typename T, std::size_t N>
@@ -369,6 +376,8 @@ ByteString CreateEncodedEKUExtension(Input eku, Critical critical);
 class OCSPResponseExtension final
 {
 public:
+  OCSPResponseExtension();
+
   ByteString id;
   bool critical;
   ByteString value;
@@ -405,7 +414,10 @@ public:
 
   std::time_t producedAt;
 
-  OCSPResponseExtension* extensions;
+  // SingleResponse extensions (for the certID given in the constructor).
+  OCSPResponseExtension* singleExtensions;
+  // ResponseData extensions.
+  OCSPResponseExtension* responseExtensions;
   bool includeEmptyExtensions; // If true, include the extension wrapper
                                // regardless of if there are any actual
                                // extensions.

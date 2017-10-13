@@ -249,28 +249,29 @@ var tests = [
         onLocationChange: function onLocationChange() {
           gBrowser.removeProgressListener(progressListener);
 
-	  executeSoon(() => {
+          executeSoon(() => {
             let notification = PopupNotifications.getNotification(self.notifyObj.id,
                                                                   self.notifyObj.browser);
             ok(notification != null, "Notification remained when subframe navigated");
             self.notifyObj.options.eventCallback = undefined;
 
             notification.remove();
-	  });
+          });
         },
       };
 
       info("Adding progress listener and performing navigation");
       gBrowser.addProgressListener(progressListener);
-      content.document.getElementById("iframe")
-                      .setAttribute("src", "http://example.org/");
+      ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
+        content.document.getElementById("iframe")
+                        .setAttribute("src", "http://example.org/");
+      });
     },
     onHidden: function () {}
   },
   // Popup Notifications should catch exceptions from callbacks
   { id: "Test#10",
     run: function () {
-      let callbackCount = 0;
       this.testNotif1 = new BasicNotification(this.id);
       this.testNotif1.message += " 1";
       this.notification1 = showNotification(this.testNotif1);
@@ -278,9 +279,6 @@ var tests = [
         info("notifyObj1.options.eventCallback: " + eventName);
         if (eventName == "dismissed") {
           throw new Error("Oops 1!");
-          if (++callbackCount == 2) {
-            goNext();
-          }
         }
       };
 
@@ -291,9 +289,6 @@ var tests = [
         info("notifyObj2.options.eventCallback: " + eventName);
         if (eventName == "dismissed") {
           throw new Error("Oops 2!");
-          if (++callbackCount == 2) {
-            goNext();
-          }
         }
       };
       this.notification2 = showNotification(this.testNotif2);

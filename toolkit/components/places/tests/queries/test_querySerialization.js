@@ -165,18 +165,13 @@ const querySwitches = [
   // hasUri
   {
     flag:        "hasUri",
-    subswitches: ["uri", "uriIsPrefix"],
+    subswitches: ["uri"],
     desc:        "nsINavHistoryQuery.hasUri",
     matches:     flagSwitchMatches,
     runs:        [
       function (aQuery, aQueryOptions) {
         aQuery.uri = uri("http://mozilla.com");
-        aQuery.uriIsPrefix = false;
       },
-      function (aQuery, aQueryOptions) {
-        aQuery.uri = uri("http://mozilla.com");
-        aQuery.uriIsPrefix = true;
-      }
     ]
   },
   // hasAnnotation
@@ -361,7 +356,6 @@ const queryOptionSwitches = [
           case aOptions1.SORT_BY_ANNOTATION_ASCENDING:
           case aOptions1.SORT_BY_ANNOTATION_DESCENDING:
             return aOptions1.sortingAnnotation === aOptions2.sortingAnnotation;
-            break;
         }
         return true;
       }
@@ -462,8 +456,6 @@ const queryOptionSwitches = [
     ]
   },
 ];
-
-///////////////////////////////////////////////////////////////////////////////
 
 /**
  * Enumerates all the sequences of the cartesian product of the arrays contained
@@ -798,8 +790,6 @@ function simplePropertyMatches(aObj1, aObj2)
 {
   return aObj1[this.property] === aObj2[this.property];
 }
-
-///////////////////////////////////////////////////////////////////////////////
 
 function run_test()
 {

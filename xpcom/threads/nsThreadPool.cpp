@@ -42,7 +42,8 @@ NS_IMPL_CI_INTERFACE_GETTER(nsThreadPool, nsIThreadPool, nsIEventTarget)
 
 nsThreadPool::nsThreadPool()
   : mMutex("[nsThreadPool.mMutex]")
-  , mEvents(mMutex)
+  , mEventsAvailable(mMutex, "[nsThreadPool.mEventsAvailable]")
+  , mEvents(mEventsAvailable, nsEventQueue::eNormalQueue)
   , mThreadLimit(DEFAULT_THREAD_LIMIT)
   , mIdleThreadLimit(DEFAULT_IDLE_THREAD_LIMIT)
   , mIdleThreadTimeout(DEFAULT_IDLE_THREAD_TIMEOUT)
@@ -64,11 +65,11 @@ nsresult
 nsThreadPool::PutEvent(nsIRunnable* aEvent)
 {
   nsCOMPtr<nsIRunnable> event(aEvent);
-  return PutEvent(event.forget());
+  return PutEvent(event.forget(), 0);
 }
 
 nsresult
-nsThreadPool::PutEvent(already_AddRefed<nsIRunnable>&& aEvent)
+nsThreadPool::PutEvent(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags)
 {
   // Avoid spawning a new thread while holding the event queue lock...
 
@@ -86,6 +87,7 @@ nsThreadPool::PutEvent(already_AddRefed<nsIRunnable>&& aEvent)
 
     // Make sure we have a thread to service this event.
     if (mThreads.Count() < (int32_t)mThreadLimit &&
+        !(aFlags & NS_DISPATCH_AT_END) &&
         // Spawn a new thread if we don't have enough idle threads to serve
         // pending events immediately.
         mEvents.Count(lock) >= mIdleCount) {
@@ -102,9 +104,7 @@ nsThreadPool::PutEvent(already_AddRefed<nsIRunnable>&& aEvent)
   }
 
   nsCOMPtr<nsIThread> thread;
-  nsThreadManager::get()->NewThread(0,
-                                    stackSize,
-                                    getter_AddRefs(thread));
+  nsThreadManager::get().NewThread(0, stackSize, getter_AddRefs(thread));
   if (NS_WARN_IF(!thread)) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -145,9 +145,8 @@ nsThreadPool::ShutdownThread(nsIThread* aThread)
   // shutdown requires this thread have an event loop (and it may not, see bug
   // 10204784).  The simplest way to cover all cases is to asynchronously
   // shutdown aThread from the main thread.
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(aThread,
-                                                 &nsIThread::AsyncShutdown);
-  NS_DispatchToMainThread(r);
+  NS_DispatchToMainThread(NewRunnableMethod(aThread,
+                                            &nsIThread::AsyncShutdown));
 }
 
 NS_IMETHODIMP
@@ -158,7 +157,7 @@ nsThreadPool::Run()
   LOG(("THRD-P(%p) enter %s\n", this, mName.BeginReading()));
 
   nsCOMPtr<nsIThread> current;
-  nsThreadManager::get()->GetCurrentThread(getter_AddRefs(current));
+  nsThreadManager::get().GetCurrentThread(getter_AddRefs(current));
 
   bool shutdownThreadOnExit = false;
   bool exitThread = false;
@@ -248,7 +247,7 @@ nsThreadPool::DispatchFromScript(nsIRunnable* aEvent, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
-nsThreadPool::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags)
+nsThreadPool::Dispatch(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags)
 {
   LOG(("THRD-P(%p) dispatch [%p %x]\n", this, /* XXX aEvent*/ nullptr, aFlags));
 
@@ -258,7 +257,7 @@ nsThreadPool::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags)
 
   if (aFlags & DISPATCH_SYNC) {
     nsCOMPtr<nsIThread> thread;
-    nsThreadManager::get()->GetCurrentThread(getter_AddRefs(thread));
+    nsThreadManager::get().GetCurrentThread(getter_AddRefs(thread));
     if (NS_WARN_IF(!thread)) {
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -271,10 +270,17 @@ nsThreadPool::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags)
       NS_ProcessNextEvent(thread);
     }
   } else {
-    NS_ASSERTION(aFlags == NS_DISPATCH_NORMAL, "unexpected dispatch flags");
-    PutEvent(Move(aEvent));
+    NS_ASSERTION(aFlags == NS_DISPATCH_NORMAL ||
+                 aFlags == NS_DISPATCH_AT_END, "unexpected dispatch flags");
+    PutEvent(Move(aEvent), aFlags);
   }
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsThreadPool::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP

@@ -17,6 +17,7 @@
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxTypes.h"                   // for gfxFloat
 #include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
+#include "mozilla/Sprintf.h"            // for SprintfLiteral
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nsTArray.h"                   // for nsTArray, etc
 #include "limits.h"
@@ -45,7 +46,7 @@ static gfxFloat RecoverZDepth(const Matrix4x4& aTransform, const gfxPoint& aPoin
 {
     const Point3D l(0, 0, 1);
     Point3D l0 = Point3D(aPoint.x, aPoint.y, 0);
-    Point3D p0 = aTransform * Point3D(0, 0, 0);
+    Point3D p0 = aTransform.TransformPoint(Point3D(0, 0, 0));
     Point3D normal = aTransform.GetNormalVector();
 
     gfxFloat n = normal.DotProduct(p0 - l0); 
@@ -76,11 +77,16 @@ static gfxFloat RecoverZDepth(const Matrix4x4& aTransform, const gfxPoint& aPoin
  * unsolved without changing our rendering code.
  */
 static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
-  gfxRect ourRect = ThebesRect(aOne->GetEffectiveVisibleRegion().ToUnknownRegion().GetBounds());
-  gfxRect otherRect = ThebesRect(aTwo->GetEffectiveVisibleRegion().ToUnknownRegion().GetBounds());
+  gfxRect ourRect = ThebesRect(aOne->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
+  gfxRect otherRect = ThebesRect(aTwo->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
 
-  Matrix4x4 ourTransform = aOne->GetTransform();
-  Matrix4x4 otherTransform = aTwo->GetTransform();
+  MOZ_ASSERT(aOne->GetParent() && aOne->GetParent()->Extend3DContext() &&
+             aTwo->GetParent() && aTwo->GetParent()->Extend3DContext());
+  // Effective transform of leaves may had been projected to 2D.
+  Matrix4x4 ourTransform =
+    aOne->GetLocalTransform() * aOne->GetParent()->GetEffectiveTransform();
+  Matrix4x4 otherTransform =
+    aTwo->GetLocalTransform() * aTwo->GetParent()->GetEffectiveTransform();
 
   // Transform both rectangles and project into 2d space.
   gfxQuad ourTransformedRect = ourRect.TransformToQuad(ourTransform);
@@ -178,9 +184,9 @@ static void SetTextColor(uint32_t aColor)
   char command[13];
 
   /* Command is the control command to the terminal */
-  sprintf(command, "%c[%d;%d;%dm", 0x1B, RESET,
-          aColor + XTERM_FOREGROUND_COLOR_OFFSET,
-          BLACK + XTERM_BACKGROUND_COLOR_OFFSET);
+  SprintfLiteral(command, "%c[%d;%d;%dm", 0x1B, RESET,
+                 aColor + XTERM_FOREGROUND_COLOR_OFFSET,
+                 BLACK + XTERM_BACKGROUND_COLOR_OFFSET);
   printf("%s", command);
 }
 

@@ -1,11 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- *
- * Contributor(s):
- *   Mihai Sucan <mihai.sucan@gmail.com>
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -17,7 +13,7 @@ const TEST_URI2 = "http://example.com/browser/devtools/client/webconsole/" +
 var lastFinishedRequests = {};
 var webConsoleClient;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   let hud = yield openConsole();
@@ -33,20 +29,15 @@ function consoleOpened(hud) {
   let deferred = promise.defer();
 
   webConsoleClient = hud.ui.webConsoleClient;
-  hud.ui.setSaveRequestAndResponseBodies(true).then(() => {
-    ok(hud.ui._saveRequestAndResponseBodies,
-      "The saveRequestAndResponseBodies property was successfully set.");
-
-    HUDService.lastFinishedRequest.callback = (aHttpRequest) => {
-      let status = aHttpRequest.response.status;
-      lastFinishedRequests[status] = aHttpRequest;
-      if ("301" in lastFinishedRequests &&
-          "404" in lastFinishedRequests) {
-        deferred.resolve();
-      }
-    };
-    content.location = TEST_URI2;
-  });
+  HUDService.lastFinishedRequest.callback = (aHttpRequest) => {
+    let status = aHttpRequest.response.status;
+    lastFinishedRequests[status] = aHttpRequest;
+    if ("301" in lastFinishedRequests &&
+        "404" in lastFinishedRequests) {
+      deferred.resolve();
+    }
+  };
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, TEST_URI2);
 
   return deferred.promise;
 }
@@ -60,11 +51,11 @@ function getHeaders() {
   ok("404" in lastFinishedRequests, "request 2: 404 Not found");
 
   webConsoleClient.getResponseHeaders(lastFinishedRequests["301"].actor,
-    function(response) {
+    function (response) {
       lastFinishedRequests["301"].response.headers = response.headers;
 
       webConsoleClient.getResponseHeaders(lastFinishedRequests["404"].actor,
-        function(resp) {
+        function (resp) {
           lastFinishedRequests["404"].response.headers = resp.headers;
           executeSoon(deferred.resolve);
         });
@@ -76,12 +67,12 @@ function getContent() {
   let deferred = promise.defer();
 
   webConsoleClient.getResponseContent(lastFinishedRequests["301"].actor,
-    function(response) {
+    function (response) {
       lastFinishedRequests["301"].response.content = response.content;
       lastFinishedRequests["301"].discardResponseBody = response.contentDiscarded;
 
       webConsoleClient.getResponseContent(lastFinishedRequests["404"].actor,
-        function(resp) {
+        function (resp) {
           lastFinishedRequests["404"].response.content = resp.content;
           lastFinishedRequests["404"].discardResponseBody =
             resp.contentDiscarded;

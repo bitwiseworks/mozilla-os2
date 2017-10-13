@@ -8,12 +8,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
 function whenDelayedStartupFinished(aWindow, aCallback) {
-  Services.obs.addObserver(function observer(aSubject, aTopic) {
-    if (aWindow == aSubject) {
-      Services.obs.removeObserver(observer, aTopic);
-      executeSoon(aCallback);
-    }
-  }, "browser-delayed-startup-finished", false);
+  return new Promise(resolve => {
+    info("Waiting for delayed startup to finish");
+    Services.obs.addObserver(function observer(aSubject, aTopic) {
+      if (aWindow == aSubject) {
+        Services.obs.removeObserver(observer, aTopic);
+        if (aCallback) {
+          executeSoon(aCallback);
+        }
+        resolve();
+      }
+    }, "browser-delayed-startup-finished", false);
+  });
 }
 
 /**
@@ -92,12 +98,12 @@ function* runNextTest() {
       shownState = true;
       info("[" + nextTest.id + "] popup shown");
       Task.spawn(() => nextTest.onShown(this))
-          .then(undefined , ex => Assert.ok(false, "onShown failed: " + ex));
+          .then(undefined, ex => Assert.ok(false, "onShown failed: " + ex));
     });
     onPopupEvent("popuphidden", function () {
       info("[" + nextTest.id + "] popup hidden");
-      nextTest.onHidden(this);
-      goNext();
+      Task.spawn(() => nextTest.onHidden(this))
+          .then(() => goNext(), ex => Assert.ok(false, "onHidden failed: " + ex));
     }, () => shownState);
     info("[" + nextTest.id + "] added listeners; panel is open: " + PopupNotifications.isPanelOpen);
   }
@@ -163,7 +169,7 @@ function BasicNotification(testId) {
 }
 
 BasicNotification.prototype.addOptions = function(options) {
-  for (let [name, value] in Iterator(options))
+  for (let [name, value] of Object.entries(options))
     this.options[name] = value;
 };
 
@@ -196,7 +202,7 @@ function checkPopup(popup, notifyObj) {
                                                      "popup-notification-icon");
   if (notifyObj.id == "geolocation") {
     isnot(icon.boxObject.width, 0, "icon for geo displayed");
-    is(popup.anchorNode.className, "notification-anchor-icon",
+    ok(popup.anchorNode.classList.contains("notification-anchor-icon"),
        "notification anchored to icon");
   }
   is(notification.getAttribute("label"), notifyObj.message, "message matches");
@@ -250,6 +256,14 @@ function onPopupEvent(eventName, callback, condition) {
   }
   gActiveListeners.set(listener, eventName);
   PopupNotifications.panel.addEventListener(eventName, listener, false);
+}
+
+function waitForNotificationPanel() {
+  return new Promise(resolve => {
+    onPopupEvent("popupshown", function() {
+      resolve(this);
+    });
+  });
 }
 
 function triggerMainCommand(popup) {

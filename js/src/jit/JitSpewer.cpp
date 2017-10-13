@@ -10,11 +10,23 @@
 
 #include "mozilla/Atomics.h"
 
+#if defined(XP_WIN)
+# include <windows.h>
+#else
+# include <unistd.h>
+#endif
+
+#include "jsprf.h"
+
 #include "jit/Ion.h"
 #include "jit/MIR.h"
 #include "jit/MIRGenerator.h"
+#include "jit/MIRGraph.h"
+
+#include "threading/LockGuard.h"
 
 #include "vm/HelperThreads.h"
+#include "vm/MutexIDs.h"
 
 #ifndef JIT_SPEW_DIR
 # if defined(_WIN32)
@@ -32,7 +44,7 @@ using namespace js::jit;
 class IonSpewer
 {
   private:
-    PRLock* outputLock_;
+    Mutex outputLock_;
     Fprinter c1Output_;
     Fprinter jsonOutput_;
     bool firstFunction_;
@@ -43,7 +55,8 @@ class IonSpewer
 
   public:
     IonSpewer()
-      : firstFunction_(false),
+      : outputLock_(mutexid::IonSpewer),
+        firstFunction_(false),
         asyncLogging_(false),
         inited_(false)
     { }
@@ -65,23 +78,6 @@ class IonSpewer
     void beginFunction();
     void spewPass(GraphSpewer* gs);
     void endFunction(GraphSpewer* gs);
-
-    // Lock used to sequentialized asynchronous compilation output.
-    void lockOutput() {
-        PR_Lock(outputLock_);
-    }
-    void unlockOutput() {
-        PR_Unlock(outputLock_);
-    }
-};
-
-class MOZ_RAII AutoLockIonSpewerOutput
-{
-  private:
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-  public:
-    explicit AutoLockIonSpewerOutput(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
-    ~AutoLockIonSpewerOutput();
 };
 
 // IonSpewer singleton.
@@ -115,7 +111,7 @@ FilterContainsLocation(JSScript* function)
     if (!filter || !filter[0])
         return true;
 
-    // Disable asm.js output when filter is set.
+    // Disable wasm output when filter is set.
     if (!function)
         return false;
 
@@ -160,9 +156,6 @@ IonSpewer::release()
         c1Output_.finish();
     if (jsonOutput_.isInitialized())
         jsonOutput_.finish();
-    if (outputLock_)
-        PR_DestroyLock(outputLock_);
-    outputLock_ = nullptr;
     inited_ = false;
 }
 
@@ -172,10 +165,38 @@ IonSpewer::init()
     if (inited_)
         return true;
 
-    outputLock_ = PR_NewLock();
-    if (!outputLock_ ||
-        !c1Output_.init(JIT_SPEW_DIR "ion.cfg") ||
-        !jsonOutput_.init(JIT_SPEW_DIR "ion.json"))
+    const size_t bufferLength = 256;
+    char c1Buffer[bufferLength];
+    char jsonBuffer[bufferLength];
+    const char *c1Filename = JIT_SPEW_DIR "/ion.cfg";
+    const char *jsonFilename = JIT_SPEW_DIR "/ion.json";
+
+    const char* usePid = getenv("ION_SPEW_BY_PID");
+    if (usePid && *usePid != 0) {
+#if defined(XP_WIN)
+        size_t pid = GetCurrentProcessId();
+#else
+        size_t pid = getpid();
+#endif
+
+        size_t len;
+        len = snprintf(jsonBuffer, bufferLength, JIT_SPEW_DIR "/ion%" PRIuSIZE ".json", pid);
+        if (bufferLength <= len) {
+            fprintf(stderr, "Warning: IonSpewer::init: Cannot serialize file name.");
+            return false;
+        }
+        jsonFilename = jsonBuffer;
+
+        len = snprintf(c1Buffer, bufferLength, JIT_SPEW_DIR "/ion%" PRIuSIZE ".cfg", pid);
+        if (bufferLength <= len) {
+            fprintf(stderr, "Warning: IonSpewer::init: Cannot serialize file name.");
+            return false;
+        }
+        c1Filename = c1Buffer;
+    }
+
+    if (!c1Output_.init(c1Filename) ||
+        !jsonOutput_.init(jsonFilename))
     {
         release();
         return false;
@@ -188,17 +209,6 @@ IonSpewer::init()
     return true;
 }
 
-AutoLockIonSpewerOutput::AutoLockIonSpewerOutput(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
-{
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    ionspewer.lockOutput();
-}
-
-AutoLockIonSpewerOutput::~AutoLockIonSpewerOutput()
-{
-    ionspewer.unlockOutput();
-}
-
 void
 IonSpewer::beginFunction()
 {
@@ -206,7 +216,7 @@ IonSpewer::beginFunction()
     // as this is useful in case of failure during the compilation. On the other
     // hand, it is recommended to disabled off main thread compilation.
     if (!getAsyncLogging() && !firstFunction_) {
-        AutoLockIonSpewerOutput outputLock;
+        LockGuard<Mutex> guard(outputLock_);
         jsonOutput_.put(","); // separate functions
     }
 }
@@ -215,7 +225,7 @@ void
 IonSpewer::spewPass(GraphSpewer* gs)
 {
     if (!getAsyncLogging()) {
-        AutoLockIonSpewerOutput outputLock;
+        LockGuard<Mutex> guard(outputLock_);
         gs->dump(c1Output_, jsonOutput_);
     }
 }
@@ -223,7 +233,7 @@ IonSpewer::spewPass(GraphSpewer* gs)
 void
 IonSpewer::endFunction(GraphSpewer* gs)
 {
-    AutoLockIonSpewerOutput outputLock;
+    LockGuard<Mutex> guard(outputLock_);
     if (getAsyncLogging() && !firstFunction_)
         jsonOutput_.put(","); // separate functions
 
@@ -293,6 +303,13 @@ GraphSpewer::spewPass(const char* pass)
     jsonSpewer_.endPass();
 
     ionspewer.spewPass(this);
+
+    // As this function is used for debugging, we ignore any of the previous
+    // failures and ensure there is enough ballast space, such that we do not
+    // exhaust the ballast space before running the next phase.
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+    if (!graph_->alloc().ensureBallast())
+        oomUnsafe.crash("Could not ensure enough ballast space after spewing graph information.");
 }
 
 void
@@ -398,43 +415,47 @@ jit::CheckLogging()
             "\n"
             "usage: IONFLAGS=option,option,option,... where options can be:\n"
             "\n"
-            "  aborts     Compilation abort messages\n"
-            "  scripts    Compiled scripts\n"
-            "  mir        MIR information\n"
-            "  prune      Prune unused branches\n"
-            "  escape     Escape analysis\n"
-            "  alias      Alias analysis\n"
-            "  gvn        Global Value Numbering\n"
-            "  licm       Loop invariant code motion\n"
-            "  sincos     Replace sin/cos by sincos\n"
-            "  sink       Sink transformation\n"
-            "  regalloc   Register allocation\n"
-            "  inline     Inlining\n"
-            "  snapshots  Snapshot information\n"
-            "  codegen    Native code generation\n"
-            "  bailouts   Bailouts\n"
-            "  caches     Inline caches\n"
-            "  osi        Invalidation\n"
-            "  safepoints Safepoints\n"
-            "  pools      Literal Pools (ARM only for now)\n"
-            "  cacheflush Instruction Cache flushes (ARM only for now)\n"
-            "  range      Range Analysis\n"
-            "  unroll     Loop unrolling\n"
-            "  logs       C1 and JSON visualization logging\n"
-            "  logs-sync  Same as logs, but flushes between each pass (sync. compiled functions only).\n"
-            "  profiling  Profiling-related information\n"
-            "  trackopts  Optimization tracking information\n"
-            "  all        Everything\n"
+            "  aborts        Compilation abort messages\n"
+            "  scripts       Compiled scripts\n"
+            "  mir           MIR information\n"
+            "  prune         Prune unused branches\n"
+            "  escape        Escape analysis\n"
+            "  alias         Alias analysis\n"
+            "  alias-sum     Alias analysis: shows summaries for every block\n"
+            "  gvn           Global Value Numbering\n"
+            "  licm          Loop invariant code motion\n"
+            "  flac          Fold linear arithmetic constants\n"
+            "  eaa           Effective address analysis\n"
+            "  sincos        Replace sin/cos by sincos\n"
+            "  sink          Sink transformation\n"
+            "  regalloc      Register allocation\n"
+            "  inline        Inlining\n"
+            "  snapshots     Snapshot information\n"
+            "  codegen       Native code generation\n"
+            "  bailouts      Bailouts\n"
+            "  caches        Inline caches\n"
+            "  osi           Invalidation\n"
+            "  safepoints    Safepoints\n"
+            "  pools         Literal Pools (ARM only for now)\n"
+            "  cacheflush    Instruction Cache flushes (ARM only for now)\n"
+            "  range         Range Analysis\n"
+            "  unroll        Loop unrolling\n"
+            "  logs          C1 and JSON visualization logging\n"
+            "  logs-sync     Same as logs, but flushes between each pass (sync. compiled functions only).\n"
+            "  profiling     Profiling-related information\n"
+            "  trackopts     Optimization tracking information\n"
+            "  dump-mir-expr Dump the MIR expressions\n"
+            "  all           Everything\n"
             "\n"
-            "  bl-aborts  Baseline compiler abort messages\n"
-            "  bl-scripts Baseline script-compilation\n"
-            "  bl-op      Baseline compiler detailed op-specific messages\n"
-            "  bl-ic      Baseline inline-cache messages\n"
-            "  bl-ic-fb   Baseline IC fallback stub messages\n"
-            "  bl-osr     Baseline IC OSR messages\n"
-            "  bl-bails   Baseline bailouts\n"
-            "  bl-dbg-osr Baseline debug mode on stack recompile messages\n"
-            "  bl-all     All baseline spew\n"
+            "  bl-aborts     Baseline compiler abort messages\n"
+            "  bl-scripts    Baseline script-compilation\n"
+            "  bl-op         Baseline compiler detailed op-specific messages\n"
+            "  bl-ic         Baseline inline-cache messages\n"
+            "  bl-ic-fb      Baseline IC fallback stub messages\n"
+            "  bl-osr        Baseline IC OSR messages\n"
+            "  bl-bails      Baseline bailouts\n"
+            "  bl-dbg-osr    Baseline debug mode on stack recompile messages\n"
+            "  bl-all        All baseline spew\n"
             "\n"
         );
         exit(0);
@@ -448,6 +469,8 @@ jit::CheckLogging()
         EnableChannel(JitSpew_Escape);
     if (ContainsFlag(env, "alias"))
         EnableChannel(JitSpew_Alias);
+    if (ContainsFlag(env, "alias-sum"))
+        EnableChannel(JitSpew_AliasSummaries);
     if (ContainsFlag(env, "scripts"))
         EnableChannel(JitSpew_IonScripts);
     if (ContainsFlag(env, "mir"))
@@ -460,6 +483,10 @@ jit::CheckLogging()
         EnableChannel(JitSpew_Unrolling);
     if (ContainsFlag(env, "licm"))
         EnableChannel(JitSpew_LICM);
+    if (ContainsFlag(env, "flac"))
+        EnableChannel(JitSpew_FLAC);
+    if (ContainsFlag(env, "eaa"))
+        EnableChannel(JitSpew_EAA);
     if (ContainsFlag(env, "sincos"))
         EnableChannel(JitSpew_Sincos);
     if (ContainsFlag(env, "sink"))
@@ -492,6 +519,8 @@ jit::CheckLogging()
         EnableChannel(JitSpew_Profiling);
     if (ContainsFlag(env, "trackopts"))
         EnableChannel(JitSpew_OptimizationTracking);
+    if (ContainsFlag(env, "dump-mir-expr"))
+        EnableChannel(JitSpew_MIRExpressions);
     if (ContainsFlag(env, "all"))
         LoggingBits = uint64_t(-1);
 

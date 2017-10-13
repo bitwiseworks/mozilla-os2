@@ -4,9 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IMFYCbCrImage.h"
+#include "DeviceManagerD3D9.h"
 #include "mozilla/layers/TextureD3D11.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/layers/TextureClient.h"
 #include "d3d9.h"
@@ -35,6 +37,9 @@ struct AutoLockTexture
   AutoLockTexture(ID3D11Texture2D* aTexture)
   {
     aTexture->QueryInterface((IDXGIKeyedMutex**)getter_AddRefs(mMutex));
+    if (!mMutex) {
+      return;
+    }
     HRESULT hr = mMutex->AcquireSync(0, 10000);
     if (hr == WAIT_TIMEOUT) {
       MOZ_CRASH("GFX: IMFYCbCrImage timeout");
@@ -47,6 +52,9 @@ struct AutoLockTexture
 
   ~AutoLockTexture()
   {
+    if (!mMutex) {
+      return;
+    }
     HRESULT hr = mMutex->ReleaseSync(0);
     if (FAILED(hr)) {
       NS_WARNING("Failed to unlock the texture");
@@ -153,9 +161,9 @@ static bool UploadData(IDirect3DDevice9* aDevice,
 }
 
 TextureClient*
-IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
+IMFYCbCrImage::GetD3D9TextureClient(KnowsCompositor* aForwarder)
 {
-  IDirect3DDevice9* device = gfxWindowsPlatform::GetPlatform()->GetD3D9Device();
+  RefPtr<IDirect3DDevice9> device = DeviceManagerD3D9::GetDevice();
   if (!device) {
     return nullptr;
   }
@@ -205,79 +213,90 @@ IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
   }
 
   mTextureClient = TextureClient::CreateWithData(
-    DXGIYCbCrTextureData::Create(aClient->GetForwarder(),
-                                 TextureFlags::DEFAULT,
+    DXGIYCbCrTextureData::Create(TextureFlags::DEFAULT,
                                  textureY, textureCb, textureCr,
                                  shareHandleY, shareHandleCb, shareHandleCr,
                                  GetSize(), mData.mYSize, mData.mCbCrSize),
     TextureFlags::DEFAULT,
-    aClient->GetForwarder()
+    aForwarder->GetTextureForwarder()
   );
 
   return mTextureClient;
 }
 
 TextureClient*
-IMFYCbCrImage::GetTextureClient(CompositableClient* aClient)
+IMFYCbCrImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
-  LayersBackend backend = aClient->GetForwarder()->GetCompositorBackendType();
-  ID3D11Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D11ImageBridgeDevice();
-
-  if (!device || backend != LayersBackend::LAYERS_D3D11) {
-    if (backend == LayersBackend::LAYERS_D3D9 ||
-        backend == LayersBackend::LAYERS_D3D11) {
-      return GetD3D9TextureClient(aClient);
-    }
-    return nullptr;
-  }
-
   if (mTextureClient) {
     return mTextureClient;
   }
 
-  RefPtr<ID3D11DeviceContext> ctx;
-  device->GetImmediateContext(getter_AddRefs(ctx));
+  RefPtr<ID3D11Device> device =
+    gfx::DeviceManagerDx::Get()->GetContentDevice();
+  if (!device) {
+    device =
+      gfx::DeviceManagerDx::Get()->GetCompositorDevice();
+  }
+
+  LayersBackend backend = aForwarder->GetCompositorBackendType();
+  if (!device || backend != LayersBackend::LAYERS_D3D11) {
+    if (backend == LayersBackend::LAYERS_D3D9 ||
+        backend == LayersBackend::LAYERS_D3D11) {
+      return GetD3D9TextureClient(aForwarder);
+    }
+    return nullptr;
+  }
+
+  if (!gfx::DeviceManagerDx::Get()->CanInitializeKeyedMutexTextures()) {
+    return nullptr;
+  }
+
+  if (mData.mYStride < 0 || mData.mCbCrStride < 0) {
+    // D3D11 only supports unsigned stride values.
+    return nullptr;
+  }
 
   CD3D11_TEXTURE2D_DESC newDesc(DXGI_FORMAT_R8_UNORM,
                                 mData.mYSize.width, mData.mYSize.height, 1, 1);
 
-  newDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+  if (device == gfx::DeviceManagerDx::Get()->GetCompositorDevice()) {
+    newDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+  } else {
+    newDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+  }
 
   RefPtr<ID3D11Texture2D> textureY;
-  HRESULT hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureY));
+  D3D11_SUBRESOURCE_DATA yData = { mData.mYChannel, (UINT)mData.mYStride, 0 };
+  HRESULT hr = device->CreateTexture2D(&newDesc, &yData, getter_AddRefs(textureY));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   newDesc.Width = mData.mCbCrSize.width;
   newDesc.Height = mData.mCbCrSize.height;
 
   RefPtr<ID3D11Texture2D> textureCb;
-  hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureCb));
+  D3D11_SUBRESOURCE_DATA cbData = { mData.mCbChannel, (UINT)mData.mCbCrStride, 0 };
+  hr = device->CreateTexture2D(&newDesc, &cbData, getter_AddRefs(textureCb));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   RefPtr<ID3D11Texture2D> textureCr;
-  hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureCr));
+  D3D11_SUBRESOURCE_DATA crData = { mData.mCrChannel, (UINT)mData.mCbCrStride, 0 };
+  hr = device->CreateTexture2D(&newDesc, &crData, getter_AddRefs(textureCr));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
+  // Even though the textures we created are meant to be protected by a keyed mutex,
+  // it appears that D3D doesn't include the initial memory upload within this
+  // synchronization. Add an empty lock/unlock pair since that appears to
+  // be sufficient to make sure we synchronize.
   {
-    AutoLockTexture lockY(textureY);
-    AutoLockTexture lockCb(textureCb);
     AutoLockTexture lockCr(textureCr);
-
-    ctx->UpdateSubresource(textureY, 0, nullptr, mData.mYChannel,
-                           mData.mYStride, mData.mYStride * mData.mYSize.height);
-    ctx->UpdateSubresource(textureCb, 0, nullptr, mData.mCbChannel,
-                           mData.mCbCrStride, mData.mCbCrStride * mData.mCbCrSize.height);
-    ctx->UpdateSubresource(textureCr, 0, nullptr, mData.mCrChannel,
-                           mData.mCbCrStride, mData.mCbCrStride * mData.mCbCrSize.height);
   }
 
   mTextureClient = TextureClient::CreateWithData(
-    DXGIYCbCrTextureData::Create(aClient->GetForwarder(),
-                                 TextureFlags::DEFAULT,
+    DXGIYCbCrTextureData::Create(TextureFlags::DEFAULT,
                                  textureY, textureCb, textureCr,
                                  GetSize(), mData.mYSize, mData.mCbCrSize),
     TextureFlags::DEFAULT,
-    aClient->GetForwarder()
+    aForwarder->GetTextureForwarder()
   );
 
   return mTextureClient;

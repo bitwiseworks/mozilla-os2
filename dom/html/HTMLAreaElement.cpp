@@ -7,6 +7,7 @@
 #include "mozilla/dom/HTMLAreaElement.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStates.h"
@@ -64,18 +65,6 @@ HTMLAreaElement::TabIndexDefault()
   return 0;
 }
 
-void
-HTMLAreaElement::GetItemValueText(DOMString& aValue)
-{
-  GetHref(aValue);
-}
-
-void
-HTMLAreaElement::SetItemValueText(const nsAString& aValue)
-{
-  SetHref(aValue);
-}
-
 NS_IMETHODIMP
 HTMLAreaElement::GetTarget(nsAString& aValue)
 {
@@ -122,7 +111,8 @@ nsDOMTokenList*
 HTMLAreaElement::RelList()
 {
   if (!mRelList) {
-    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel);
+    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel,
+                                  HTMLAnchorElement::sSupportedRelValues);
   }
   return mRelList;
 }
@@ -231,10 +221,11 @@ HTMLAreaElement::ToString(nsAString& aSource)
   return GetHref(aSource);
 }
 
-NS_IMETHODIMP    
+NS_IMETHODIMP
 HTMLAreaElement::GetPing(nsAString& aValue)
 {
-  return GetURIListAttr(nsGkAtoms::ping, aValue);
+  GetAttr(kNameSpaceID_None, nsGkAtoms::ping, aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

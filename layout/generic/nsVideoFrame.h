@@ -26,9 +26,14 @@ class nsAString;
 class nsPresContext;
 class nsDisplayItem;
 
-class nsVideoFrame : public nsContainerFrame, public nsIAnonymousContentCreator
+class nsVideoFrame : public nsContainerFrame
+                   , public nsIAnonymousContentCreator
 {
 public:
+  template <typename T> using Maybe = mozilla::Maybe<T>;
+  using Nothing = mozilla::Nothing;
+  using Visibility = mozilla::Visibility;
+
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
@@ -46,6 +51,9 @@ public:
   virtual nsresult AttributeChanged(int32_t aNameSpaceID,
                                     nsIAtom* aAttribute,
                                     int32_t aModType) override;
+
+  void OnVisibilityChange(Visibility aNewVisibility,
+                          Maybe<OnNonvisible> aNonvisibleAction = Nothing()) override;
 
   /* get the size of the video's display */
   nsSize GetVideoIntrinsicSize(nsRenderingContext *aRenderingContext);
@@ -65,8 +73,8 @@ public:
   virtual bool IsLeaf() const override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
 #ifdef ACCESSIBILITY
@@ -77,7 +85,8 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eReplaced));
+    return nsSplittableFrame::IsFrameOfType(aFlags &
+      ~(nsIFrame::eReplaced | nsIFrame::eReplacedSizing));
   }
   
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) override;
@@ -91,6 +100,8 @@ public:
   bool ShouldDisplayPoster();
 
   nsIContent *GetCaptionOverlay() { return mCaptionDiv; }
+
+  nsIContent *GetVideoControls() { return mVideoControls; }
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;

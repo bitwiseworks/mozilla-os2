@@ -28,7 +28,7 @@
 #include "mozilla/Logging.h"
 
 
-extern PRLogModuleInfo* gStorageLog;
+extern mozilla::LazyLogModule gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -46,17 +46,17 @@ NS_IMPL_CI_INTERFACE_GETTER(Statement,
 class StatementClassInfo : public nsIClassInfo
 {
 public:
-  MOZ_CONSTEXPR StatementClassInfo() {}
+  constexpr StatementClassInfo() {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetInterfaces(uint32_t *_count, nsIID ***_array) override
   {
     return NS_CI_INTERFACE_GETTER_NAME(Statement)(_count, _array);
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetScriptableHelper(nsIXPCScriptable **_helper) override
   {
     static StatementJSHelper sJSHelper;
@@ -64,35 +64,35 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetContractID(char **_contractID) override
   {
     *_contractID = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassDescription(char **_desc) override
   {
     *_desc = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassID(nsCID **_id) override
   {
     *_id = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetFlags(uint32_t *_flags) override
   {
     *_flags = 0;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassIDNoAlloc(nsCID *_cid) override
   {
     return NS_ERROR_NOT_AVAILABLE;
@@ -446,9 +446,9 @@ Statement::GetParameterName(uint32_t aParamIndex,
                                                    aParamIndex + 1);
   if (name == nullptr) {
     // this thing had no name, so fake one
-    nsAutoCString name(":");
-    name.AppendInt(aParamIndex);
-    _name.Assign(name);
+    nsAutoCString fakeName(":");
+    fakeName.AppendInt(aParamIndex);
+    _name.Assign(fakeName);
   }
   else {
     _name.Assign(nsDependentCString(name));
@@ -545,6 +545,8 @@ Statement::Reset()
 NS_IMETHODIMP
 Statement::BindParameters(mozIStorageBindingParamsArray *aParameters)
 {
+  NS_ENSURE_ARG_POINTER(aParameters);
+
   if (!mDBStatement)
     return NS_ERROR_NOT_INITIALIZED;
 
@@ -647,19 +649,6 @@ Statement::GetState(int32_t *_state)
   else
     *_state = MOZ_STORAGE_STATEMENT_READY;
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Statement::GetColumnDecltype(uint32_t aParamIndex,
-                             nsACString &_declType)
-{
-  if (!mDBStatement)
-    return NS_ERROR_NOT_INITIALIZED;
-
-  ENSURE_INDEX_VALUE(aParamIndex, mResultColumnCount);
-
-  _declType.Assign(::sqlite3_column_decltype(mDBStatement, aParamIndex));
   return NS_OK;
 }
 
@@ -770,7 +759,6 @@ Statement::GetUTF8String(uint32_t aIndex,
   if (type == mozIStorageStatement::VALUE_TYPE_NULL) {
     // NULL columns should have IsVoid set to distinguish them from the empty
     // string.
-    _value.Truncate(0);
     _value.SetIsVoid(true);
   }
   else {
@@ -793,7 +781,6 @@ Statement::GetString(uint32_t aIndex,
   if (type == mozIStorageStatement::VALUE_TYPE_NULL) {
     // NULL columns should have IsVoid set to distinguish them from the empty
     // string.
-    _value.Truncate(0);
     _value.SetIsVoid(true);
   } else {
     const char16_t *value =

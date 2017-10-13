@@ -14,7 +14,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Utils",
-  "resource:///modules/sessionstore/Utils.jsm");
+  "resource://gre/modules/sessionstore/Utils.jsm");
 
 function debug(msg) {
   Services.console.logStringMessage("SessionHistory: " + msg);
@@ -64,16 +64,17 @@ var SessionHistoryInternal = {
    *        The docShell that owns the session history.
    */
   collect: function (docShell) {
-    let data = {entries: []};
-    let isPinned = docShell.isAppTab;
+    let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
+
+    let data = {entries: [], userContextId: loadContext.originAttributes.userContextId };
 
     if (history && history.count > 0) {
       // Loop over the transaction linked list directly so we can get the
       // persist property for each transaction.
       for (let txn = history.rootTransaction; txn; txn = txn.next) {
-        let entry = this.serializeEntry(txn.sHEntry, isPinned);
+        let entry = this.serializeEntry(txn.sHEntry);
         entry.persist = txn.persist;
         data.entries.push(entry);
       }
@@ -107,11 +108,9 @@ var SessionHistoryInternal = {
    *
    * @param shEntry
    *        nsISHEntry instance
-   * @param isPinned
-   *        The tab is pinned and should be treated differently for privacy.
    * @return object
    */
-  serializeEntry: function (shEntry, isPinned) {
+  serializeEntry: function (shEntry) {
     let entry = { url: shEntry.URI.spec };
 
     // Save some bytes and don't include the title property
@@ -162,21 +161,44 @@ var SessionHistoryInternal = {
     if (shEntry.contentType)
       entry.contentType = shEntry.contentType;
 
-    let x = {}, y = {};
-    shEntry.getScrollPosition(x, y);
-    if (x.value != 0 || y.value != 0)
-      entry.scroll = x.value + "," + y.value;
+    if (shEntry.scrollRestorationIsManual) {
+      entry.scrollRestorationIsManual = true;
+    } else {
+      let x = {}, y = {};
+      shEntry.getScrollPosition(x, y);
+      if (x.value != 0 || y.value != 0)
+        entry.scroll = x.value + "," + y.value;
+    }
 
-    // Collect owner data for the current history entry.
-    try {
-      let owner = this.serializeOwner(shEntry);
-      if (owner) {
-        entry.owner_b64 = owner;
+    // Collect triggeringPrincipal data for the current history entry.
+    // Please note that before Bug 1297338 there was no concept of a
+    // principalToInherit. To remain backward/forward compatible we
+    // serialize the principalToInherit as triggeringPrincipal_b64.
+    // Once principalToInherit is well established (within FF55)
+    // we can update this code, remove triggeringPrincipal_b64 and
+    // just keep triggeringPrincipal_base64 as well as
+    // principalToInherit_base64;  see Bug 1301666.
+    if (shEntry.principalToInherit) {
+      try {
+        let principalToInherit = Utils.serializePrincipal(shEntry.principalToInherit);
+        if (principalToInherit) {
+          entry.triggeringPrincipal_b64 = principalToInherit;
+          entry.principalToInherit_base64 = principalToInherit;
+        }
+      } catch (e) {
+        debug(e);
       }
-    } catch (ex) {
-      // Not catching anything specific here, just possible errors
-      // from writeCompoundObject() and the like.
-      debug("Failed serializing owner data: " + ex);
+    }
+
+    if (shEntry.triggeringPrincipal) {
+      try {
+        let triggeringPrincipal = Utils.serializePrincipal(shEntry.triggeringPrincipal);
+        if (triggeringPrincipal) {
+          entry.triggeringPrincipal_base64 = triggeringPrincipal;
+        }
+      } catch (e) {
+        debug(e);
+      }
     }
 
     entry.docIdentifier = shEntry.BFCacheEntry.ID;
@@ -203,7 +225,7 @@ var SessionHistoryInternal = {
             break;
           }
 
-          children.push(this.serializeEntry(child, isPinned));
+          children.push(this.serializeEntry(child));
         }
       }
 
@@ -213,39 +235,6 @@ var SessionHistoryInternal = {
     }
 
     return entry;
-  },
-
-  /**
-   * Serialize owner data contained in the given session history entry.
-   *
-   * @param shEntry
-   *        The session history entry.
-   * @return The base64 encoded owner data.
-   */
-  serializeOwner: function (shEntry) {
-    if (!shEntry.owner) {
-      return null;
-    }
-
-    let binaryStream = Cc["@mozilla.org/binaryoutputstream;1"].
-                       createInstance(Ci.nsIObjectOutputStream);
-    let pipe = Cc["@mozilla.org/pipe;1"].createInstance(Ci.nsIPipe);
-    pipe.init(false, false, 0, 0xffffffff, null);
-    binaryStream.setOutputStream(pipe.outputStream);
-    binaryStream.writeCompoundObject(shEntry.owner, Ci.nsISupports, true);
-    binaryStream.close();
-
-    // Now we want to read the data from the pipe's input end and encode it.
-    let scriptableStream = Cc["@mozilla.org/binaryinputstream;1"].
-                           createInstance(Ci.nsIBinaryInputStream);
-    scriptableStream.setInputStream(pipe.inputStream);
-    let ownerBytes =
-      scriptableStream.readByteArray(scriptableStream.available());
-
-    // We can stop doing base64 encoding once our serialization into JSON
-    // is guaranteed to handle all chars in strings, including embedded
-    // nulls.
-    return btoa(String.fromCharCode.apply(null, ownerBytes));
   },
 
   /**
@@ -259,7 +248,6 @@ var SessionHistoryInternal = {
   restore: function (docShell, tabData) {
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory;
-
     if (history.count > 0) {
       history.PurgeHistory(history.count);
     }
@@ -352,7 +340,9 @@ var SessionHistoryInternal = {
                                        entry.structuredCloneVersion);
     }
 
-    if (entry.scroll) {
+    if (entry.scrollRestorationIsManual) {
+      shEntry.scrollRestorationIsManual = true;
+    } else if (entry.scroll) {
       var scrollPos = (entry.scroll || "0,0").split(",");
       scrollPos = [parseInt(scrollPos[0]) || 0, parseInt(scrollPos[1]) || 0];
       shEntry.setScrollPosition(scrollPos[0], scrollPos[1]);
@@ -375,17 +365,35 @@ var SessionHistoryInternal = {
       }
     }
 
+    // The field entry.owner_b64 got renamed to entry.triggeringPricipal_b64 in
+    // Bug 1286472. To remain backward compatible we still have to support that
+    // field for a few cycles before we can remove it within Bug 1289785.
     if (entry.owner_b64) {
-      var ownerInput = Cc["@mozilla.org/io/string-input-stream;1"].
-                       createInstance(Ci.nsIStringInputStream);
-      var binaryData = atob(entry.owner_b64);
-      ownerInput.setData(binaryData, binaryData.length);
-      var binaryStream = Cc["@mozilla.org/binaryinputstream;1"].
-                         createInstance(Ci.nsIObjectInputStream);
-      binaryStream.setInputStream(ownerInput);
-      try { // Catch possible deserialization exceptions
-        shEntry.owner = binaryStream.readObject(true);
-      } catch (ex) { debug(ex); }
+      entry.triggeringPricipal_b64 = entry.owner_b64;
+      delete entry.owner_b64;
+    }
+
+    // Before introducing the concept of principalToInherit we only had
+    // a triggeringPrincipal within every entry which basically is the
+    // equivalent of the new principalToInherit. To avoid compatibility
+    // issues, we first check if the entry has entries for
+    // triggeringPrincipal_base64 and principalToInherit_base64. If not
+    // we fall back to using the principalToInherit (which is stored
+    // as triggeringPrincipal_b64) as the triggeringPrincipal and
+    // the principalToInherit.
+    // FF55 will remove the triggeringPrincipal_b64, see Bug 1301666.
+    if (entry.triggeringPrincipal_base64 || entry.principalToInherit_base64) {
+      if (entry.triggeringPrincipal_base64) {
+        shEntry.triggeringPrincipal =
+          Utils.deserializePrincipal(entry.triggeringPrincipal_base64);
+      }
+      if (entry.principalToInherit_base64) {
+        shEntry.principalToInherit =
+          Utils.deserializePrincipal(entry.principalToInherit_base64);
+      }
+    } else if (entry.triggeringPrincipal_b64) {
+      shEntry.triggeringPrincipal = Utils.deserializePrincipal(entry.triggeringPrincipal_b64);
+      shEntry.principalToInherit = shEntry.triggeringPrincipal;
     }
 
     if (entry.children && shEntry instanceof Ci.nsISHContainer) {

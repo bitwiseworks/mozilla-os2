@@ -6,7 +6,6 @@
 #include "jsapi-tests/tests.h"
 
 using namespace JS;
-using mozilla::UniquePtr;
 
 struct BarkWhenTracedClass {
     static int finalizeCount;
@@ -21,21 +20,25 @@ struct BarkWhenTracedClass {
 int BarkWhenTracedClass::finalizeCount;
 int BarkWhenTracedClass::traceCount;
 
+static const JSClassOps BarkWhenTracedClassClassOps = {
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    BarkWhenTracedClass::finalize,
+    nullptr,
+    nullptr,
+    nullptr,
+    BarkWhenTracedClass::trace
+};
+
 const JSClass BarkWhenTracedClass::class_ = {
     "BarkWhenTracedClass",
-    0,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    finalize,
-    nullptr,
-    nullptr,
-    nullptr,
-    trace
+    JSCLASS_FOREGROUND_FINALIZE,
+    &BarkWhenTracedClassClassOps
 };
 
 struct Kennel {
@@ -71,7 +74,7 @@ GCFinalizesNBarkers(JSContext* cx, int n)
     int preGCTrace = BarkWhenTracedClass::traceCount;
     int preGCFinalize = BarkWhenTracedClass::finalizeCount;
 
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
 
     return (BarkWhenTracedClass::finalizeCount == preGCFinalize + n &&
             BarkWhenTracedClass::traceCount > preGCTrace);
@@ -82,7 +85,7 @@ BEGIN_TEST(test_PersistentRooted)
 {
     BarkWhenTracedClass::reset();
 
-    UniquePtr<Kennel> kennel(Allocate(cx));
+    mozilla::UniquePtr<Kennel> kennel(Allocate(cx));
     CHECK(kennel.get());
 
     // GC should be able to find our barker.
@@ -91,7 +94,7 @@ BEGIN_TEST(test_PersistentRooted)
     kennel = nullptr;
 
     // Now GC should not be able to find the barker.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     CHECK(BarkWhenTracedClass::finalizeCount == 1);
 
     return true;
@@ -106,7 +109,7 @@ BEGIN_TEST(test_PersistentRootedNull)
     Kennel kennel(cx);
     CHECK(!kennel.obj);
 
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     CHECK(BarkWhenTracedClass::finalizeCount == 0);
 
     return true;
@@ -118,13 +121,13 @@ BEGIN_TEST(test_PersistentRootedCopy)
 {
     BarkWhenTracedClass::reset();
 
-    UniquePtr<Kennel> kennel(Allocate(cx));
+    mozilla::UniquePtr<Kennel> kennel(Allocate(cx));
     CHECK(kennel.get());
 
     CHECK(GCFinalizesNBarkers(cx, 0));
 
     // Copy construction! AMAZING!
-    UniquePtr<Kennel> newKennel(new Kennel(*kennel));
+    mozilla::UniquePtr<Kennel> newKennel(new Kennel(*kennel));
 
     CHECK(GCFinalizesNBarkers(cx, 0));
 
@@ -136,7 +139,7 @@ BEGIN_TEST(test_PersistentRootedCopy)
 
     // Now that kennel and nowKennel are both deallocated, GC should not be
     // able to find the barker.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     CHECK(BarkWhenTracedClass::finalizeCount == 1);
 
     return true;
@@ -148,13 +151,13 @@ BEGIN_TEST(test_PersistentRootedAssign)
 {
     BarkWhenTracedClass::reset();
 
-    UniquePtr<Kennel> kennel(Allocate(cx));
+    mozilla::UniquePtr<Kennel> kennel(Allocate(cx));
     CHECK(kennel.get());
 
     CHECK(GCFinalizesNBarkers(cx, 0));
 
     // Allocate a new, empty kennel.
-    UniquePtr<Kennel> kennel2(new Kennel(cx));
+    mozilla::UniquePtr<Kennel> kennel2(new Kennel(cx));
 
     // Assignment! ASTONISHING!
     *kennel2 = *kennel;
@@ -168,7 +171,7 @@ BEGIN_TEST(test_PersistentRootedAssign)
     CHECK(GCFinalizesNBarkers(cx, 0));
 
     // Allocate a second barker.
-    kennel2 = UniquePtr<Kennel>(Allocate(cx));
+    kennel2 = mozilla::UniquePtr<Kennel>(Allocate(cx));
     CHECK(kennel2.get());
 
     *kennel = *kennel2;
@@ -181,7 +184,7 @@ BEGIN_TEST(test_PersistentRootedAssign)
 
     // Now that kennel and kennel2 are both deallocated, GC should not be
     // able to find the barker.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     CHECK(BarkWhenTracedClass::finalizeCount == 2);
 
     return true;
@@ -213,7 +216,7 @@ BEGIN_TEST(test_GlobalPersistentRooted)
     CHECK(!gGlobalRoot.initialized());
 
     // Now GC should not be able to find the barker.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     CHECK(BarkWhenTracedClass::finalizeCount == 1);
 
     return true;

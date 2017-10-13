@@ -21,10 +21,13 @@ XPCOMUtils.defineLazyGetter(this, "console", () => {
   });
 });
 
+XPCOMUtils.defineLazyServiceGetter(this, "PushService",
+  "@mozilla.org/push/Service;1", "nsIPushService");
+
 const PUSH_CID = Components.ID("{cde1d019-fad8-4044-b141-65fb4fb7a245}");
 
 /**
- * The Push component runs in the child process and exposes the SimplePush API
+ * The Push component runs in the child process and exposes the Push API
  * to the web application. The PushService running in the parent process is the
  * one actually performing all operations.
  */
@@ -43,31 +46,28 @@ Push.prototype = {
                                           Ci.nsISupportsWeakReference,
                                           Ci.nsIObserver]),
 
-  init: function(aWindow) {
+  init: function(win) {
     console.debug("init()");
 
-    this._window = aWindow;
+    this._window = win;
 
-    this.initDOMRequestHelper(aWindow);
+    this.initDOMRequestHelper(win);
 
-    this._principal = aWindow.document.nodePrincipal;
-
-    this._client = Cc["@mozilla.org/push/PushClient;1"].createInstance(Ci.nsIPushClient);
+    this._principal = win.document.nodePrincipal;
   },
 
-  setScope: function(scope){
-    console.debug("setScope()", scope);
+  __init: function(scope) {
     this._scope = scope;
   },
 
-  askPermission: function (aAllowCallback, aCancelCallback) {
+  askPermission: function () {
     console.debug("askPermission()");
 
     return this.createPromise((resolve, reject) => {
       let permissionDenied = () => {
         reject(new this._window.DOMException(
-          "User denied permission to use the Push API",
-          "PermissionDeniedError"
+          "User denied permission to use the Push API.",
+          "NotAllowedError"
         ));
       };
 
@@ -89,15 +89,30 @@ Push.prototype = {
     });
   },
 
-  subscribe: function() {
+  subscribe: function(options) {
     console.debug("subscribe()", this._scope);
 
     let histogram = Services.telemetry.getHistogramById("PUSH_API_USED");
     histogram.add(true);
     return this.askPermission().then(() =>
       this.createPromise((resolve, reject) => {
-        let callback = new PushEndpointCallback(this, resolve, reject);
-        this._client.subscribe(this._scope, this._principal, callback);
+        let callback = new PushSubscriptionCallback(this, resolve, reject);
+
+        if (!options || !options.applicationServerKey) {
+          PushService.subscribe(this._scope, this._principal, callback);
+          return;
+        }
+
+        let appServerKey = options.applicationServerKey;
+        let keyView = new this._window.Uint8Array(ArrayBuffer.isView(appServerKey) ?
+                                                  appServerKey.buffer : appServerKey);
+        if (keyView.byteLength === 0) {
+          callback._rejectWithError(Cr.NS_ERROR_DOM_PUSH_INVALID_KEY_ERR);
+          return;
+        }
+        PushService.subscribeWithKey(this._scope, this._principal,
+                                     appServerKey.length, appServerKey,
+                                     callback);
       })
     );
   },
@@ -106,8 +121,8 @@ Push.prototype = {
     console.debug("getSubscription()", this._scope);
 
     return this.createPromise((resolve, reject) => {
-      let callback = new PushEndpointCallback(this, resolve, reject);
-      this._client.getSubscription(this._scope, this._principal, callback);
+      let callback = new PushSubscriptionCallback(this, resolve, reject);
+      PushService.getSubscription(this._scope, this._principal, callback);
     });
   },
 
@@ -135,8 +150,17 @@ Push.prototype = {
   },
 
   _testPermission: function() {
-    return Services.perms.testExactPermissionFromPrincipal(
+    let permission = Services.perms.testExactPermissionFromPrincipal(
       this._principal, "desktop-notification");
+    if (permission == Ci.nsIPermissionManager.ALLOW_ACTION) {
+      return permission;
+    }
+    try {
+      if (Services.prefs.getBoolPref("dom.push.testing.ignorePermission")) {
+        permission = Ci.nsIPermissionManager.ALLOW_ACTION;
+      }
+    } catch (e) {}
+    return permission;
   },
 
   _requestPermission: function(allowCallback, cancelCallback) {
@@ -178,50 +202,82 @@ Push.prototype = {
   },
 };
 
-function PushEndpointCallback(pushManager, resolve, reject) {
+function PushSubscriptionCallback(pushManager, resolve, reject) {
   this.pushManager = pushManager;
   this.resolve = resolve;
   this.reject = reject;
 }
 
-PushEndpointCallback.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPushEndpointCallback]),
-  onPushEndpoint: function(ok, endpoint, keyLen, key,
-                           authSecretLen, authSecretIn) {
+PushSubscriptionCallback.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPushSubscriptionCallback]),
+
+  onPushSubscription: function(ok, subscription) {
     let {pushManager} = this;
     if (!Components.isSuccessCode(ok)) {
-      this.reject(new pushManager._window.DOMException(
-        "Error retrieving push subscription",
-        "AbortError"
-      ));
+      this._rejectWithError(ok);
       return;
     }
 
-    if (!endpoint) {
+    if (!subscription) {
       this.resolve(null);
       return;
     }
 
-    let publicKey = null;
-    if (keyLen) {
-      publicKey = new ArrayBuffer(keyLen);
-      let keyView = new Uint8Array(publicKey);
-      keyView.set(key);
+    let p256dhKey = this._getKey(subscription, "p256dh");
+    let authSecret = this._getKey(subscription, "auth");
+    let options = {
+      endpoint: subscription.endpoint,
+      scope: pushManager._scope,
+      p256dhKey: p256dhKey,
+      authSecret: authSecret,
+    };
+    let appServerKey = this._getKey(subscription, "appServer");
+    if (appServerKey) {
+      // Avoid passing null keys to work around bug 1256449.
+      options.appServerKey = appServerKey;
     }
-
-    let authSecret = null;
-    if (authSecretLen) {
-      authSecret = new ArrayBuffer(authSecretLen);
-      let secretView = new Uint8Array(authSecret);
-      secretView.set(authSecretIn);
-    }
-
-    let sub = new pushManager._window.PushSubscription(endpoint,
-                                                       pushManager._scope,
-                                                       publicKey,
-                                                       authSecret);
-    sub.setPrincipal(pushManager._principal);
+    let sub = new pushManager._window.PushSubscription(options);
     this.resolve(sub);
+  },
+
+  _getKey: function(subscription, name) {
+    let outKeyLen = {};
+    let rawKey = Cu.cloneInto(subscription.getKey(name, outKeyLen),
+                              this.pushManager._window);
+    if (!outKeyLen.value) {
+      return null;
+    }
+
+    let key = new this.pushManager._window.ArrayBuffer(outKeyLen.value);
+    let keyView = new this.pushManager._window.Uint8Array(key);
+    keyView.set(rawKey);
+    return key;
+  },
+
+  _rejectWithError: function(result) {
+    let error;
+    switch (result) {
+      case Cr.NS_ERROR_DOM_PUSH_INVALID_KEY_ERR:
+        error = new this.pushManager._window.DOMException(
+          "Invalid raw ECDSA P-256 public key.",
+          "InvalidAccessError"
+        );
+        break;
+
+      case Cr.NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR:
+        error = new this.pushManager._window.DOMException(
+          "A subscription with a different application server key already exists.",
+          "InvalidStateError"
+        );
+        break;
+
+      default:
+        error = new this.pushManager._window.DOMException(
+          "Error retrieving push subscription.",
+          "AbortError"
+        );
+    }
+    this.reject(error);
   },
 };
 

@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,11 +5,12 @@
  * found in the LICENSE file.
  */
 
-
 #ifndef SkColor_DEFINED
 #define SkColor_DEFINED
 
 #include "SkScalar.h"
+#include "SkPoint3.h"
+#include "SkTypes.h"
 
 /** \file SkColor.h
 
@@ -111,8 +111,7 @@ SK_API void SkRGBToHSV(U8CPU red, U8CPU green, U8CPU blue, SkScalar hsv[3]);
     @param color the argb color to convert. Note: the alpha component is ignored.
     @param hsv  3 element array which holds the resulting HSV components.
 */
-static inline void SkColorToHSV(SkColor color, SkScalar hsv[3])
-{
+static inline void SkColorToHSV(SkColor color, SkScalar hsv[3]) {
     SkRGBToHSV(SkColorGetR(color), SkColorGetG(color), SkColorGetB(color), hsv);
 }
 
@@ -135,8 +134,7 @@ SK_API SkColor SkHSVToColor(U8CPU alpha, const SkScalar hsv[3]);
     @param hsv  3 element array which holds the input HSV components.
     @return the resulting argb color
 */
-static inline SkColor SkHSVToColor(const SkScalar hsv[3])
-{
+static inline SkColor SkHSVToColor(const SkScalar hsv[3]) {
     return SkHSVToColor(0xFF, hsv);
 }
 
@@ -161,9 +159,40 @@ SK_API SkPMColor SkPreMultiplyColor(SkColor c);
 */
 typedef SkPMColor (*SkXfermodeProc)(SkPMColor src, SkPMColor dst);
 
-/** Define a function pointer type for combining a premultiplied src color
-    and a 16bit device color.
-*/
-typedef uint16_t (*SkXfermodeProc16)(SkPMColor src, uint16_t dst);
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct SkPM4f;
+
+/*
+ *  The float values are 0...1 unpremultiplied
+ */
+struct SkColor4f {
+    float fR;
+    float fG;
+    float fB;
+    float fA;
+
+    bool operator==(const SkColor4f& other) const {
+        return fA == other.fA && fR == other.fR && fG == other.fG && fB == other.fB;
+    }
+    bool operator!=(const SkColor4f& other) const {
+        return !(*this == other);
+    }
+
+    const float* vec() const { return &fR; }
+    float* vec() { return &fR; }
+
+    static SkColor4f Pin(float r, float g, float b, float a);
+    static SkColor4f FromColor(SkColor);
+    static SkColor4f FromColor3f(SkColor3f, float a);
+
+    SkColor toSkColor() const;
+
+    SkColor4f pin() const {
+        return Pin(fR, fG, fB, fA);
+    }
+
+    SkPM4f premul() const;
+};
 
 #endif

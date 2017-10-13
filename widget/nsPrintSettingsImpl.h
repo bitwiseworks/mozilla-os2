@@ -81,7 +81,6 @@ protected:
 
   nsString      mPaperName;
   int16_t       mPaperData;
-  int16_t       mPaperSizeType;
   double        mPaperWidth;
   double        mPaperHeight;
   int16_t       mPaperSizeUnit;
@@ -98,7 +97,6 @@ protected:
   int16_t       mOutputFormat;
   bool          mIsInitedFromPrinter;
   bool          mIsInitedFromPrefs;
-  bool          mPersistMarginBoxSettings;
 };
 
 #endif /* nsPrintSettings_h__ */

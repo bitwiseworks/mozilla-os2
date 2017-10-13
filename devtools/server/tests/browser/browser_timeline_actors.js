@@ -7,10 +7,11 @@
 // Test that the timeline can also record data from the memory and framerate
 // actors, emitted as events in tadem with the markers.
 
-const {TimelineFront} = require("devtools/server/actors/timeline");
+const {TimelineFront} = require("devtools/shared/fronts/timeline");
 
-add_task(function*() {
-  let doc = yield addTab("data:text/html;charset=utf-8,mop");
+add_task(function* () {
+  let browser = yield addTab("data:text/html;charset=utf-8,mop");
+  let doc = browser.contentDocument;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -45,7 +46,7 @@ add_task(function*() {
 
   info("Stop timeline marker recording");
   yield front.stop();
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });
 
@@ -62,7 +63,7 @@ function waitUntil(predicate, interval = 10) {
     return Promise.resolve(true);
   }
   return new Promise(resolve =>
-    setTimeout(function() {
+    setTimeout(function () {
       waitUntil(predicate).then(() => resolve(true));
     }, interval));
 }

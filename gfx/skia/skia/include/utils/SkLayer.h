@@ -10,8 +10,8 @@
 #ifndef SkLayer_DEFINED
 #define SkLayer_DEFINED
 
+#include "../private/SkTDArray.h"
 #include "SkRefCnt.h"
-#include "SkTDArray.h"
 #include "SkColor.h"
 #include "SkMatrix.h"
 #include "SkPoint.h"
@@ -23,7 +23,7 @@ class SkCanvas;
 class SkLayer : public SkRefCnt {
 
 public:
-    SK_DECLARE_INST_COUNT(SkLayer)
+    
 
     SkLayer();
     SkLayer(const SkLayer&);

@@ -21,7 +21,7 @@
 
 class GMPStringList {
 public:
-  virtual const uint32_t Size() const = 0;
+  virtual uint32_t Size() const = 0;
 
   virtual void StringAt(uint32_t aIndex,
                         const char** aOutString, uint32_t* aOutLength) const = 0;
@@ -79,7 +79,8 @@ enum GMPDOMException {
   kGMPSecurityError = 18,
   kGMPAbortError = 20,
   kGMPQuotaExceededError = 22,
-  kGMPTimeoutError = 23
+  kGMPTimeoutError = 23,
+  kGMPTypeError = 52
 };
 
 enum GMPSessionMessageType {
@@ -102,34 +103,22 @@ enum GMPMediaKeyStatus {
   kGMPMediaKeyStatusInvalid = 8 // Must always be last.
 };
 
+struct GMPMediaKeyInfo {
+  GMPMediaKeyInfo() {}
+  GMPMediaKeyInfo(const uint8_t* aKeyId,
+                  uint32_t aKeyIdSize,
+                  GMPMediaKeyStatus aStatus)
+    : keyid(aKeyId)
+    , keyid_size(aKeyIdSize)
+    , status(aStatus)
+  {}
+  const uint8_t* keyid;
+  uint32_t keyid_size;
+  GMPMediaKeyStatus status;
+};
+
 // Time in milliseconds, as offset from epoch, 1 Jan 1970.
 typedef int64_t GMPTimestamp;
-
-// Capability definitions. The capabilities of the EME GMP are reported
-// to Gecko by calling the GMPDecryptorCallback::SetCapabilities()
-// callback and specifying the logical OR of the GMP_EME_CAP_* flags below.
-//
-// Note the DECRYPT and the DECRYPT_AND_DECODE are mutually exclusive;
-// only one mode should be reported for each stream type, but different
-// modes can be reported for different stream types.
-//
-// Note: Gecko does not currently support the caps changing at runtime.
-// Set them once per plugin initialization, during the startup of
-// the GMPDecryptor.
-
-// Capability; CDM can decrypt encrypted buffers and return still
-// compressed buffers back to Gecko for decompression there.
-#define GMP_EME_CAP_DECRYPT_AUDIO (uint64_t(1) << 0)
-#define GMP_EME_CAP_DECRYPT_VIDEO (uint64_t(1) << 1)
-
-// Capability; CDM can decrypt and then decode encrypted buffers,
-// and return decompressed samples to Gecko for playback.
-#define GMP_EME_CAP_DECRYPT_AND_DECODE_AUDIO (uint64_t(1) << 2)
-#define GMP_EME_CAP_DECRYPT_AND_DECODE_VIDEO (uint64_t(1) << 3)
-
-// Capability; CDM can decrypt and then decode and render encrypted buffers
-#define GMP_EME_CAP_RENDER_AUDIO (uint64_t(1) << 4)
-#define GMP_EME_CAP_RENDER_VIDEO (uint64_t(1) << 5)
 
 // Callbacks to be called from the CDM. Threadsafe.
 class GMPDecryptorCallback {
@@ -212,16 +201,17 @@ public:
                                 uint32_t aKeyIdLength,
                                 GMPMediaKeyStatus aStatus) = 0;
 
-  // The CDM must report its capabilites of this CDM. aCaps should be a
-  // logical OR of the GMP_EME_CAP_* flags. The CDM *MUST* call this
-  // function and report whether it can decrypt and/or decode. Without
-  // this, Gecko does not know how to use the CDM and will not send
-  // samples to the CDM to decrypt or decrypt-and-decode mode. Note a
-  // CDM cannot change modes once playback has begun.
+  // DEPRECATED; this function has no affect.
   virtual void SetCapabilities(uint64_t aCaps) = 0;
 
   // Returns decrypted buffer to Gecko, or reports failure.
   virtual void Decrypted(GMPBuffer* aBuffer, GMPErr aResult) = 0;
+
+  // To aggregate KeyStatusChanged into single callback per session id.
+  virtual void BatchedKeyStatusChanged(const char* aSessionId,
+                                       uint32_t aSessionIdLength,
+                                       const GMPMediaKeyInfo* aKeyInfos,
+                                       uint32_t aKeyInfosLength) = 0;
 
   virtual ~GMPDecryptorCallback() {}
 };
@@ -244,8 +234,9 @@ enum GMPSessionType {
   kGMPSessionInvalid = 2 // Must always be last.
 };
 
-// Gecko supports the current GMPDecryptor version, and the previous.
-#define GMP_API_DECRYPTOR "eme-decrypt-v8"
+// Gecko supports the current GMPDecryptor version, and the obsolete
+// version that the Adobe GMP still uses.
+#define GMP_API_DECRYPTOR "eme-decrypt-v9"
 #define GMP_API_DECRYPTOR_BACKWARDS_COMPAT "eme-decrypt-v7"
 
 // API exposed by plugin library to manage decryption sessions.
@@ -258,14 +249,9 @@ public:
 
   // Sets the callback to use with the decryptor to return results
   // to Gecko.
-  //
-  // The CDM must also call GMPDecryptorCallback::SetCapabilities()
-  // exactly once during start up, to inform Gecko whether to use the CDM
-  // in decrypt or decrypt-and-decode mode.
-  //
-  // Note: GMPDecryptorCallback::SetCapabilities() must be called before
-  // Gecko will send any samples for decryption to the GMP.
-  virtual void Init(GMPDecryptorCallback* aCallback) = 0;
+  virtual void Init(GMPDecryptorCallback* aCallback,
+                    bool aDistinctiveIdentifierRequired,
+                    bool aPersistentStateRequired) = 0;
 
   // Initiates the creation of a session given |aType| and |aInitData|, and
   // the generation of a license request message.
@@ -361,6 +347,113 @@ public:
   virtual void DecryptingComplete() = 0;
 
   virtual ~GMPDecryptor() {}
+};
+
+// v7 is the latest decryptor version supported by the Adobe GMP.
+//
+// API name macro: GMP_API_DECRYPTOR_BACKWARDS_COMPAT
+// Host API: GMPDecryptorHost
+class GMPDecryptor7 {
+public:
+
+  // Sets the callback to use with the decryptor to return results
+  // to Gecko.
+  virtual void Init(GMPDecryptorCallback* aCallback) = 0;
+
+  // Initiates the creation of a session given |aType| and |aInitData|, and
+  // the generation of a license request message.
+  //
+  // This corresponds to a MediaKeySession.generateRequest() call in JS.
+  //
+  // The GMPDecryptor must do the following, in order, upon this method
+  // being called:
+  //
+  // 1. Generate a sessionId to expose to JS, and call
+  //    GMPDecryptorCallback::SetSessionId(aCreateSessionToken, sessionId...)
+  //    with the sessionId to be exposed to JS/EME on the MediaKeySession
+  //    object on which generateRequest() was called, and then
+  // 2. send any messages to JS/EME required to generate a license request
+  //    given the supplied initData, and then
+  // 3. generate a license request message, and send it to JS/EME, and then
+  // 4. call GMPDecryptorCallback::ResolvePromise().
+  //
+  // Note: GMPDecryptorCallback::SetSessionId(aCreateSessionToken, sessionId, ...)
+  // *must* be called before GMPDecryptorCallback::SendMessage(sessionId, ...)
+  // will work.
+  //
+  // If generating the request fails, reject aPromiseId by calling
+  // GMPDecryptorCallback::RejectPromise().
+  virtual void CreateSession(uint32_t aCreateSessionToken,
+                             uint32_t aPromiseId,
+                             const char* aInitDataType,
+                             uint32_t aInitDataTypeSize,
+                             const uint8_t* aInitData,
+                             uint32_t aInitDataSize,
+                             GMPSessionType aSessionType) = 0;
+
+  // Loads a previously loaded persistent session.
+  //
+  // This corresponds to a MediaKeySession.load() call in JS.
+  //
+  // The GMPDecryptor must do the following, in order, upon this method
+  // being called:
+  //
+  // 1. Send any messages to JS/EME, or read from storage, whatever is
+  //    required to load the session, and then
+  // 2. if there is no session with the given sessionId loadable, call
+  //    ResolveLoadSessionPromise(aPromiseId, false), otherwise
+  // 2. mark the session's keys as usable, and then
+  // 3. update the session's expiration, and then
+  // 4. call GMPDecryptorCallback::ResolveLoadSessionPromise(aPromiseId, true).
+  //
+  // If loading the session fails due to error, reject aPromiseId by calling
+  // GMPDecryptorCallback::RejectPromise().
+  virtual void LoadSession(uint32_t aPromiseId,
+                           const char* aSessionId,
+                           uint32_t aSessionIdLength) = 0;
+
+  // Updates the session with |aResponse|.
+  // This corresponds to a MediaKeySession.update() call in JS.
+  virtual void UpdateSession(uint32_t aPromiseId,
+                             const char* aSessionId,
+                             uint32_t aSessionIdLength,
+                             const uint8_t* aResponse,
+                             uint32_t aResponseSize) = 0;
+
+  // Releases the resources (keys) for the specified session.
+  // This corresponds to a MediaKeySession.close() call in JS.
+  virtual void CloseSession(uint32_t aPromiseId,
+                            const char* aSessionId,
+                            uint32_t aSessionIdLength) = 0;
+
+  // Removes the resources (keys) for the specified session.
+  // This corresponds to a MediaKeySession.remove() call in JS.
+  virtual void RemoveSession(uint32_t aPromiseId,
+                             const char* aSessionId,
+                             uint32_t aSessionIdLength) = 0;
+
+  // Resolve/reject promise on completion.
+  // This corresponds to a MediaKeySession.setServerCertificate() call in JS.
+  virtual void SetServerCertificate(uint32_t aPromiseId,
+                                    const uint8_t* aServerCert,
+                                    uint32_t aServerCertSize) = 0;
+
+  // Asynchronously decrypts aBuffer in place. When the decryption is
+  // complete, GMPDecryptor should write the decrypted data back into the
+  // same GMPBuffer object and return it to Gecko by calling Decrypted(),
+  // with the GMPNoErr successcode. If decryption fails, call Decrypted()
+  // with a failure code, and an error event will fire on the media element.
+  // Note: When Decrypted() is called and aBuffer is passed back, aBuffer
+  // is deleted. Don't forget to call Decrypted(), as otherwise aBuffer's
+  // memory will leak!
+  virtual void Decrypt(GMPBuffer* aBuffer,
+                       GMPEncryptedBufferMetadata* aMetadata) = 0;
+
+  // Called when the decryption operations are complete.
+  // Do not call the GMPDecryptorCallback's functions after this is called.
+  virtual void DecryptingComplete() = 0;
+
+  virtual ~GMPDecryptor7() {}
 };
 
 #endif // GMP_DECRYPTION_h_

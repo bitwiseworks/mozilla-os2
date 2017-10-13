@@ -4,29 +4,30 @@
 
 #include "nsCertTree.h"
 
-#include "pkix/pkixtypes.h"
-#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
+#include "ScopedNSSTypes.h"
+#include "mozilla/Logging.h"
+#include "nsArray.h"
+#include "nsArrayUtils.h"
+#include "nsHashKeys.h"
+#include "nsISupportsPrimitives.h"
 #include "nsITreeColumns.h"
+#include "nsIX509CertDB.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertValidity.h"
-#include "nsIX509CertDB.h"
-#include "nsXPIDLString.h"
-#include "nsReadableUtils.h"
-#include "nsUnicharUtils.h"
-#include "nsNSSCertificate.h"
 #include "nsNSSCertHelper.h"
-#include "nsIMutableArray.h"
-#include "nsArrayUtils.h"
-#include "nsISupportsPrimitives.h"
-#include "nsXPCOMCID.h"
+#include "nsNSSCertificate.h"
+#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
+#include "nsNSSHelper.h"
+#include "nsReadableUtils.h"
 #include "nsTHashtable.h"
-#include "nsHashKeys.h"
-
-#include "mozilla/Logging.h"
+#include "nsUnicharUtils.h"
+#include "nsXPCOMCID.h"
+#include "nsXPIDLString.h"
+#include "pkix/pkixtypes.h"
 
 using namespace mozilla;
 
-extern PRLogModuleInfo* gPIPNSSLog;
+extern LazyLogModule gPIPNSSLog;
 
 static NS_DEFINE_CID(kCertOverrideCID, NS_CERTOVERRIDE_CID);
 
@@ -61,8 +62,7 @@ CompareCacheHashEntry::CompareCacheHashEntry()
 }
 
 static bool
-CompareCacheMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                         const void *key)
+CompareCacheMatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   const CompareCacheHashEntryPtr *entryPtr = static_cast<const CompareCacheHashEntryPtr*>(hdr);
   return entryPtr->entry->key == key;
@@ -182,10 +182,10 @@ nsCertTree::FreeCertArray()
   mDispInfo.Clear();
 }
 
-CompareCacheHashEntry *
-nsCertTree::getCacheEntry(void *cache, void *aCert)
+CompareCacheHashEntry*
+nsCertTree::getCacheEntry(void* cache, void* aCert)
 {
-  PLDHashTable &aCompareCache = *reinterpret_cast<PLDHashTable*>(cache);
+  PLDHashTable& aCompareCache = *static_cast<PLDHashTable*>(cache);
   auto entryPtr = static_cast<CompareCacheHashEntryPtr*>
                              (aCompareCache.Add(aCert, fallible));
   return entryPtr ? entryPtr->entry : nullptr;
@@ -613,7 +613,7 @@ nsCertTree::GetCertsByType(uint32_t           aType,
 {
   nsNSSShutDownPreventionLock locker;
   nsCOMPtr<nsIInterfaceRequestor> cxt = new PipUIContext();
-  ScopedCERTCertList certList(PK11_ListCerts(PK11CertListUnique, cxt));
+  UniqueCERTCertList certList(PK11_ListCerts(PK11CertListUnique, cxt));
   return GetCertsByTypeFromCertList(certList.get(), aType, aCertCmpFn,
                                     aCertCmpFnArg);
 }
@@ -634,7 +634,7 @@ nsCertTree::GetCertsByTypeFromCache(nsIX509CertList   *aCache,
   // more encapsulated types that handled NSS shutdown themselves, we wouldn't
   // be having these kinds of problems.
   nsNSSShutDownPreventionLock locker;
-  CERTCertList *certList = reinterpret_cast<CERTCertList*>(aCache->GetRawCertList());
+  CERTCertList* certList = aCache->GetRawCertList();
   if (!certList)
     return NS_ERROR_FAILURE;
   return GetCertsByTypeFromCertList(certList, aType, aCertCmpFn, aCertCmpFnArg);
@@ -686,7 +686,7 @@ nsCertTree::UpdateUIContents()
   mNumOrgs = CountOrganizations();
   mTreeArray = new treeArrayEl[mNumOrgs];
 
-  mCellText = do_CreateInstance(NS_ARRAY_CONTRACTID);
+  mCellText = nsArrayBase::Create();
 
 if (count) {
   uint32_t j = 0;
@@ -792,12 +792,12 @@ nsCertTree::DeleteEntryObject(uint32_t index)
             // although there are still overrides stored,
             // so, we keep the cert, but remove the trust
 
-            ScopedCERTCertificate nsscert(cert->GetCert());
+            UniqueCERTCertificate nsscert(cert->GetCert());
 
             if (nsscert) {
               CERTCertTrust trust;
               memset((void*)&trust, 0, sizeof(trust));
-            
+
               SECStatus srv = CERT_DecodeTrustString(&trust, ""); // no override 
               if (srv == SECSuccess) {
                 CERT_ChangeCertTrust(CERT_GetDefaultCertDB(), nsscert.get(),
@@ -856,19 +856,6 @@ nsCertTree::GetTreeItem(uint32_t aIndex, nsICertTreeItem **_treeitem)
 
   *_treeitem = certdi;
   NS_IF_ADDREF(*_treeitem);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsCertTree::IsHostPortOverride(uint32_t aIndex, bool *_retval)
-{
-  NS_ENSURE_ARG(_retval);
-
-  RefPtr<nsCertTreeDispInfo> certdi(GetDispInfoAtIndex(aIndex));
-  if (!certdi)
-    return NS_ERROR_FAILURE;
-
-  *_retval = (certdi->mTypeOfEntry == nsCertTreeDispInfo::host_port_override);
   return NS_OK;
 }
 
@@ -1046,7 +1033,7 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
   if (!mTreeArray)
     return NS_ERROR_NOT_INITIALIZED;
 
-  nsresult rv;
+  nsresult rv = NS_OK;
   _retval.Truncate();
 
   const char16_t* colID;
@@ -1117,47 +1104,6 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
     rv = cert->GetTokenName(_retval);
   } else if (NS_LITERAL_STRING("emailcol").Equals(colID) && cert) {
     rv = cert->GetEmailAddress(_retval);
-  } else if (NS_LITERAL_STRING("purposecol").Equals(colID) && mNSSComponent && cert) {
-    uint32_t verified;
-
-    nsAutoString theUsages;
-    rv = cert->GetUsagesString(false, &verified, theUsages); // allow OCSP
-    if (NS_FAILED(rv)) {
-      verified = nsIX509Cert::NOT_VERIFIED_UNKNOWN;
-    }
-
-    switch (verified) {
-      case nsIX509Cert::VERIFIED_OK:
-        _retval = theUsages;
-        break;
-
-      case nsIX509Cert::CERT_REVOKED:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyRevoked", _retval);
-        break;
-      case nsIX509Cert::CERT_EXPIRED:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyExpired", _retval);
-        break;
-      case nsIX509Cert::CERT_NOT_TRUSTED:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyNotTrusted", _retval);
-        break;
-      case nsIX509Cert::ISSUER_NOT_TRUSTED:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyIssuerNotTrusted", _retval);
-        break;
-      case nsIX509Cert::ISSUER_UNKNOWN:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyIssuerUnknown", _retval);
-        break;
-      case nsIX509Cert::INVALID_CA:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyInvalidCA", _retval);
-        break;
-      case nsIX509Cert::SIGNATURE_ALGORITHM_DISABLED:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyDisabledAlgorithm", _retval);
-        break;
-      case nsIX509Cert::NOT_VERIFIED_UNKNOWN:
-      case nsIX509Cert::USAGE_NOT_ALLOWED:
-      default:
-        rv = mNSSComponent->GetPIPNSSBundleString("VerifyUnknown", _retval);
-        break;
-    }
   } else if (NS_LITERAL_STRING("issuedcol").Equals(colID) && cert) {
     nsCOMPtr<nsIX509CertValidity> validity;
 
@@ -1174,17 +1120,6 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
     }
   } else if (NS_LITERAL_STRING("serialnumcol").Equals(colID) && cert) {
     rv = cert->GetSerialNumber(_retval);
-
-
-  } else if (NS_LITERAL_STRING("overridetypecol").Equals(colID)) {
-    // default to classic permanent-trust
-    nsCertOverride::OverrideBits ob = nsCertOverride::ob_Untrusted;
-    if (certdi->mTypeOfEntry == nsCertTreeDispInfo::host_port_override) {
-      ob = certdi->mOverrideBits;
-    }
-    nsAutoCString temp;
-    nsCertOverride::convertBitsToString(ob, temp);
-    _retval = NS_ConvertUTF8toUTF16(temp);
   } else if (NS_LITERAL_STRING("sitecol").Equals(colID)) {
     if (certdi->mTypeOfEntry == nsCertTreeDispInfo::host_port_override) {
       nsAutoCString hostPort;
@@ -1198,28 +1133,6 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
     const char *stringID = 
       (certdi->mIsTemporary) ? "CertExceptionTemporary" : "CertExceptionPermanent";
     rv = mNSSComponent->GetPIPNSSBundleString(stringID, _retval);
-  } else if (NS_LITERAL_STRING("typecol").Equals(colID) && cert) {
-    uint32_t type = nsIX509Cert::UNKNOWN_CERT;
-    rv = cert->GetCertType(&type);
-
-    switch (type) {
-    case nsIX509Cert::USER_CERT:
-        rv = mNSSComponent->GetPIPNSSBundleString("CertUser", _retval);
-	break;
-    case nsIX509Cert::CA_CERT:
-        rv = mNSSComponent->GetPIPNSSBundleString("CertCA", _retval);
-	break;
-    case nsIX509Cert::SERVER_CERT:
-        rv = mNSSComponent->GetPIPNSSBundleString("CertSSL", _retval);
-	break;
-    case nsIX509Cert::EMAIL_CERT:
-        rv = mNSSComponent->GetPIPNSSBundleString("CertEmail", _retval);
-	break;
-    default:
-        rv = mNSSComponent->GetPIPNSSBundleString("CertUnknown", _retval);
-	break;
-    }
-
   } else {
     return NS_ERROR_FAILURE;
   }

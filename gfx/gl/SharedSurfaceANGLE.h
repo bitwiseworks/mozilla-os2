@@ -40,10 +40,6 @@ public:
     const HANDLE mShareHandle;
 protected:
     RefPtr<IDXGIKeyedMutex> mKeyedMutex;
-    RefPtr<IDXGIKeyedMutex> mConsumerKeyedMutex;
-    RefPtr<ID3D11Texture2D> mConsumerTexture;
-
-    const GLuint mFence;
 
     SharedSurface_ANGLEShareHandle(GLContext* gl,
                                    GLLibraryEGL* egl,
@@ -51,8 +47,7 @@ protected:
                                    bool hasAlpha,
                                    EGLSurface pbuffer,
                                    HANDLE shareHandle,
-                                   const RefPtr<IDXGIKeyedMutex>& keyedMutex,
-                                   GLuint fence);
+                                   const RefPtr<IDXGIKeyedMutex>& keyedMutex);
 
     EGLDisplay Display();
 
@@ -62,23 +57,10 @@ public:
     virtual void LockProdImpl() override;
     virtual void UnlockProdImpl() override;
 
-    virtual void Fence() override;
     virtual void ProducerAcquireImpl() override;
     virtual void ProducerReleaseImpl() override;
     virtual void ProducerReadAcquireImpl() override;
     virtual void ProducerReadReleaseImpl() override;
-    virtual void ConsumerAcquireImpl() override;
-    virtual void ConsumerReleaseImpl() override;
-    virtual bool WaitSync() override;
-    virtual bool PollSync() override;
-
-    virtual void Fence_ContentThread_Impl() override;
-    virtual bool WaitSync_ContentThread_Impl() override;
-    virtual bool PollSync_ContentThread_Impl() override;
-
-    const RefPtr<ID3D11Texture2D>& GetConsumerTexture() const {
-        return mConsumerTexture;
-    }
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override;
 
@@ -98,12 +80,12 @@ protected:
 public:
     static UniquePtr<SurfaceFactory_ANGLEShareHandle> Create(GLContext* gl,
                                                              const SurfaceCaps& caps,
-                                                             const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                                             const RefPtr<layers::LayersIPCChannel>& allocator,
                                                              const layers::TextureFlags& flags);
 
 protected:
     SurfaceFactory_ANGLEShareHandle(GLContext* gl, const SurfaceCaps& caps,
-                                    const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                    const RefPtr<layers::LayersIPCChannel>& allocator,
                                     const layers::TextureFlags& flags, GLLibraryEGL* egl,
                                     EGLConfig config);
 

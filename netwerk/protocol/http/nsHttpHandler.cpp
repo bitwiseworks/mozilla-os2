@@ -29,7 +29,7 @@
 #include "nsCOMPtr.h"
 #include "nsNetCID.h"
 #include "prprf.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsAsyncRedirectVerifyHelper.h"
 #include "nsSocketTransportService2.h"
 #include "nsAlgorithm.h"
@@ -44,7 +44,6 @@
 #include "nsIStreamConverterService.h"
 #include "nsITimer.h"
 #include "nsCRT.h"
-#include "SpdyZlibReporter.h"
 #include "nsIMemoryReporter.h"
 #include "nsIParentalControlsService.h"
 #include "nsPIDOMWindow.h"
@@ -53,10 +52,17 @@
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSocketTransportService2.h"
+#include "nsIOService.h"
+#include "nsIUUIDGenerator.h"
 
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/NeckoParent.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Unused.h"
+#include "mozilla/BasePrincipal.h"
+
+#include "mozilla/dom/ContentParent.h"
 
 #if defined(XP_UNIX)
 #include <sys/utsname.h>
@@ -94,6 +100,8 @@
 #define TELEMETRY_ENABLED        "toolkit.telemetry.enabled"
 #define ALLOW_EXPERIMENTS        "network.allow-experiments"
 #define SAFE_HINT_HEADER_VALUE   "safeHint.enabled"
+#define SECURITY_PREFIX          "security."
+#define NEW_TAB_REMOTE_MODE           "browser.newtabpage.remote.mode"
 
 #define UA_PREF(_pref) UA_PREF_PREFIX _pref
 #define HTTP_PREF(_pref) HTTP_PREF_PREFIX _pref
@@ -115,21 +123,41 @@ NewURI(const nsACString &aSpec,
        int32_t aDefaultPort,
        nsIURI **aURI)
 {
-    nsStandardURL *url = new nsStandardURL();
-    if (!url)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(url);
+    RefPtr<nsStandardURL> url = new nsStandardURL();
 
     nsresult rv = url->Init(nsIStandardURL::URLTYPE_AUTHORITY,
                             aDefaultPort, aSpec, aCharset, aBaseURI);
     if (NS_FAILED(rv)) {
-        NS_RELEASE(url);
         return rv;
     }
 
-    *aURI = url; // no QI needed
+    url.forget(aURI);
     return NS_OK;
 }
+
+#ifdef ANDROID
+static nsCString
+GetDeviceModelId() {
+    // Assumed to be running on the main thread
+    // We need the device property in either case
+    nsAutoCString deviceModelId;
+    nsCOMPtr<nsIPropertyBag2> infoService = do_GetService("@mozilla.org/system-info;1");
+    MOZ_ASSERT(infoService, "Could not find a system info service");
+    nsAutoString androidDevice;
+    nsresult rv = infoService->GetPropertyAsAString(NS_LITERAL_STRING("device"), androidDevice);
+    if (NS_SUCCEEDED(rv)) {
+        deviceModelId = NS_LossyConvertUTF16toASCII(androidDevice);
+    }
+    nsAutoCString deviceString;
+    rv = Preferences::GetCString(UA_PREF("device_string"), &deviceString);
+    if (NS_SUCCEEDED(rv)) {
+        deviceString.Trim(" ", true, true);
+        deviceString.ReplaceSubstring(NS_LITERAL_CSTRING("%DEVICEID%"), deviceModelId);
+        return deviceString;
+    }
+    return deviceModelId;
+}
+#endif
 
 //-----------------------------------------------------------------------------
 // nsHttpHandler <public>
@@ -138,13 +166,13 @@ NewURI(const nsACString &aSpec,
 nsHttpHandler *gHttpHandler = nullptr;
 
 nsHttpHandler::nsHttpHandler()
-    : mConnMgr(nullptr)
-    , mHttpVersion(NS_HTTP_VERSION_1_1)
+    : mHttpVersion(NS_HTTP_VERSION_1_1)
     , mProxyHttpVersion(NS_HTTP_VERSION_1_1)
     , mCapabilities(NS_HTTP_ALLOW_KEEPALIVE)
     , mReferrerLevel(0xff) // by default we always send a referrer
     , mSpoofReferrerSource(false)
     , mReferrerTrimmingPolicy(0)
+    , mReferrerXOriginTrimmingPolicy(0)
     , mReferrerXOriginPolicy(0)
     , mFastFallbackToIPv4(false)
     , mProxyPipelining(true)
@@ -153,7 +181,7 @@ nsHttpHandler::nsHttpHandler()
     , mResponseTimeout(PR_SecondsToInterval(300))
     , mResponseTimeoutEnabled(false)
     , mNetworkChangedTimeout(5000)
-    , mMaxRequestAttempts(10)
+    , mMaxRequestAttempts(6)
     , mMaxRequestDelay(10)
     , mIdleSynTimeout(250)
     , mH2MandatorySuiteEnabled(false)
@@ -181,7 +209,6 @@ nsHttpHandler::nsHttpHandler()
     , mCompatFirefoxEnabled(false)
     , mUserAgentIsDirty(true)
     , mPromptTempRedirect(true)
-    , mSendSecureXSiteReferrer(true)
     , mEnablePersistentHttpsCaching(false)
     , mDoNotTrackEnabled(false)
     , mSafeHintEnabled(false)
@@ -191,7 +218,6 @@ nsHttpHandler::nsHttpHandler()
     , mAllowExperiments(true)
     , mDebugObservations(false)
     , mEnableSpdy(false)
-    , mSpdyV31(true)
     , mHttp2Enabled(true)
     , mUseH2Deps(true)
     , mEnforceHttp2TlsProfile(true)
@@ -220,10 +246,11 @@ nsHttpHandler::nsHttpHandler()
     , mTCPKeepaliveLongLivedEnabled(false)
     , mTCPKeepaliveLongLivedIdleTimeS(600)
     , mEnforceH1Framing(FRAMECHECK_BARELY)
+    , mKeepEmptyResponseHeadersAsEmtpyString(false)
+    , mDefaultHpackBuffer(4096)
+    , mMaxHttpResponseHeaderSize(393216)
 {
     LOG(("Creating nsHttpHandler [this=%p].\n", this));
-
-    RegisterStrongMemoryReporter(new SpdyZlibReporter());
 
     MOZ_ASSERT(!gHttpHandler, "HTTP handler already created!");
     gHttpHandler = this;
@@ -236,7 +263,7 @@ nsHttpHandler::~nsHttpHandler()
     // make sure the connection manager is shutdown
     if (mConnMgr) {
         mConnMgr->Shutdown();
-        NS_RELEASE(mConnMgr);
+        mConnMgr = nullptr;
     }
 
     // Note: don't call NeckoChild::DestroyNeckoChild() here, as it's too late
@@ -288,13 +315,9 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(HTTP_PREF("tcp_keepalive.short_lived_connections"), this, true);
         prefBranch->AddObserver(HTTP_PREF("tcp_keepalive.long_lived_connections"), this, true);
         prefBranch->AddObserver(SAFE_HINT_HEADER_VALUE, this, true);
+        prefBranch->AddObserver(SECURITY_PREFIX, this, true);
+        prefBranch->AddObserver(NEW_TAB_REMOTE_MODE, this, true);
         PrefsChanged(prefBranch, nullptr);
-    }
-
-    rv = Preferences::AddBoolVarCache(&mPackagedAppsEnabled,
-        "network.http.enable-packaged-apps", false);
-    if (NS_FAILED(rv)) {
-        mPackagedAppsEnabled = false;
     }
 
     nsHttpChannelAuthProvider::InitializePrefs();
@@ -314,7 +337,7 @@ nsHttpHandler::Init()
           appInfo->GetName(mAppName);
         }
         appInfo->GetVersion(mAppVersion);
-        mAppName.StripChars(" ()<>@,;:\\\"/[]?={}");
+        mAppName.StripChars(R"( ()<>@,;:\"/[]?={})");
     } else {
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
@@ -331,10 +354,10 @@ nsHttpHandler::Init()
     rv = InitConnectionMgr();
     if (NS_FAILED(rv)) return rv;
 
-    mSchedulingContextService =
-        do_GetService("@mozilla.org/network/scheduling-context-service;1");
+    mRequestContextService =
+        do_GetService("@mozilla.org/network/request-context-service;1");
 
-#ifdef ANDROID
+#if defined(ANDROID) || defined(MOZ_MULET)
     mProductSub.AssignLiteral(MOZILLA_UAVERSION);
 #else
     mProductSub.AssignLiteral("20100101");
@@ -408,13 +431,15 @@ nsHttpHandler::MakeNewRequestTokenBucket()
 nsresult
 nsHttpHandler::InitConnectionMgr()
 {
+    // Init ConnectionManager only on parent!
+    if (IsNeckoChild()) {
+        return NS_OK;
+    }
+
     nsresult rv;
 
     if (!mConnMgr) {
         mConnMgr = new nsHttpConnectionMgr();
-        if (!mConnMgr)
-            return NS_ERROR_OUT_OF_MEMORY;
-        NS_ADDREF(mConnMgr);
     }
 
     rv = mConnMgr->Init(mMaxConnections,
@@ -427,13 +452,13 @@ nsHttpHandler::InitConnectionMgr()
 }
 
 nsresult
-nsHttpHandler::AddStandardRequestHeaders(nsHttpHeaderArray *request, bool isSecure)
+nsHttpHandler::AddStandardRequestHeaders(nsHttpRequestHead *request, bool isSecure)
 {
     nsresult rv;
 
     // Add the "User-Agent" header
     rv = request->SetHeader(nsHttp::User_Agent, UserAgent(),
-                            false, nsHttpHeaderArray::eVarietyDefault);
+                            false, nsHttpHeaderArray::eVarietyRequestDefault);
     if (NS_FAILED(rv)) return rv;
 
     // MIME based content negotiation lives!
@@ -441,7 +466,7 @@ nsHttpHandler::AddStandardRequestHeaders(nsHttpHeaderArray *request, bool isSecu
     // service worker expects to see it.  The other "default" headers are
     // hidden from service worker interception.
     rv = request->SetHeader(nsHttp::Accept, mAccept,
-                            false, nsHttpHeaderArray::eVarietyOverride);
+                            false, nsHttpHeaderArray::eVarietyRequestOverride);
     if (NS_FAILED(rv)) return rv;
 
     // Add the "Accept-Language" header.  This header is also exposed to the
@@ -449,38 +474,35 @@ nsHttpHandler::AddStandardRequestHeaders(nsHttpHeaderArray *request, bool isSecu
     if (!mAcceptLanguages.IsEmpty()) {
         // Add the "Accept-Language" header
         rv = request->SetHeader(nsHttp::Accept_Language, mAcceptLanguages,
-                                false, nsHttpHeaderArray::eVarietyOverride);
+                                false,
+                                nsHttpHeaderArray::eVarietyRequestOverride);
         if (NS_FAILED(rv)) return rv;
     }
 
     // Add the "Accept-Encoding" header
     if (isSecure) {
         rv = request->SetHeader(nsHttp::Accept_Encoding, mHttpsAcceptEncodings,
-                                false, nsHttpHeaderArray::eVarietyDefault);
+                                false,
+                                nsHttpHeaderArray::eVarietyRequestDefault);
     } else {
         rv = request->SetHeader(nsHttp::Accept_Encoding, mHttpAcceptEncodings,
-                                false, nsHttpHeaderArray::eVarietyDefault);
+                                false,
+                                nsHttpHeaderArray::eVarietyRequestDefault);
     }
     if (NS_FAILED(rv)) return rv;
-
-    // Add the "Do-Not-Track" header
-    if (mDoNotTrackEnabled) {
-      rv = request->SetHeader(nsHttp::DoNotTrack, NS_LITERAL_CSTRING("1"),
-                              false, nsHttpHeaderArray::eVarietyDefault);
-      if (NS_FAILED(rv)) return rv;
-    }
 
     // add the "Send Hint" header
     if (mSafeHintEnabled || mParentalControlEnabled) {
       rv = request->SetHeader(nsHttp::Prefer, NS_LITERAL_CSTRING("safe"),
-                              false, nsHttpHeaderArray::eVarietyDefault);
+                              false,
+                              nsHttpHeaderArray::eVarietyRequestDefault);
       if (NS_FAILED(rv)) return rv;
     }
     return NS_OK;
 }
 
 nsresult
-nsHttpHandler::AddConnectionHeader(nsHttpHeaderArray *request,
+nsHttpHandler::AddConnectionHeader(nsHttpRequestHead *request,
                                    uint32_t caps)
 {
     // RFC2616 section 19.6.2 states that the "Connection: keep-alive"
@@ -564,6 +586,8 @@ nsHttpHandler::GetCookieService()
 nsresult
 nsHttpHandler::GetIOService(nsIIOService** result)
 {
+    NS_ENSURE_ARG_POINTER(result);
+
     NS_ADDREF(*result = mIOService);
     return NS_OK;
 }
@@ -577,7 +601,7 @@ nsHttpHandler::Get32BitsOfPseudoRandom()
     // rand() provides different amounts of PRNG on different platforms.
     // 15 or 31 bits are common amounts.
 
-    PR_STATIC_ASSERT(RAND_MAX >= 0xfff);
+    static_assert(RAND_MAX >= 0xfff, "RAND_MAX should be >= 12 bits");
 
 #if RAND_MAX < 0xffffU
     return ((uint16_t) rand() << 20) |
@@ -781,9 +805,13 @@ nsHttpHandler::InitUserAgentComponents()
             mCompatDevice.AssignLiteral("Mobile");
         }
     }
+
+    if (Preferences::GetBool(UA_PREF("use_device"), false)) {
+        mDeviceModelId = mozilla::net::GetDeviceModelId();
+    }
 #endif // ANDROID
 
-#ifdef FXOS_SIMULATOR
+#ifdef MOZ_MULET
     {
         // Add the `Mobile` or `Tablet` or `TV` token when running in the b2g
         // desktop simulator via preference.
@@ -795,7 +823,7 @@ nsHttpHandler::InitUserAgentComponents()
             mCompatDevice.AssignLiteral("Mobile");
         }
     }
-#endif // FXOS_SIMULATOR
+#endif // MOZ_MULET
 
 #if defined(MOZ_WIDGET_GONK)
     // Device model identifier should be a simple token, which can be composed
@@ -944,6 +972,15 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
 #define MULTI_PREF_CHANGED(p) \
   ((pref == nullptr) || !PL_strncmp(pref, p, sizeof(p) - 1))
 
+    // If a security pref changed, lets clear our connection pool reuse
+    if (MULTI_PREF_CHANGED(SECURITY_PREFIX)) {
+        LOG(("nsHttpHandler::PrefsChanged Security Pref Changed %s\n", pref));
+        if (mConnMgr) {
+            mConnMgr->DoShiftReloadConnectionCleanup(nullptr);
+            mConnMgr->PruneDeadConnections();
+        }
+    }
+
     //
     // UA components
     //
@@ -962,6 +999,18 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
                             getter_Copies(mUserAgentOverride));
         mUserAgentIsDirty = true;
     }
+
+#ifdef ANDROID
+    // general.useragent.use_device
+    if (PREF_CHANGED(UA_PREF("use_device"))) {
+        if (Preferences::GetBool(UA_PREF("use_device"), false)) {
+            mDeviceModelId = mozilla::net::GetDeviceModelId();
+        } else {
+            mDeviceModelId = EmptyCString();
+        }
+        mUserAgentIsDirty = true;
+    }
+#endif
 
     //
     // HTTP options
@@ -1049,7 +1098,13 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
     if (PREF_CHANGED(HTTP_PREF("referer.trimmingPolicy"))) {
         rv = prefs->GetIntPref(HTTP_PREF("referer.trimmingPolicy"), &val);
         if (NS_SUCCEEDED(rv))
-            mReferrerTrimmingPolicy = (uint8_t) clamped(val, 0, 0xff);
+            mReferrerTrimmingPolicy = (uint8_t) clamped(val, 0, 2);
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("referer.XOriginTrimmingPolicy"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("referer.XOriginTrimmingPolicy"), &val);
+        if (NS_SUCCEEDED(rv))
+            mReferrerXOriginTrimmingPolicy = (uint8_t) clamped(val, 0, 2);
     }
 
     if (PREF_CHANGED(HTTP_PREF("referer.XOriginPolicy"))) {
@@ -1197,12 +1252,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mQoSBits = (uint8_t) clamped(val, 0, 0xff);
     }
 
-    if (PREF_CHANGED(HTTP_PREF("sendSecureXSiteReferrer"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("sendSecureXSiteReferrer"), &cVar);
-        if (NS_SUCCEEDED(rv))
-            mSendSecureXSiteReferrer = cVar;
-    }
-
     if (PREF_CHANGED(HTTP_PREF("accept.default"))) {
         nsXPIDLCString accept;
         rv = prefs->GetCharPref(HTTP_PREF("accept.default"),
@@ -1284,12 +1333,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled"), &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableSpdy = cVar;
-    }
-
-    if (PREF_CHANGED(HTTP_PREF("spdy.enabled.v3-1"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled.v3-1"), &cVar);
-        if (NS_SUCCEEDED(rv))
-            mSpdyV31 = cVar;
     }
 
     if (PREF_CHANGED(HTTP_PREF("spdy.enabled.http2"))) {
@@ -1441,6 +1484,13 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         if (NS_SUCCEEDED(rv) && cVar) {
             if (mConnMgr)
                 mConnMgr->PrintDiagnostics();
+        }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("max_response_header_size"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("max_response_header_size"), &val);
+        if (NS_SUCCEEDED(rv)) {
+            mMaxHttpResponseHeaderSize = val;
         }
     }
     //
@@ -1648,6 +1698,34 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
+    // remote content-signature testing option
+    if (PREF_CHANGED(NEW_TAB_REMOTE_MODE)) {
+        nsAutoCString channel;
+        prefs->GetCharPref(NEW_TAB_REMOTE_MODE, getter_Copies(channel));
+        if (channel.EqualsLiteral("test") ||
+            channel.EqualsLiteral("test2") ||
+            channel.EqualsLiteral("dev")) {
+            mNewTabContentSignaturesDisabled = true;
+        } else {
+            mNewTabContentSignaturesDisabled = false;
+        }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("keep_empty_response_headers_as_empty_string"))) {
+        rv = prefs->GetBoolPref(HTTP_PREF("keep_empty_response_headers_as_empty_string"),
+                                &cVar);
+        if (NS_SUCCEEDED(rv)) {
+            mKeepEmptyResponseHeadersAsEmtpyString = cVar;
+        }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("spdy.hpack-default-buffer"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("spdy.default-hpack-buffer"), &val);
+        if (NS_SUCCEEDED(rv)) {
+            mDefaultHpackBuffer = val;
+        }
+    }
+
     // Enable HTTP response timeout if TCP Keepalives are disabled.
     mResponseTimeoutEnabled = !mTCPKeepaliveShortLivedEnabled &&
                               !mTCPKeepaliveLongLivedEnabled;
@@ -1834,7 +1912,7 @@ nsHttpHandler::SetAcceptEncodings(const char *aAcceptEncodings, bool isSecure)
             mHttpsAcceptEncodings = aAcceptEncodings;
         }
     }
-      
+
     return NS_OK;
 }
 
@@ -1972,7 +2050,11 @@ nsHttpHandler::NewProxiedChannel2(nsIURI *uri,
         net_EnsurePSMInit();
     }
 
-    rv = httpChannel->Init(uri, caps, proxyInfo, proxyResolveFlags, proxyURI);
+    nsID channelId;
+    rv = NewChannelId(&channelId);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = httpChannel->Init(uri, caps, proxyInfo, proxyResolveFlags, proxyURI, channelId);
     if (NS_FAILED(rv))
         return rv;
 
@@ -2071,9 +2153,10 @@ nsHttpHandler::Observe(nsISupports *subject,
         if (mWifiTickler)
             mWifiTickler->Cancel();
 
-        // ensure connection manager is shutdown
-        if (mConnMgr)
-            mConnMgr->Shutdown();
+        // Inform nsIOService that network is tearing down.
+        gIOService->SetHttpHandlerAlreadyShutingDown();
+
+        ShutdownConnectionManager();
 
         // need to reset the session start time since cache validation may
         // depend on this value.
@@ -2117,8 +2200,8 @@ nsHttpHandler::Observe(nsISupports *subject,
         if (mConnMgr) {
             if (gSocketTransportService) {
                 nsCOMPtr<nsIRunnable> event =
-                    NS_NewRunnableMethod(mConnMgr,
-                                         &nsHttpConnectionMgr::ClearConnectionHistory);
+                    NewRunnableMethod(mConnMgr,
+                                      &nsHttpConnectionMgr::ClearConnectionHistory);
                 gSocketTransportService->Dispatch(event, NS_DISPATCH_NORMAL);
             }
             mConnMgr->ClearAltServiceMappings();
@@ -2146,13 +2229,16 @@ nsHttpHandler::Observe(nsISupports *subject,
 
 nsresult
 nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
+                                          nsIPrincipal *aPrincipal,
                                           nsIInterfaceRequestor *aCallbacks,
                                           bool anonymous)
 {
     if (IsNeckoChild()) {
         ipc::URIParams params;
         SerializeURI(aURI, params);
-        gNeckoChild->SendSpeculativeConnect(params, anonymous);
+        gNeckoChild->SendSpeculativeConnect(params,
+                                            IPC::Principal(aPrincipal),
+                                            anonymous);
         return NS_OK;
     }
 
@@ -2162,13 +2248,19 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
     if (mDebugObservations && obsService) {
-        // this is basically used for test coverage of an otherwise 'hintable' feature
-        nsAutoCString spec;
-        aURI->GetSpec(spec);
-        spec.Append(anonymous ? NS_LITERAL_CSTRING("[A]") : NS_LITERAL_CSTRING("[.]"));
-        obsService->NotifyObservers(nullptr,
-                                    "speculative-connect-request",
-                                    NS_ConvertUTF8toUTF16(spec).get());
+        // this is basically used for test coverage of an otherwise 'hintable'
+        // feature
+        obsService->NotifyObservers(nullptr, "speculative-connect-request",
+                                    nullptr);
+        if (!IsNeckoChild()) {
+            for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
+                PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
+                if (!neckoParent) {
+                    continue;
+                }
+                Unused << neckoParent->SendSpeculativeConnectRequest();
+            }
+        }
     }
 
     nsISiteSecurityService* sss = gHttpHandler->GetSSService();
@@ -2182,10 +2274,13 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         flags |= nsISocketProvider::NO_PERMANENT_STORAGE;
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
-                                      aURI, flags, &isStsHost)) && isStsHost) {
-        if (NS_SUCCEEDED(aURI->Clone(getter_AddRefs(clone)))) {
-            clone->SetScheme(NS_LITERAL_CSTRING("https"));
+                                      aURI, flags, nullptr, &isStsHost)) &&
+                                      isStsHost) {
+        if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
+                                                 getter_AddRefs(clone)))) {
             aURI = clone.get();
+            // (NOTE: We better make sure |clone| stays alive until the end
+            // of the function now, since our aURI arg now points to it!)
         }
     }
 
@@ -2225,8 +2320,22 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     nsAutoCString username;
     aURI->GetUsername(username);
 
-    nsHttpConnectionInfo *ci =
-        new nsHttpConnectionInfo(host, port, EmptyCString(), username, nullptr, usingSSL);
+    NeckoOriginAttributes neckoOriginAttributes;
+    // If the principal is given, we use the originAttributes from this
+    // principal. Otherwise, we use the originAttributes from the
+    // loadContext.
+    if (aPrincipal) {
+        neckoOriginAttributes.InheritFromDocToNecko(
+            BasePrincipal::Cast(aPrincipal)->OriginAttributesRef());
+    } else if (loadContext) {
+        DocShellOriginAttributes docshellOriginAttributes;
+        loadContext->GetOriginAttributes(docshellOriginAttributes);
+        neckoOriginAttributes.InheritFromDocShellToNecko(docshellOriginAttributes);
+    }
+
+    auto *ci =
+        new nsHttpConnectionInfo(host, port, EmptyCString(), username, nullptr,
+                                 neckoOriginAttributes, usingSSL);
     ci->SetAnonymous(anonymous);
 
     return SpeculativeConnect(ci, aCallbacks);
@@ -2236,14 +2345,30 @@ NS_IMETHODIMP
 nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
                                   nsIInterfaceRequestor *aCallbacks)
 {
-    return SpeculativeConnectInternal(aURI, aCallbacks, false);
+    return SpeculativeConnectInternal(aURI, nullptr, aCallbacks, false);
+}
+
+NS_IMETHODIMP
+nsHttpHandler::SpeculativeConnect2(nsIURI *aURI,
+                                   nsIPrincipal *aPrincipal,
+                                   nsIInterfaceRequestor *aCallbacks)
+{
+    return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, false);
 }
 
 NS_IMETHODIMP
 nsHttpHandler::SpeculativeAnonymousConnect(nsIURI *aURI,
                                            nsIInterfaceRequestor *aCallbacks)
 {
-    return SpeculativeConnectInternal(aURI, aCallbacks, true);
+    return SpeculativeConnectInternal(aURI, nullptr, aCallbacks, true);
+}
+
+NS_IMETHODIMP
+nsHttpHandler::SpeculativeAnonymousConnect2(nsIURI *aURI,
+                                            nsIPrincipal *aPrincipal,
+                                            nsIInterfaceRequestor *aCallbacks)
+{
+    return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, true);
 }
 
 void
@@ -2256,7 +2381,7 @@ nsHttpHandler::TickleWifi(nsIInterfaceRequestor *cb)
     // on B2G, contains the necessary information on wifi and gateway
 
     nsCOMPtr<nsIDOMWindow> domWindow = do_GetInterface(cb);
-    nsCOMPtr<nsPIDOMWindow> piWindow = do_QueryInterface(domWindow);
+    nsCOMPtr<nsPIDOMWindowOuter> piWindow = do_QueryInterface(domWindow);
     if (!piWindow)
         return;
 
@@ -2361,6 +2486,28 @@ nsHttpsHandler::AllowPort(int32_t aPort, const char *aScheme, bool *_retval)
     // don't override anything.
     *_retval = false;
     return NS_OK;
+}
+
+void
+nsHttpHandler::ShutdownConnectionManager()
+{
+    // ensure connection manager is shutdown
+    if (mConnMgr) {
+        mConnMgr->Shutdown();
+    }
+}
+
+nsresult
+nsHttpHandler::NewChannelId(nsID *channelId)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!mUUIDGen) {
+    nsresult rv;
+    mUUIDGen = do_GetService("@mozilla.org/uuid-generator;1", &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return mUUIDGen->GenerateUUIDInPlace(channelId);
 }
 
 } // namespace net

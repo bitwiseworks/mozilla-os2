@@ -38,7 +38,7 @@
         // properly store and retrieve the security info from the cache.
         iframe.parentNode.removeChild(iframe);
         iframe = null;
-        SpecialPowers.exactGC(window, function() {
+        SpecialPowers.exactGC(function() {
           iframe = document.createElement("iframe");
           iframe.src = "https://example.com/tests/dom/workers/test/serviceworkers/fetch/https/synth.html";
           document.body.appendChild(iframe);
@@ -58,7 +58,6 @@
   onload = function() {
     SpecialPowers.pushPrefEnv({"set": [
       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-      ["dom.serviceWorkers.interception.enabled", true],
       ["dom.serviceWorkers.enabled", true],
       ["dom.serviceWorkers.testing.enabled", true],
       ["dom.caches.enabled", true]

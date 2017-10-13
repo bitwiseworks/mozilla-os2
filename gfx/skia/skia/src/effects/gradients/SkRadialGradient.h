@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2012 Google Inc.
  *
@@ -13,40 +12,38 @@
 
 class SkRadialGradient : public SkGradientShaderBase {
 public:
-    SkRadialGradient(const SkPoint& center, SkScalar radius, const Descriptor&,
-                     const SkMatrix* localMatrix);
-
-    virtual size_t contextSize() const SK_OVERRIDE;
+    SkRadialGradient(const SkPoint& center, SkScalar radius, const Descriptor&);
 
     class RadialGradientContext : public SkGradientShaderBase::GradientShaderBaseContext {
     public:
         RadialGradientContext(const SkRadialGradient&, const ContextRec&);
 
-        virtual void shadeSpan(int x, int y, SkPMColor dstC[], int count) SK_OVERRIDE;
-        virtual void shadeSpan16(int x, int y, uint16_t dstC[], int count) SK_OVERRIDE;
+        void shadeSpan(int x, int y, SkPMColor dstC[], int count) override;
 
     private:
         typedef SkGradientShaderBase::GradientShaderBaseContext INHERITED;
     };
 
-    virtual BitmapType asABitmap(SkBitmap* bitmap,
-                                 SkMatrix* matrix,
-                                 TileMode* xy) const SK_OVERRIDE;
-    virtual GradientType asAGradient(GradientInfo* info) const SK_OVERRIDE;
-    virtual bool asNewEffect(GrContext*, const SkPaint&, const SkMatrix*, GrColor*, GrEffect**) const SK_OVERRIDE;
+    GradientType asAGradient(GradientInfo* info) const override;
+#if SK_SUPPORT_GPU
+    sk_sp<GrFragmentProcessor> asFragmentProcessor(const AsFPArgs&) const override;
+#endif
 
     SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkRadialGradient)
 
 protected:
     SkRadialGradient(SkReadBuffer& buffer);
-    virtual void flatten(SkWriteBuffer& buffer) const SK_OVERRIDE;
-    virtual Context* onCreateContext(const ContextRec&, void* storage) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer& buffer) const override;
+    size_t onContextSize(const ContextRec&) const override;
+    Context* onCreateContext(const ContextRec&, void* storage) const override;
 
 private:
-    typedef SkGradientShaderBase INHERITED;
     const SkPoint fCenter;
     const SkScalar fRadius;
+
+    friend class SkGradientShader;
+    typedef SkGradientShaderBase INHERITED;
 };
 
 #endif

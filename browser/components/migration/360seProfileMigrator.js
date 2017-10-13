@@ -11,12 +11,15 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
+Cu.import("resource://gre/modules/osfile.jsm"); /* globals OS */
+Cu.import("resource:///modules/MigrationUtils.jsm"); /* globals MigratorPrototype */
 
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
                                   "resource://gre/modules/Sqlite.jsm");
+
+const kBookmarksFileName = "360sefav.db";
 
 function copyToTempUTF8File(file, charset) {
   let inputStream = Cc["@mozilla.org/network/file-input-stream;1"]
@@ -90,12 +93,12 @@ function getHash(aStr) {
 
   // convert the binary hash data to a hex string.
   let binary = hasher.finish(false);
-  return [toHexString(binary.charCodeAt(i)) for (i in binary)].join("").toLowerCase();
+  return Array.from(binary, (c, i) => toHexString(binary.charCodeAt(i))).join("").toLowerCase();
 }
 
 function Bookmarks(aProfileFolder) {
   let file = aProfileFolder.clone();
-  file.append("360sefav.db");
+  file.append(kBookmarksFileName);
 
   this._file = file;
 }
@@ -106,7 +109,7 @@ Bookmarks.prototype = {
     return this._file.exists() && this._file.isReadable();
   },
 
-  migrate: function (aCallback) {
+  migrate(aCallback) {
     return Task.spawn(function* () {
       let idToGuid = new Map();
       let folderGuid = PlacesUtils.bookmarks.toolbarGuid;
@@ -134,11 +137,11 @@ Bookmarks.prototype = {
            SELECT id, parent_id, is_folder, title, url FROM bookmark WHERE id`);
 
         for (let row of rows) {
-          let id = parseInt(row.getResultByName("id"), 10),
-              parent_id = parseInt(row.getResultByName("parent_id"), 10),
-              is_folder = parseInt(row.getResultByName("is_folder"), 10),
-              title = row.getResultByName("title"),
-              url = row.getResultByName("url");
+          let id = parseInt(row.getResultByName("id"), 10);
+          let parent_id = parseInt(row.getResultByName("parent_id"), 10);
+          let is_folder = parseInt(row.getResultByName("is_folder"), 10);
+          let title = row.getResultByName("title");
+          let url = row.getResultByName("url");
 
           let parentGuid = idToGuid.get(parent_id) || idToGuid.get("fallback");
           if (!parentGuid) {
@@ -152,7 +155,7 @@ Bookmarks.prototype = {
 
           try {
             if (is_folder == 1) {
-              let newFolderGuid = (yield PlacesUtils.bookmarks.insert({
+              let newFolderGuid = (yield MigrationUtils.insertBookmarkWrapper({
                 parentGuid,
                 type: PlacesUtils.bookmarks.TYPE_FOLDER,
                 title
@@ -160,7 +163,7 @@ Bookmarks.prototype = {
 
               idToGuid.set(id, newFolderGuid);
             } else {
-              yield PlacesUtils.bookmarks.insert({
+              yield MigrationUtils.insertBookmarkWrapper({
                 parentGuid,
                 url,
                 title
@@ -210,8 +213,10 @@ Object.defineProperty(Qihoo360seProfileMigrator.prototype, "sourceProfiles", {
     if ("__sourceProfiles" in this)
       return this.__sourceProfiles;
 
-    if (!this._usersDir)
-      return this.__sourceProfiles = [];
+    if (!this._usersDir) {
+      this.__sourceProfiles = [];
+      return this.__sourceProfiles;
+    }
 
     let profiles = [];
     let noLoggedInUser = true;
@@ -229,7 +234,7 @@ Object.defineProperty(Qihoo360seProfileMigrator.prototype, "sourceProfiles", {
       let loginIniObj = parseINIStrings(loginIniInUtf8);
       try {
         loginIniInUtf8.remove(false);
-      } catch(ex) {}
+      } catch (ex) {}
 
       let nowLoginEmail = loginIniObj.NowLogin && loginIniObj.NowLogin.email;
 
@@ -273,10 +278,11 @@ Object.defineProperty(Qihoo360seProfileMigrator.prototype, "sourceProfiles", {
       });
     }
 
-    return this.__sourceProfiles = profiles.filter(profile => {
+    this.__sourceProfiles = profiles.filter(profile => {
       let resources = this.getResources(profile);
       return resources && resources.length > 0;
     });
+    return this.__sourceProfiles;
   }
 });
 
@@ -296,6 +302,23 @@ Qihoo360seProfileMigrator.prototype.getResources = function(aProfile) {
     new Bookmarks(profileFolder)
   ];
   return resources.filter(r => r.exists);
+};
+
+Qihoo360seProfileMigrator.prototype.getLastUsedDate = function() {
+  let bookmarksPaths = this.sourceProfiles.map(({id}) => {
+    return OS.Path.join(this._usersDir.path, id, kBookmarksFileName);
+  });
+  if (!bookmarksPaths.length) {
+    return Promise.resolve(new Date(0));
+  }
+  let datePromises = bookmarksPaths.map(path => {
+    return OS.File.stat(path).catch(() => null).then(info => {
+      return info ? info.lastModificationDate : 0;
+    });
+  });
+  return Promise.all(datePromises).then(dates => {
+    return new Date(Math.max.apply(Math, dates));
+  });
 };
 
 Qihoo360seProfileMigrator.prototype.classDescription = "360 Secure Browser Profile Migrator";

@@ -5,7 +5,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/commandline/" +
                  "test/browser_cmd_media.html";
 var tests = {
-  testInput: function(options) {
+  testInput: function (options) {
     return helpers.audit(options, [
       {
         setup: "media emulate braille",
@@ -31,7 +31,7 @@ var tests = {
     ]);
   },
 
-  testEmulateMedia: function(options) {
+  testEmulateMedia: function (options) {
     return helpers.audit(options, [
       {
         setup: "media emulate braille",
@@ -43,19 +43,20 @@ var tests = {
         exec: {
           output: ""
         },
-        post: function() {
-          let body = options.window.document.body;
-          let style = options.window.getComputedStyle(body);
-          is(style.backgroundColor, "rgb(255, 255, 0)", "media correctly emulated");
-        }
+        post: Task.async(function* () {
+          yield ContentTask.spawn(options.browser, {}, function* () {
+            let color = content.getComputedStyle(content.document.body).backgroundColor;
+            is(color, "rgb(255, 255, 0)", "media correctly emulated");
+          });
+        })
       }
     ]);
   },
 
-  testEndMediaEmulation: function(options) {
+  testEndMediaEmulation: function (options) {
     return helpers.audit(options, [
       {
-        setup: function() {
+        setup: function () {
           let mDV = options.browser.markupDocumentViewer;
           mDV.emulateMedium("embossed");
           return helpers.setInput(options, "media reset");
@@ -63,18 +64,19 @@ var tests = {
         exec: {
           output: ""
         },
-        post: function() {
-          let body = options.window.document.body;
-          let style = options.window.getComputedStyle(body);
-          is(style.backgroundColor, "rgb(255, 255, 255)", "media reset");
-        }
+        post: Task.async(function* () {
+          yield ContentTask.spawn(options.browser, {}, function* () {
+            let color = content.getComputedStyle(content.document.body).backgroundColor;
+            is(color, "rgb(255, 255, 255)", "media reset");
+          });
+        })
       }
     ]);
   }
 };
 
 function test() {
-  return Task.spawn(function*() {
+  return Task.spawn(function* () {
     let options = yield helpers.openTab(TEST_URI);
     yield helpers.openToolbar(options);
 

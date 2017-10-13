@@ -34,12 +34,17 @@ skip script test262/intl402/ch12/12.2/12.2.2_L15.js
 skip script test262/ch13/13.2/13.2-15-1.js
 skip script test262/ch11/11.4/11.4.1/11.4.1-5-a-28-s.js
 
-##################################################
-# Test262 tests skipped due to SpiderMonkey bugs #
-##################################################
+# ECMA-402 1st ed. required |timeZoneName: undefined|, but newer versions have
+# changed it to being the default time zone, cf. the NOTE in
+# Intl.DateTimeFormat.prototype.resolvedOptions().
+skip script test262/intl402/ch12/12.3/12.3.3.js
 
-skip script test262/ch10/10.4/10.4.3/10.4.3-1-104.js # bug 603201
-skip script test262/ch10/10.4/10.4.3/10.4.3-1-106.js # bug 603201
+# ECMA-262 6th ed. used Unicode 5.1, but we're now supporting Unicode 9.0.
+# Disable tests which require Unicode 5.1 semantics, or more specific disable
+# tests which expect that U+180E is a white space character.
+skip script test262/ch09/9.3/9.3.1/S9.3.1_A2.js
+skip script test262/ch09/9.3/9.3.1/S9.3.1_A3_T2.js
+skip script test262/ch09/9.3/9.3.1/S9.3.1_A3_T1.js
 
 #######################################################################
 # Tests disabled due to jstest limitations wrt imported test262 tests #
@@ -392,6 +397,3 @@ skip script test262/ch13/13.1/13.1-13gs.js
 skip script test262/ch13/13.2/13.2-19-b-3gs.js
 skip script test262/ch14/14.1/14.1-4gs.js
 skip script test262/ch14/14.1/14.1-5gs.js
-
-# Bug 917508: fails on Android x86 emulator
-skip-if(Android&&AndroidVersion>=17) script test262/ch11/11.5/11.5.3/S11.5.3_A4_T2.js

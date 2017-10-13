@@ -15,7 +15,9 @@
 #include "gfxPlatform.h"
 #include "gfxWindowsPlatform.h"
 #include "TextureD3D9.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/gfx/Point.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "gfxPrefs.h"
 
 namespace mozilla {
@@ -30,6 +32,23 @@ const LPCWSTR kClassName       = L"D3D9WindowClass";
 struct vertex {
   float x, y;
 };
+
+static StaticAutoPtr<mozilla::Mutex> sDeviceManagerLock;
+static StaticRefPtr<DeviceManagerD3D9> sDeviceManager;
+
+/* static */ void
+DeviceManagerD3D9::Init()
+{
+  MOZ_ASSERT(!sDeviceManagerLock);
+  sDeviceManagerLock = new Mutex("DeviceManagerD3D9.sDeviceManagerLock");
+}
+
+/* static */ void
+DeviceManagerD3D9::Shutdown()
+{
+  sDeviceManagerLock = nullptr;
+  sDeviceManager = nullptr;
+}
 
 SwapChainD3D9::SwapChainD3D9(DeviceManagerD3D9 *aDeviceManager)
   : mDeviceManager(aDeviceManager)
@@ -165,6 +184,7 @@ DeviceManagerD3D9::DeviceManagerD3D9()
   , mDeviceResetCount(0)
   , mMaxTextureSize(0)
   , mTextureAddressingMode(D3DTADDRESS_CLAMP)
+  , mHasComponentAlpha(true)
   , mHasDynamicTextures(false)
   , mDeviceWasRemoved(false)
 {
@@ -175,8 +195,50 @@ DeviceManagerD3D9::~DeviceManagerD3D9()
   DestroyDevice();
 }
 
+/* static */ RefPtr<DeviceManagerD3D9>
+DeviceManagerD3D9::Get()
+{
+  MutexAutoLock lock(*sDeviceManagerLock);
+
+  bool canCreate =
+    !gfxPlatform::UsesOffMainThreadCompositing() ||
+    CompositorThreadHolder::IsInCompositorThread();
+  if (!sDeviceManager && canCreate) {
+    sDeviceManager = new DeviceManagerD3D9();
+    if (!sDeviceManager->Initialize()) {
+      gfxCriticalError() << "[D3D9] Could not Initialize the DeviceManagerD3D9";
+      sDeviceManager = nullptr;
+    }
+  }
+
+  return sDeviceManager;
+}
+
+/* static */ RefPtr<IDirect3DDevice9>
+DeviceManagerD3D9::GetDevice()
+{
+  MutexAutoLock lock(*sDeviceManagerLock);
+  return sDeviceManager ? sDeviceManager->device() : nullptr;
+}
+
+/* static */ void
+DeviceManagerD3D9::OnDeviceManagerDestroy(DeviceManagerD3D9* aDeviceManager)
+{
+  if (!sDeviceManagerLock) {
+    // If the device manager has shutdown, we don't care anymore. We can get
+    // here when the compositor shuts down asynchronously.
+    MOZ_ASSERT(!sDeviceManager);
+    return;
+  }
+
+  MutexAutoLock lock(*sDeviceManagerLock);
+  if (aDeviceManager == sDeviceManager) {
+    sDeviceManager = nullptr;
+  }
+}
+
 bool
-DeviceManagerD3D9::Init()
+DeviceManagerD3D9::Initialize()
 {
   WNDCLASSW wc;
   HRESULT hr;
@@ -331,13 +393,13 @@ DeviceManagerD3D9::Init()
     mNv3DVUtils->SetDeviceInfo(devUnknown); 
   } 
 
-  auto failCreateShaderMsg = "[D3D9] failed to create a critical resource (shader) code: ";
+  auto failCreateShaderMsg = "[D3D9] failed to create a critical resource (shader) code";
 
   hr = mDevice->CreateVertexShader((DWORD*)LayerQuadVS,
                                    getter_AddRefs(mLayerVS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "LayerQuadVS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -345,7 +407,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "RGBShaderPS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -353,7 +415,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBAPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "RGBAShaderPS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -361,7 +423,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass1PS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "ComponentPass1ShaderPS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -369,7 +431,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass2PS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "ComponentPass2ShaderPS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -377,7 +439,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mYCbCrPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "YCbCrShaderPS: " << gfx::hexa(hr);
     return false;
   }
 
@@ -385,7 +447,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mSolidColorPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg;
+    gfxCriticalError() << failCreateShaderMsg << "SolidColorShaderPS" << gfx::hexa(hr);
     return false;
   }
 
@@ -393,14 +455,7 @@ DeviceManagerD3D9::Init()
                                    getter_AddRefs(mLayerVSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
-    return false;
-  }
-  hr = mDevice->CreateVertexShader((DWORD*)LayerQuadVSMask3D,
-                                   getter_AddRefs(mLayerVSMask3D));
-
-  if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "LayerQuadVSMask: " << gfx::hexa(hr);
     return false;
   }
 
@@ -408,7 +463,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "RGBShaderPSMask " << gfx::hexa(hr);
     return false;
   }
 
@@ -416,15 +471,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBAPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
-    return false;
-  }
-
-  hr = mDevice->CreatePixelShader((DWORD*)RGBAShaderPSMask3D,
-                                  getter_AddRefs(mRGBAPSMask3D));
-
-  if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "RGBAShaderPSMask: " << gfx::hexa(hr);
     return false;
   }
 
@@ -432,7 +479,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass1PSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "ComponentPass1ShaderPSMask: " << gfx::hexa(hr);
     return false;
   }
 
@@ -440,7 +487,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass2PSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg;
+    gfxCriticalError() << failCreateShaderMsg << "ComponentPass2ShaderPSMask: ";
     return false;
   }
 
@@ -448,7 +495,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mYCbCrPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "YCbCrShaderPSMask: " << gfx::hexa(hr);
     return false;
   }
 
@@ -456,7 +503,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mSolidColorPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << "SolidColorShaderPSMask: " << gfx::hexa(hr);
     return false;
   }
 
@@ -597,13 +644,8 @@ DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, MaskType aMaskType)
       maskTexRegister = 1;
       break;
     case RGBALAYER:
-      if (aMaskType == MaskType::Mask2d) {
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mRGBAPSMask);
-      } else {
-        mDevice->SetVertexShader(mLayerVSMask3D);
-        mDevice->SetPixelShader(mRGBAPSMask3D);
-      }
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mRGBAPSMask);
       maskTexRegister = 1;
       break;
     case COMPONENTLAYERPASS1:
@@ -638,7 +680,7 @@ DeviceManagerD3D9::DestroyDevice()
   if (!IsD3D9Ex()) {
     ReleaseTextureResources();
   }
-  gfxWindowsPlatform::GetPlatform()->OnDeviceManagerDestroy(this);
+  DeviceManagerD3D9::OnDeviceManagerDestroy(this);
 }
 
 DeviceManagerState
@@ -784,6 +826,10 @@ DeviceManagerD3D9::VerifyCaps()
     mTextureAddressingMode = D3DTADDRESS_WRAP;
   } else {
     gfxPlatform::DisableBufferRotation();
+  }
+
+  if (LACKS_CAP(caps.DestBlendCaps, D3DPBLENDCAPS_INVSRCCOLOR)) {
+    mHasComponentAlpha = false;
   }
 
   return true;

@@ -2,6 +2,9 @@ setJitCompilerOption("baseline.warmup.trigger", 10);
 setJitCompilerOption("ion.warmup.trigger", 20);
 var i;
 
+var config = getBuildConfiguration();
+var max = 200;
+
 // Check that we are able to remove the operation inside recover test functions (denoted by "rop..."),
 // when we inline the first version of uceFault, and ensure that the bailout is correct
 // when uceFault is replaced (which cause an invalidation bailout)
@@ -156,6 +159,42 @@ function rursh_object(i) {
     if (uceFault_ursh_object(i) || uceFault_ursh_object(i))
         assertEq(x, 49  /* = 99 >>> 1 */);
     assertRecoveredOnBailout(x, false);
+    return i;
+}
+
+var uceFault_signextend8_1 = eval(uneval(uceFault).replace('uceFault', 'uceFault_signextend8_1'));
+function rsignextend8_1(i) {
+    var x = (i << 24) >> 24;
+    if (uceFault_signextend8_1(i) || uceFault_signextend8_1(i))
+        assertEq(x, 99  /* = (99 << 24) >> 24 */);
+    assertRecoveredOnBailout(x, true);
+    return i;
+}
+
+var uceFault_signextend8_2 = eval(uneval(uceFault).replace('uceFault', 'uceFault_signextend8_2'));
+function rsignextend8_2(i) {
+    var x = ((-1 * i) << 24) >> 24;
+    if (uceFault_signextend8_2(i) || uceFault_signextend8_2(i))
+        assertEq(x, -99  /* = (-99 << 24) >> 24 */);
+    assertRecoveredOnBailout(x, true);
+    return i;
+}
+
+var uceFault_signextend16_1 = eval(uneval(uceFault).replace('uceFault', 'uceFault_signextend16_1'));
+function rsignextend16_1(i) {
+    var x = (i << 16) >> 16;
+    if (uceFault_signextend16_1(i) || uceFault_signextend16_1(i))
+        assertEq(x, 99  /* = (99 << 16) >> 16 */);
+    assertRecoveredOnBailout(x, true);
+    return i;
+}
+
+var uceFault_signextend16_2 = eval(uneval(uceFault).replace('uceFault', 'uceFault_signextend16_2'));
+function rsignextend16_2(i) {
+    var x = ((-1 * i) << 16) >> 16;
+    if (uceFault_signextend16_2(i) || uceFault_signextend16_2(i))
+        assertEq(x, -99  /* = (-99 << 16) >> 16 */);
+    assertRecoveredOnBailout(x, true);
     return i;
 }
 
@@ -909,7 +948,11 @@ function rregexp_y_replace(i) {
 
     var res = "str00123456789".replace(re, "abc");
 
-    // replace will not zero the lastIndex field, if sticky flag is set
+    assertEq(re.lastIndex, 0);
+
+    assertEq(res, "str00123456789");
+
+    res = "str00123456789".replace(re, "abc");
     assertEq(re.lastIndex == 0, false);
 
     if (uceFault_regexp_y_replace(i) || uceFault_regexp_y_replace(i))
@@ -926,6 +969,11 @@ function rregexp_y_literal_replace(i) {
 
     var res = "str00123456789".replace(re, "abc");
 
+    assertEq(re.lastIndex, 0);
+
+    assertEq(res, "str00123456789");
+
+    res = "str00123456789".replace(re, "abc");
     assertEq(re.lastIndex == 0, false);
 
     if (uceFault_regexp_y_literal_replace(i) || uceFault_regexp_y_literal_replace(i))
@@ -1054,7 +1102,7 @@ function rstring_replace_y(i) {
     if (uceFault_string_replace_y(i) || uceFault_string_replace_y(i))
         assertEq(res, "abc");
     assertRecoveredOnBailout(res, false);
-    assertEq(re.lastIndex == 0, true);
+    assertEq(re.lastIndex == 0, false);
     return i;
 }
 
@@ -1241,6 +1289,18 @@ function rhypot_object_4args(i) {
     return i;
 }
 
+var uceFault_random = eval(uneval(uceFault).replace('uceFault', 'uceFault_random'));
+function rrandom(i) {
+    // setRNGState() exists only in debug builds
+    if(config.debug) setRNGState(2, 1+i);
+
+    var x = Math.random();
+    if (uceFault_random(i) || uceFault_random(i))
+        assertEq(x, config.debug ? setRNGState(2, 1+i) || Math.random() : x);
+    assertRecoveredOnBailout(x, true);
+    return i;
+}
+
 var uceFault_sin_number = eval(uneval(uceFault).replace('uceFault', 'uceFault_sin_number'));
 function rsin_number(i) {
     var x = Math.sin(i);
@@ -1283,7 +1343,8 @@ function rlog_object(i) {
     return i;
 }
 
-for (i = 0; i < 100; i++) {
+for (j = 100 - max; j < 100; j++) {
+    let i = j < 2 ? (Math.abs(j) % 50) + 2 : j;
     rbitnot_number(i);
     rbitnot_object(i);
     rbitand_number(i);
@@ -1298,6 +1359,10 @@ for (i = 0; i < 100; i++) {
     rrsh_object(i);
     rursh_number(i);
     rursh_object(i);
+    rsignextend8_1(i);
+    rsignextend8_2(i);
+    rsignextend16_1(i);
+    rsignextend16_2(i);
     radd_number(i);
     radd_float(i);
     radd_object(i);
@@ -1395,6 +1460,7 @@ for (i = 0; i < 100; i++) {
     rhypot_object_2args(i);
     rhypot_object_3args(i);
     rhypot_object_4args(i);
+    rrandom(i);
     rsin_number(i);
     rsin_object(i);
     rlog_number(i);

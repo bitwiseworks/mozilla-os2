@@ -11,6 +11,7 @@
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "base/task.h"
 
 using namespace mozilla::ipc;
 using namespace mozilla::jsipc;
@@ -27,15 +28,12 @@ ContentBridgeChild::ContentBridgeChild(Transport* aTransport)
 
 ContentBridgeChild::~ContentBridgeChild()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, new DeleteTask<Transport>(mTransport));
 }
 
 void
 ContentBridgeChild::ActorDestroy(ActorDestroyReason aWhy)
 {
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ContentBridgeChild::DeferredDestroy));
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeChild::DeferredDestroy));
 }
 
 /*static*/ ContentBridgeChild*
@@ -60,11 +58,11 @@ ContentBridgeChild::DeferredDestroy()
 
 bool
 ContentBridgeChild::RecvAsyncMessage(const nsString& aMsg,
-                                     const ClonedMessageData& aData,
                                      InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                     const IPC::Principal& aPrincipal)
+                                     const IPC::Principal& aPrincipal,
+                                     const ClonedMessageData& aData)
 {
-  return nsIContentChild::RecvAsyncMessage(aMsg, aData, Move(aCpows), aPrincipal);
+  return nsIContentChild::RecvAsyncMessage(aMsg, Move(aCpows), aPrincipal, aData);
 }
 
 PBlobChild*
@@ -90,6 +88,18 @@ ContentBridgeChild::SendPBrowserConstructor(PBrowserChild* aActor,
                                                       aCpID,
                                                       aIsForApp,
                                                       aIsForBrowser);
+}
+
+PFileDescriptorSetChild*
+ContentBridgeChild::SendPFileDescriptorSetConstructor(const FileDescriptor& aFD)
+{
+  return PContentBridgeChild::SendPFileDescriptorSetConstructor(aFD);
+}
+
+PSendStreamChild*
+ContentBridgeChild::SendPSendStreamConstructor(PSendStreamChild* aActor)
+{
+  return PContentBridgeChild::SendPSendStreamConstructor(aActor);
 }
 
 // This implementation is identical to ContentChild::GetCPOWManager but we can't
@@ -166,6 +176,30 @@ bool
 ContentBridgeChild::DeallocPBlobChild(PBlobChild* aActor)
 {
   return nsIContentChild::DeallocPBlobChild(aActor);
+}
+
+PSendStreamChild*
+ContentBridgeChild::AllocPSendStreamChild()
+{
+  return nsIContentChild::AllocPSendStreamChild();
+}
+
+bool
+ContentBridgeChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
+{
+  return nsIContentChild::DeallocPSendStreamChild(aActor);
+}
+
+PFileDescriptorSetChild*
+ContentBridgeChild::AllocPFileDescriptorSetChild(const FileDescriptor& aFD)
+{
+  return nsIContentChild::AllocPFileDescriptorSetChild(aFD);
+}
+
+bool
+ContentBridgeChild::DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor)
+{
+  return nsIContentChild::DeallocPFileDescriptorSetChild(aActor);
 }
 
 } // namespace dom

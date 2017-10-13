@@ -11,6 +11,7 @@ const Ci = Components.interfaces;
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
+/* globals AddonManagerPrivate*/
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 const ID_SUFFIX              = "@personas.mozilla.org";
@@ -41,6 +42,9 @@ const PERSIST_FILES = {
 
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+  "resource://gre/modules/ServiceRequest.jsm");
+
 
 XPCOMUtils.defineLazyGetter(this, "_prefs", () => {
   return Services.prefs.getBranch("lightweightThemes.");
@@ -78,7 +82,7 @@ var _themeIDBeingDisabled = null;
   let wasThemeSelected = false;
   try {
     wasThemeSelected = _prefs.getBoolPref("isThemeSelected");
-  } catch(e) { }
+  } catch (e) { }
 
   if (wasThemeSelected) {
     _prefs.clearUserPref("isThemeSelected");
@@ -184,6 +188,10 @@ this.LightweightThemeManager = {
     }
 
     this._builtInThemes.set(theme.id, theme);
+
+    if (_prefs.getCharPref("selectedThemeID") == theme.id) {
+      this.currentTheme = theme;
+    }
   },
 
   forgetBuiltInTheme: function(id) {
@@ -249,8 +257,7 @@ this.LightweightThemeManager = {
     if (!theme || !theme.updateURL)
       return;
 
-    var req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                .createInstance(Ci.nsIXMLHttpRequest);
+    var req = new ServiceRequest();
 
     req.mozBackgroundRequest = true;
     req.overrideMimeType("text/plain");
@@ -364,12 +371,10 @@ this.LightweightThemeManager = {
         AddonManagerPrivate.callAddonListeners("onOperationCancelled",
                                                new AddonWrapper(this.getUsedTheme(next)));
       }
-      else {
-        if (id == current.id) {
-          AddonManagerPrivate.callAddonListeners("onOperationCancelled",
-                                                 new AddonWrapper(current));
-          return;
-        }
+      else if (id == current.id) {
+        AddonManagerPrivate.callAddonListeners("onOperationCancelled",
+                                               new AddonWrapper(current));
+        return;
       }
     }
     catch (e) {
@@ -697,7 +702,7 @@ function _setCurrentTheme(aData, aLocal) {
     _updateUsedThemes(usedThemes);
 
     if (isInstall)
-       AddonManagerPrivate.callAddonListeners("onInstalled", wrapper);
+      AddonManagerPrivate.callAddonListeners("onInstalled", wrapper);
   }
 
   if (cancel.data)

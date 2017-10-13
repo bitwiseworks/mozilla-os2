@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -66,15 +67,7 @@ if CONFIG['MOZ_OMX_PLUGIN']:
         '/media/omx-plugin/lib/ics/libutils',
         '/media/omx-plugin/lib/ics/libstagefright',
         '/media/omx-plugin/lib/ics/libvideoeditorplayer',
-        '/media/omx-plugin/lib/gb/libutils',
-        '/media/omx-plugin/lib/gb/libstagefright',
-        '/media/omx-plugin/lib/gb/libstagefright_color_conversion',
-        '/media/omx-plugin/lib/gb235/libstagefright',
         '/media/omx-plugin',
-        '/media/omx-plugin/gb',
-        '/media/omx-plugin/gb235',
-        '/media/omx-plugin/lib/hc/libstagefright',
-        '/media/omx-plugin/hc',
         '/media/omx-plugin/kk',
     ]
 
@@ -150,18 +143,27 @@ DIRS += [
 if CONFIG['MOZ_GIO_COMPONENT']:
     DIRS += ['/extensions/gio']
 
+if CONFIG['MOZ_RUST']:
+    DIRS += [
+        '/toolkit/library/gtest/rust',
+        '/toolkit/library/rust',
+    ]
+
 DIRS += [
     '/toolkit/library/StaticXULComponentsEnd',
     '/toolkit/library',
 ]
 
-if CONFIG['MOZ_ENABLE_GTK']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     DIRS += ['/toolkit/system/gnome']
 
 DIRS += ['/addon-sdk']
 
 if CONFIG['ENABLE_MARIONETTE'] or CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('gonk', 'android'):
-    DIRS += ['/testing/marionette']
+    DIRS += [
+        '/testing/firefox-ui',
+        '/testing/marionette',
+    ]
 
 DIRS += [
     '/tools/quitter',
@@ -172,6 +174,7 @@ if CONFIG['ENABLE_TESTS']:
     DIRS += [
         '/testing/mochitest',
         '/testing/xpcshell',
+        '/testing/tools/minidumpwriter',
         '/testing/tools/screenshot',
         '/testing/profiles',
         '/testing/mozbase',
@@ -180,9 +183,18 @@ if CONFIG['ENABLE_TESTS']:
         '/testing/web-platform',
     ]
 
-    if CONFIG['MOZ_WEBRTC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
-            DIRS += [
-                '/media/webrtc/signaling/test',
-                '/media/webrtc/signaling/test/standalone',
-                '/media/mtransport/test',
-            ]
+    # The file id utility requires breakpad libraries.
+    if CONFIG['MOZ_CRASHREPORTER']:
+        DIRS += ['/testing/tools/fileid']
+
+    if CONFIG['MOZ_MEMORY']:
+        DIRS += ['/memory/gtest']
+
+    if CONFIG['MOZ_WEBRTC'] and not CONFIG['MOZ_TASK_TRACER']:
+        DIRS += [
+            '/media/webrtc/signaling/test',
+            '/media/mtransport/test',
+        ]
+
+if CONFIG['FUZZING']:
+    DIRS += ['/tools/fuzzing']

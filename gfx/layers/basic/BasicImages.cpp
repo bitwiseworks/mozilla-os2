@@ -22,9 +22,6 @@
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "gfx2DGlue.h"
 #include "YCbCrUtils.h"                 // for YCbCr conversions
-#ifdef XP_MACOSX
-#include "gfxQuartzImageSurface.h"
-#endif
 
 namespace mozilla {
 namespace layers {
@@ -35,6 +32,7 @@ public:
   BasicPlanarYCbCrImage(const gfx::IntSize& aScaleHint, gfxImageFormat aOffscreenFormat, BufferRecycleBin *aRecycleBin)
     : RecyclingPlanarYCbCrImage(aRecycleBin)
     , mScaleHint(aScaleHint)
+    , mStride(0)
     , mDelayedConversion(false)
   {
     SetOffscreenFormat(aOffscreenFormat);
@@ -49,7 +47,7 @@ public:
     }
   }
 
-  virtual bool SetData(const Data& aData) override;
+  virtual bool CopyData(const Data& aData) override;
   virtual void SetDelayedConversion(bool aDelayed) override { mDelayedConversion = aDelayed; }
 
   already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
@@ -86,9 +84,9 @@ public:
 };
 
 bool
-BasicPlanarYCbCrImage::SetData(const Data& aData)
+BasicPlanarYCbCrImage::CopyData(const Data& aData)
 {
-  RecyclingPlanarYCbCrImage::SetData(aData);
+  RecyclingPlanarYCbCrImage::CopyData(aData);
 
   if (mDelayedConversion) {
     return false;
@@ -148,10 +146,10 @@ BasicPlanarYCbCrImage::GetAsSourceSurface()
     // We create the target out of mDecodedBuffer, and get a snapshot from it.
     // The draw target is destroyed on scope exit and the surface owns the data.
     RefPtr<gfx::DrawTarget> drawTarget
-      = gfxPlatform::GetPlatform()->CreateDrawTargetForData(mDecodedBuffer.get(),
-                                                            mSize,
-                                                            mStride,
-                                                            gfx::ImageFormatToSurfaceFormat(format));
+      = gfxPlatform::CreateDrawTargetForData(mDecodedBuffer.get(),
+                                             mSize,
+                                             mStride,
+                                             gfx::ImageFormatToSurfaceFormat(format));
     if (!drawTarget) {
       return nullptr;
     }

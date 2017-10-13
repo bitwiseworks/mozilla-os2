@@ -20,8 +20,7 @@
 #include <utils/AndroidThreads.h>
 #endif
 
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 using namespace android;
 
@@ -142,7 +141,7 @@ GonkDecoderManager::Shutdown()
     mDecoder = nullptr;
   }
 
-  mInitPromise.RejectIfExists(DecoderFailureReason::CANCELED, __func__);
+  mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
 
   return NS_OK;
 }
@@ -176,7 +175,8 @@ GonkDecoderManager::ProcessInput(bool aEndOfStream)
     }
   } else {
     GMDD_LOG("input processed: error#%d", rv);
-    mDecodeCallback->Error();
+    mDecodeCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                            __func__));
   }
 }
 
@@ -190,7 +190,8 @@ GonkDecoderManager::ProcessFlush()
   mWaitOutput.Clear();
   if (mDecoder->flush() != OK) {
     GMDD_LOG("flush error");
-    mDecodeCallback->Error();
+    mDecodeCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                            __func__));
   }
   mIsFlushing = false;
   lock.NotifyAll();
@@ -226,7 +227,8 @@ GonkDecoderManager::ProcessToDo(bool aEndOfStream)
   mToDo.clear();
 
   if (NumQueuedSamples() > 0 && ProcessQueuedSamples() < 0) {
-    mDecodeCallback->Error();
+    mDecodeCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                            __func__));
     return;
   }
 
@@ -248,11 +250,13 @@ GonkDecoderManager::ProcessToDo(bool aEndOfStream)
       MOZ_ASSERT(mWaitOutput.Length() == 1);
       mWaitOutput.RemoveElementAt(0);
       mDecodeCallback->DrainComplete();
+      ResetEOS();
       return;
     } else if (rv == NS_ERROR_NOT_AVAILABLE) {
       break;
     } else {
-      mDecodeCallback->Error();
+      mDecodeCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                              __func__));
       return;
     }
   }
@@ -270,6 +274,18 @@ GonkDecoderManager::ProcessToDo(bool aEndOfStream)
       mToDo->setInt32("input-eos", 1);
     }
     mDecoder->requestActivityNotification(mToDo);
+  }
+}
+
+void
+GonkDecoderManager::ResetEOS()
+{
+  // After eos, android::MediaCodec needs to be flushed to receive next input
+  mWaitOutput.Clear();
+  if (mDecoder->flush() != OK) {
+    GMDD_LOG("flush error");
+    mDecodeCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                            __func__));
   }
 }
 
@@ -319,7 +335,6 @@ GonkDecoderManager::OnTaskLooper()
 #endif
 
 GonkMediaDataDecoder::GonkMediaDataDecoder(GonkDecoderManager* aManager,
-                                           FlushableTaskQueue* aTaskQueue,
                                            MediaDataDecoderCallback* aCallback)
   : mManager(aManager)
 {
@@ -338,36 +353,33 @@ GonkMediaDataDecoder::Init()
   return mManager->Init();
 }
 
-nsresult
+void
 GonkMediaDataDecoder::Shutdown()
 {
-  nsresult rv = mManager->Shutdown();
+  mManager->Shutdown();
 
   // Because codec allocated runnable and init promise is at reader TaskQueue,
   // so manager needs to be destroyed at reader TaskQueue to prevent racing.
   mManager = nullptr;
-  return rv;
 }
 
 // Inserts data into the decoder's pipeline.
-nsresult
+void
 GonkMediaDataDecoder::Input(MediaRawData* aSample)
 {
   mManager->Input(aSample);
-  return NS_OK;
 }
 
-nsresult
+void
 GonkMediaDataDecoder::Flush()
 {
-  return mManager->Flush();
+  mManager->Flush();
 }
 
-nsresult
+void
 GonkMediaDataDecoder::Drain()
 {
   mManager->Input(nullptr);
-  return NS_OK;
 }
 
 } // namespace mozilla

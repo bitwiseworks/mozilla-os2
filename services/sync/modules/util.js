@@ -35,8 +35,6 @@ this.Utils = {
   // In the ideal world, references to these would be removed.
   nextTick: CommonUtils.nextTick,
   namedTimer: CommonUtils.namedTimer,
-  exceptionStr: CommonUtils.exceptionStr,
-  stackTrace: CommonUtils.stackTrace,
   makeURI: CommonUtils.makeURI,
   encodeUTF8: CommonUtils.encodeUTF8,
   decodeUTF8: CommonUtils.decodeUTF8,
@@ -54,12 +52,32 @@ this.Utils = {
   digestBytes: CryptoUtils.digestBytes,
   sha1: CryptoUtils.sha1,
   sha1Base32: CryptoUtils.sha1Base32,
+  sha256: CryptoUtils.sha256,
   makeHMACKey: CryptoUtils.makeHMACKey,
   makeHMACHasher: CryptoUtils.makeHMACHasher,
   hkdfExpand: CryptoUtils.hkdfExpand,
   pbkdf2Generate: CryptoUtils.pbkdf2Generate,
   deriveKeyFromPassphrase: CryptoUtils.deriveKeyFromPassphrase,
   getHTTPMACSHA1Header: CryptoUtils.getHTTPMACSHA1Header,
+
+  /**
+   * The string to use as the base User-Agent in Sync requests.
+   * This string will look something like
+   *
+   *   Firefox/49.0a1 (Windows NT 6.1; WOW64; rv:46.0) FxSync/1.51.0.20160516142357.desktop
+   */
+  _userAgent: null,
+  get userAgent() {
+    if (!this._userAgent) {
+      let hph = Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler);
+      this._userAgent =
+        Services.appinfo.name + "/" + Services.appinfo.version +  // Product.
+        " (" + hph.oscpu + ")" +                                  // (oscpu)
+        " FxSync/" + WEAVE_VERSION + "." +                        // Sync.
+        Services.appinfo.appBuildID + ".";                        // Build.
+    }
+    return this._userAgent + Svc.Prefs.get("client.type", "desktop");
+  },
 
   /**
    * Wrap a function to catch all exceptions and log them
@@ -77,7 +95,7 @@ this.Utils = {
         return func.call(thisArg);
       }
       catch(ex) {
-        thisArg._log.debug("Exception: " + Utils.exceptionStr(ex));
+        thisArg._log.debug("Exception calling " + (func.name || "anonymous function"), ex);
         if (exceptionCallback) {
           return exceptionCallback.call(thisArg, ex);
         }
@@ -338,12 +356,14 @@ this.Utils = {
 
     try {
       json = yield CommonUtils.readJSON(path);
-    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
-      // Ignore non-existent files.
     } catch (e) {
-      if (that._log) {
-        that._log.debug("Failed to load json: " +
-                        CommonUtils.exceptionStr(e));
+      if (e instanceof OS.File.Error && e.becauseNoSuchFile) {
+        // Ignore non-existent files, but explicitly return null.
+        json = null;
+      } else {
+        if (that._log) {
+          that._log.debug("Failed to load json", e);
+        }
       }
     }
 
@@ -390,6 +410,52 @@ this.Utils = {
       callback.call(that, error);
     }
   }),
+
+  /**
+   * Move a json file in the profile directory. Will fail if a file exists at the
+   * destination.
+   *
+   * @returns a promise that resolves to undefined on success, or rejects on failure
+   *
+   * @param aFrom
+   *        Current path to the JSON file saved on disk, relative to profileDir/weave
+   *        .json will be appended to the file name.
+   * @param aTo
+   *        New path to the JSON file saved on disk, relative to profileDir/weave
+   *        .json will be appended to the file name.
+   * @param that
+   *        Object to use for logging
+   */
+  jsonMove(aFrom, aTo, that) {
+    let pathFrom = OS.Path.join(OS.Constants.Path.profileDir, "weave",
+                                ...(aFrom + ".json").split("/"));
+    let pathTo = OS.Path.join(OS.Constants.Path.profileDir, "weave",
+                              ...(aTo + ".json").split("/"));
+    if (that._log) {
+      that._log.trace("Moving " + pathFrom + " to " + pathTo);
+    }
+    return OS.File.move(pathFrom, pathTo, { noOverwrite: true });
+  },
+
+  /**
+   * Removes a json file in the profile directory.
+   *
+   * @returns a promise that resolves to undefined on success, or rejects on failure
+   *
+   * @param filePath
+   *        Current path to the JSON file saved on disk, relative to profileDir/weave
+   *        .json will be appended to the file name.
+   * @param that
+   *        Object to use for logging
+   */
+  jsonRemove(filePath, that) {
+    let path = OS.Path.join(OS.Constants.Path.profileDir, "weave",
+                            ...(filePath + ".json").split("/"));
+    if (that._log) {
+      that._log.trace("Deleting " + path);
+    }
+    return OS.File.remove(path, { ignoreAbsent: true });
+  },
 
   getErrorString: function Utils_getErrorString(error, args) {
     try {
@@ -615,30 +681,12 @@ this.Utils = {
    * Get the FxA identity hosts.
    */
   getSyncCredentialsHostsFxA: function() {
-    // This is somewhat expensive and the result static, so we cache the result.
-    if (this._syncCredentialsHostsFxA) {
-      return this._syncCredentialsHostsFxA;
-    }
     let result = new Set();
     // the FxA host
     result.add(FxAccountsCommon.FXA_PWDMGR_HOST);
-    //
-    // The FxA hosts - these almost certainly all have the same hostname, but
-    // better safe than sorry...
-    for (let prefName of ["identity.fxaccounts.remote.force_auth.uri",
-                          "identity.fxaccounts.remote.signup.uri",
-                          "identity.fxaccounts.remote.signin.uri",
-                          "identity.fxaccounts.settings.uri"]) {
-      let prefVal;
-      try {
-        prefVal = Services.prefs.getCharPref(prefName);
-      } catch (_) {
-        continue;
-      }
-      let uri = Services.io.newURI(prefVal, null, null);
-      result.add(uri.prePath);
-    }
-    return this._syncCredentialsHostsFxA = result;
+    // We used to include the FxA hosts (hence the Set() result) but we now
+    // don't give them special treatment (hence the Set() with exactly 1 item)
+    return result;
   },
 
   getDefaultDeviceName() {
@@ -672,6 +720,32 @@ this.Utils = {
       Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler).oscpu;
 
     return Str.sync.get("client.name2", [user, appName, system]);
+  },
+
+  getDeviceName() {
+    const deviceName = Svc.Prefs.get("client.name", "");
+
+    if (deviceName === "") {
+      return this.getDefaultDeviceName();
+    }
+
+    return deviceName;
+  },
+
+  getDeviceType() {
+    return Svc.Prefs.get("client.type", DEVICE_TYPE_DESKTOP);
+  },
+
+  formatTimestamp(date) {
+    // Format timestamp as: "%Y-%m-%d %H:%M:%S"
+    let year = String(date.getFullYear());
+    let month = String(date.getMonth() + 1).padStart(2, "0");
+    let day = String(date.getDate()).padStart(2, "0");
+    let hours = String(date.getHours()).padStart(2, "0");
+    let minutes = String(date.getMinutes()).padStart(2, "0");
+    let seconds = String(date.getSeconds()).padStart(2, "0");
+
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 };
 

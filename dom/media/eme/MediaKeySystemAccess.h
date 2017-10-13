@@ -19,6 +19,9 @@
 #include "js/TypeDecls.h"
 
 namespace mozilla {
+
+class DecoderDoctorDiagnostics;
+
 namespace dom {
 
 class MediaKeySystemAccess final : public nsISupports,
@@ -29,18 +32,17 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaKeySystemAccess)
 
 public:
-  explicit MediaKeySystemAccess(nsPIDOMWindow* aParent,
+  explicit MediaKeySystemAccess(nsPIDOMWindowInner* aParent,
                                 const nsAString& aKeySystem,
-                                const nsAString& aCDMVersion,
                                 const MediaKeySystemConfiguration& aConfig);
 
 protected:
   ~MediaKeySystemAccess();
 
 public:
-  nsPIDOMWindow* GetParentObject() const;
+  nsPIDOMWindowInner* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void GetKeySystem(nsString& aRetVal) const;
 
@@ -48,32 +50,28 @@ public:
 
   already_AddRefed<Promise> CreateMediaKeys(ErrorResult& aRv);
 
-
-
   static MediaKeySystemStatus GetKeySystemStatus(const nsAString& aKeySystem,
-                                                 int32_t aMinCdmVersion,
-                                                 nsACString& aOutExceptionMessage,
-                                                 nsACString& aOutCdmVersion);
+                                                 nsACString& aOutExceptionMessage);
 
   static bool IsSupported(const nsAString& aKeySystem,
-                          const Sequence<MediaKeySystemConfiguration>& aConfigs);
+                          const Sequence<MediaKeySystemConfiguration>& aConfigs,
+                          DecoderDoctorDiagnostics* aDiagnostics);
 
-  static void NotifyObservers(nsIDOMWindow* aWindow,
+  static void NotifyObservers(nsPIDOMWindowInner* aWindow,
                               const nsAString& aKeySystem,
                               MediaKeySystemStatus aStatus);
 
-  static bool IsGMPPresentOnDisk(const nsAString& aKeySystem,
-                                 const nsACString& aVersion,
-                                 nsACString& aOutMessage);
-
   static bool GetSupportedConfig(const nsAString& aKeySystem,
                                  const Sequence<MediaKeySystemConfiguration>& aConfigs,
-                                 MediaKeySystemConfiguration& aOutConfig);
+                                 MediaKeySystemConfiguration& aOutConfig,
+                                 DecoderDoctorDiagnostics* aDiagnostics);
+
+  static bool KeySystemSupportsInitDataType(const nsAString& aKeySystem,
+                                            const nsAString& aInitDataType);
 
 private:
-  nsCOMPtr<nsPIDOMWindow> mParent;
+  nsCOMPtr<nsPIDOMWindowInner> mParent;
   const nsString mKeySystem;
-  const nsString mCDMVersion;
   const MediaKeySystemConfiguration mConfig;
 };
 

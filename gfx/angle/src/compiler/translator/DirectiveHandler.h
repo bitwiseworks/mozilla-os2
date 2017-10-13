@@ -11,15 +11,19 @@
 #include "compiler/translator/ExtensionBehavior.h"
 #include "compiler/translator/Pragma.h"
 #include "compiler/preprocessor/DirectiveHandlerBase.h"
+#include "GLSLANG/ShaderLang.h"
 
+namespace sh
+{
 class TDiagnostics;
 
 class TDirectiveHandler : public pp::DirectiveHandler, angle::NonCopyable
 {
   public:
-    TDirectiveHandler(TExtensionBehavior& extBehavior,
-                      TDiagnostics& diagnostics,
-                      int& shaderVersion,
+    TDirectiveHandler(TExtensionBehavior &extBehavior,
+                      TDiagnostics &diagnostics,
+                      int &shaderVersion,
+                      sh::GLenum shaderType,
                       bool debugShaderPrecisionSupported);
     ~TDirectiveHandler() override;
 
@@ -44,7 +48,10 @@ class TDirectiveHandler : public pp::DirectiveHandler, angle::NonCopyable
     TExtensionBehavior& mExtensionBehavior;
     TDiagnostics& mDiagnostics;
     int& mShaderVersion;
+    sh::GLenum mShaderType;
     bool mDebugShaderPrecisionSupported;
 };
+
+}  // namespace sh
 
 #endif  // COMPILER_TRANSLATOR_DIRECTIVEHANDLER_H_

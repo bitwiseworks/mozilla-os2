@@ -270,6 +270,7 @@ class FloatRegisters
 
     static const SetType VolatileMask = AllMask & ~NonVolatileMask;
     static const SetType AllDoubleMask = AllMask;
+    static const SetType AllSingleMask = AllMask;
 
     static const SetType WrapperMask = VolatileMask;
 
@@ -297,6 +298,11 @@ class FloatRegisters
 static const uint32_t ION_FRAME_SLACK_SIZE = 24;
 
 static const uint32_t ShadowStackSpace = 0;
+
+// TODO:
+// This constant needs to be updated to account for whatever near/far branching
+// strategy is used by ARM64.
+static const uint32_t JumpImmediateRange = UINT32_MAX;
 
 static const uint32_t ABIStackAlignment = 16;
 static const uint32_t CodeAlignment = 16;
@@ -391,7 +397,7 @@ struct FloatRegister
     bool equiv(FloatRegister other) const {
         return k_ == other.k_;
     }
-    MOZ_CONSTEXPR uint32_t size() const {
+    constexpr uint32_t size() const {
         return k_ == FloatRegisters::Double ? sizeof(double) : sizeof(float);
     }
     uint32_t numAlignedAliased() {
@@ -449,9 +455,6 @@ hasMultiAlias()
 {
     return false;
 }
-
-static const size_t AsmJSCheckedImmediateRange = 0;
-static const size_t AsmJSImmediateRange = 0;
 
 } // namespace jit
 } // namespace js

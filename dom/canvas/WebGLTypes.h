@@ -16,6 +16,9 @@ typedef int64_t WebGLintptr;
 typedef bool WebGLboolean;
 
 namespace mozilla {
+namespace gl {
+class GLContext; // This is going to be needed a lot.
+} // namespace gl
 
 /*
  * WebGLTextureFakeBlackStatus is an enum to track what needs to use a dummy 1x1 black
@@ -90,30 +93,35 @@ enum class WebGLTexelFormat : uint8_t {
     // is implicitly treated as being RGB8 itself.
     Auto,
     // 1-channel formats
-    R8,
     A8,
-    R16F, // OES_texture_half_float
     A16F, // OES_texture_half_float
-    R32F, // OES_texture_float
     A32F, // OES_texture_float
+    R8,
+    R16F, // OES_texture_half_float
+    R32F, // OES_texture_float
     // 2-channel formats
     RA8,
     RA16F, // OES_texture_half_float
     RA32F, // OES_texture_float
+    RG8,
+    RG16F,
+    RG32F,
     // 3-channel formats
     RGB8,
-    RGBX8, // used for DOM elements. Source format only.
-    BGRX8, // used for DOM elements. Source format only.
     RGB565,
+    RGB11F11F10F,
     RGB16F, // OES_texture_half_float
     RGB32F, // OES_texture_float
     // 4-channel formats
     RGBA8,
-    BGRA8, // used for DOM elements
     RGBA5551,
     RGBA4444,
     RGBA16F, // OES_texture_half_float
-    RGBA32F // OES_texture_float
+    RGBA32F, // OES_texture_float
+    // DOM element source only formats.
+    RGBX8,
+    BGRX8,
+    BGRA8
 };
 
 enum class WebGLTexImageFunc : uint8_t {
@@ -134,6 +142,7 @@ enum class WebGLTexDimensions : uint8_t {
 enum class WebGLExtensionID : uint8_t {
     ANGLE_instanced_arrays,
     EXT_blend_minmax,
+    EXT_color_buffer_float,
     EXT_color_buffer_half_float,
     EXT_frag_depth,
     EXT_sRGB,
@@ -149,6 +158,7 @@ enum class WebGLExtensionID : uint8_t {
     OES_vertex_array_object,
     WEBGL_color_buffer_float,
     WEBGL_compressed_texture_atc,
+    WEBGL_compressed_texture_etc,
     WEBGL_compressed_texture_etc1,
     WEBGL_compressed_texture_pvrtc,
     WEBGL_compressed_texture_s3tc,

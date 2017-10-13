@@ -136,7 +136,7 @@ nsAsyncShutdownClient.prototype = {
   get name() {
     return this._moduleClient.name;
   },
-  addBlocker: function(/*nsIAsyncShutdownBlocker*/ xpcomBlocker,
+  addBlocker: function(/* nsIAsyncShutdownBlocker*/ xpcomBlocker,
       fileName, lineNumber, stack) {
     // We need a Promise-based function with the same behavior as
     // `xpcomBlocker`. Furthermore, to support `removeBlocker`, we
@@ -202,7 +202,7 @@ nsAsyncShutdownClient.prototype = {
 function nsAsyncShutdownBarrier(moduleBarrier) {
   this._client = new nsAsyncShutdownClient(moduleBarrier.client);
   this._moduleBarrier = moduleBarrier;
-};
+}
 nsAsyncShutdownBarrier.prototype = {
   get state() {
     return PropertyBagConverter.fromValue(this._moduleBarrier.state);
@@ -237,7 +237,7 @@ function nsAsyncShutdownService() {
 
     // All processes
     "webWorkersShutdown",
-    "xpcomThreadsShutdown",
+    "xpcomWillShutdown",
     ]) {
     let k = _k;
     Object.defineProperty(this, k, {

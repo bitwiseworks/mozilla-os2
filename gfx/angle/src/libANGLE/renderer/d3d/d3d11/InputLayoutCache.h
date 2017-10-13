@@ -13,13 +13,15 @@
 #include <GLES2/gl2.h>
 
 #include <cstddef>
+
+#include <array>
 #include <map>
-#include <unordered_map>
 
 #include "common/angleutils.h"
 #include "libANGLE/Constants.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/formatutils.h"
+#include "libANGLE/renderer/d3d/RendererD3D.h"
 
 namespace gl
 {
@@ -31,6 +33,7 @@ namespace rx
 struct TranslatedAttribute;
 struct TranslatedIndexData;
 struct SourceIndexData;
+class ProgramD3D;
 
 class InputLayoutCache : angle::NonCopyable
 {
@@ -42,8 +45,16 @@ class InputLayoutCache : angle::NonCopyable
     void clear();
     void markDirty();
 
-    gl::Error applyVertexBuffers(const std::vector<TranslatedAttribute> &attributes,
-                                 GLenum mode, gl::Program *program, SourceIndexData *sourceInfo);
+    gl::Error applyVertexBuffers(const gl::State &state,
+                                 const std::vector<TranslatedAttribute> &vertexArrayAttribs,
+                                 const std::vector<TranslatedAttribute> &currentValueAttribs,
+                                 GLenum mode,
+                                 GLint start,
+                                 TranslatedIndexData *indexInfo,
+                                 GLsizei numIndicesPerInstance);
+
+    gl::Error updateVertexOffsetsForPointSpritesEmulation(GLint startVertex,
+                                                          GLsizei emulatedInstanceId);
 
     // Useful for testing
     void setCacheSize(unsigned int cacheSize) { mCacheSize = cacheSize; }
@@ -66,9 +77,9 @@ class InputLayoutCache : angle::NonCopyable
 
         enum Flags
         {
-            FLAG_USES_INSTANCED_SPRITES = 0x1,
-            FLAG_MOVE_FIRST_INDEXED = 0x2,
-            FLAG_INSTANCED_SPRITES_ACTIVE = 0x4,
+            FLAG_USES_INSTANCED_SPRITES     = 0x1,
+            FLAG_INSTANCED_SPRITES_ACTIVE   = 0x2,
+            FLAG_INSTANCED_RENDERING_ACTIVE = 0x4,
         };
 
         size_t numAttributes;
@@ -76,24 +87,34 @@ class InputLayoutCache : angle::NonCopyable
         uint32_t attributeData[gl::MAX_VERTEX_ATTRIBS];
     };
 
+    gl::Error updateInputLayout(const gl::State &state,
+                                GLenum mode,
+                                const AttribIndexArray &sortedSemanticIndices,
+                                GLsizei numIndicesPerInstance);
+    gl::Error createInputLayout(const AttribIndexArray &sortedSemanticIndices,
+                                GLenum mode,
+                                gl::Program *program,
+                                GLsizei numIndicesPerInstance,
+                                ID3D11InputLayout **inputLayoutOut);
+
     std::map<PackedAttributeLayout, ID3D11InputLayout *> mLayoutMap;
 
     ID3D11InputLayout *mCurrentIL;
-    ID3D11Buffer *mCurrentBuffers[gl::MAX_VERTEX_ATTRIBS];
-    UINT mCurrentVertexStrides[gl::MAX_VERTEX_ATTRIBS];
-    UINT mCurrentVertexOffsets[gl::MAX_VERTEX_ATTRIBS];
+    std::array<ID3D11Buffer *, gl::MAX_VERTEX_ATTRIBS> mCurrentBuffers;
+    std::array<UINT, gl::MAX_VERTEX_ATTRIBS> mCurrentVertexStrides;
+    std::array<UINT, gl::MAX_VERTEX_ATTRIBS> mCurrentVertexOffsets;
+    std::vector<const TranslatedAttribute *> mCurrentAttributes;
 
     ID3D11Buffer *mPointSpriteVertexBuffer;
     ID3D11Buffer *mPointSpriteIndexBuffer;
 
     unsigned int mCacheSize;
-    unsigned long long mCounter;
 
     ID3D11Device *mDevice;
     ID3D11DeviceContext *mDeviceContext;
     D3D_FEATURE_LEVEL mFeatureLevel;
 };
 
-}
+}  // namespace rx
 
 #endif // LIBANGLE_RENDERER_D3D_D3D11_INPUTLAYOUTCACHE_H_

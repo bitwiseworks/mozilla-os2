@@ -6,10 +6,11 @@
  * completed, and rec data.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
 
-add_task(function*() {
-  let doc = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+add_task(function* () {
+  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+  let doc = browser.contentDocument;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -67,11 +68,11 @@ add_task(function*() {
   checkSystemInfo(importedModel, "Client");
 
   yield front.destroy();
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });
 
-function checkSystemInfo (recording, type) {
+function checkSystemInfo(recording, type) {
   let data = recording[`get${type}SystemInfo`]();
   for (let field of ["appid", "apptype", "vendor", "name", "version"]) {
     ok(data[field], `get${type}SystemInfo() has ${field} property`);

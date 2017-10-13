@@ -11,7 +11,8 @@
 #include "mozilla/StaticMutex.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/unused.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/Unused.h"
 
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -19,13 +20,25 @@
 
 #include <stdarg.h>
 
+// We need a definition of gettid(), but glibc doesn't provide a
+// wrapper for it.
 #if defined(__GLIBC__)
-// glibc doesn't implement gettid(2).
+#include <unistd.h>
 #include <sys/syscall.h>
-static pid_t gettid()
+static inline pid_t gettid()
 {
   return (pid_t) syscall(SYS_gettid);
 }
+#elif defined(XP_MACOSX)
+#include <unistd.h>
+#include <sys/syscall.h>
+static inline pid_t gettid()
+{
+  return (pid_t) syscall(SYS_thread_selfid);
+}
+#elif defined(LINUX)
+#include <sys/types.h>
+pid_t gettid();
 #endif
 
 // NS_ENSURE_TRUE_VOID() without the warning on the debug build.
@@ -47,13 +60,13 @@ static pid_t gettid()
 namespace mozilla {
 namespace tasktracer {
 
-static mozilla::ThreadLocal<TraceInfo*> sTraceInfoTLS;
+static MOZ_THREAD_LOCAL(TraceInfo*) sTraceInfoTLS;
 static mozilla::StaticMutex sMutex;
 
 // The generation of TraceInfo. It will be > 0 if the Task Tracer is started and
 // <= 0 if stopped.
 static mozilla::Atomic<bool> sStarted;
-static nsTArray<nsAutoPtr<TraceInfo>>* sTraceInfos = nullptr;
+static nsTArray<UniquePtr<TraceInfo>>* sTraceInfos = nullptr;
 static PRTime sStartTime;
 
 static const char sJSLabelPrefix[] = "#tt#";
@@ -71,8 +84,7 @@ AllocTraceInfo(int aTid)
 {
   StaticMutexAutoLock lock(sMutex);
 
-  nsAutoPtr<TraceInfo>* info = sTraceInfos->AppendElement(
-                                 new TraceInfo(aTid));
+  auto* info = sTraceInfos->AppendElement(MakeUnique<TraceInfo>(aTid));
 
   return info->get();
 }
@@ -114,12 +126,12 @@ CreateSourceEvent(SourceEventType aType)
   info->mCurTraceSourceType = aType;
   info->mCurTaskId = newId;
 
-  int* namePtr;
+  uintptr_t* namePtr;
 #define SOURCE_EVENT_NAME(type)         \
   case SourceEventType::type:           \
   {                                     \
     static int CreateSourceEvent##type; \
-    namePtr = &CreateSourceEvent##type; \
+    namePtr = (uintptr_t*)&CreateSourceEvent##type; \
     break;                              \
   }
 
@@ -127,7 +139,7 @@ CreateSourceEvent(SourceEventType aType)
 #include "SourceEventTypeMap.h"
     default:
       MOZ_CRASH("Unknown SourceEvent.");
-  };
+  }
 #undef CREATE_SOURCE_EVENT_NAME
 
   // Log a fake dispatch and start for this source event.
@@ -216,7 +228,7 @@ InitTaskTracer(uint32_t aFlags)
   }
 
   MOZ_ASSERT(!sTraceInfos);
-  sTraceInfos = new nsTArray<nsAutoPtr<TraceInfo>>();
+  sTraceInfos = new nsTArray<UniquePtr<TraceInfo>>();
 
   if (!sTraceInfoTLS.initialized()) {
     Unused << sTraceInfoTLS.init();
@@ -368,7 +380,7 @@ LogEnd(uint64_t aTaskId, uint64_t aSourceEventId)
 }
 
 void
-LogVirtualTablePtr(uint64_t aTaskId, uint64_t aSourceEventId, int* aVptr)
+LogVirtualTablePtr(uint64_t aTaskId, uint64_t aSourceEventId, uintptr_t* aVptr)
 {
   TraceInfo* info = GetOrCreateTraceInfo();
   ENSURE_TRUE_VOID(info);
@@ -426,10 +438,10 @@ StopLogging()
   SetLogStarted(false);
 }
 
-TraceInfoLogsType*
+UniquePtr<TraceInfoLogsType>
 GetLoggedData(TimeStamp aTimeStamp)
 {
-  TraceInfoLogsType* result = new TraceInfoLogsType();
+  auto result = MakeUnique<TraceInfoLogsType>();
 
   // TODO: This is called from a signal handler. Use semaphore instead.
   StaticMutexAutoLock lock(sMutex);

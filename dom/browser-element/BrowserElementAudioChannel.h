@@ -17,7 +17,7 @@
 
 class nsIBrowserElementAPI;
 class nsITabParent;
-class nsPIDOMWindow;
+class nsPIDOMWindowOuter;
 
 namespace mozilla {
 namespace dom {
@@ -36,11 +36,10 @@ public:
                                            DOMEventTargetHelper)
 
   static already_AddRefed<BrowserElementAudioChannel>
-  Create(nsPIDOMWindow* aWindow,
+  Create(nsPIDOMWindowInner* aWindow,
          nsIFrameLoader* aFrameLoader,
          nsIBrowserElementAPI* aAPI,
          AudioChannel aAudioChannel,
-         const nsAString& aManifestURL,
          ErrorResult& aRv);
 
   // WebIDL methods
@@ -58,17 +57,20 @@ public:
 
   already_AddRefed<dom::DOMRequest> IsActive(ErrorResult& aRv);
 
-  already_AddRefed<dom::DOMRequest> NotifyChannel(const nsAString& aEvent,
-                                                  ErrorResult& aRv);
-
   IMPL_EVENT_HANDLER(activestatechanged);
 
 private:
-  BrowserElementAudioChannel(nsPIDOMWindow* aWindow,
+  BrowserElementAudioChannel(nsPIDOMWindowInner* aWindow,
                              nsIFrameLoader* aFrameLoader,
                              nsIBrowserElementAPI* aAPI,
-                             AudioChannel aAudioChannel,
-                             const nsAString& aManifestURL);
+                             AudioChannel aAudioChannel);
+
+  bool IsSystemAppWindow(nsPIDOMWindowOuter* aWindow) const;
+
+  // This method is used to check whether we're in the nested-mozbrower-frame
+  // situation, see bug1214148.
+  nsresult IsFromNestedFrame(nsISupports* aSubject,
+                             bool& aIsNested) const;
 
   ~BrowserElementAudioChannel();
 
@@ -79,9 +81,8 @@ private:
   nsCOMPtr<nsIFrameLoader> mFrameLoader;
   nsCOMPtr<nsIBrowserElementAPI> mBrowserElementAPI;
   nsCOMPtr<nsITabParent> mTabParent;
-  nsCOMPtr<nsPIDOMWindow> mFrameWindow;
+  nsCOMPtr<nsPIDOMWindowOuter> mFrameWindow;
   AudioChannel mAudioChannel;
-  nsString mManifestURL;
 
   enum {
     eStateActive,

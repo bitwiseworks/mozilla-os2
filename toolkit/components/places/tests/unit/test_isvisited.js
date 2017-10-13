@@ -13,12 +13,12 @@ add_task(function* test_execute()
 {
   var referrer = uri("about:blank");
 
-  // add a http:// uri 
+  // add a http:// uri
   var uri1 = uri("http://mozilla.com");
   yield PlacesTestUtils.addVisits({uri: uri1, referrer: referrer});
   do_check_guid_for_uri(uri1);
   do_check_true(yield promiseIsURIVisited(uri1));
- 
+
   // add a https:// uri
   var uri2 = uri("https://etrade.com");
   yield PlacesTestUtils.addVisits({uri: uri2, referrer: referrer});
@@ -50,23 +50,24 @@ add_task(function* test_execute()
     "data:,Hello%2C%20World!",
     "wyciwyg:/0/http://mozilla.org",
     "javascript:alert('hello wolrd!');",
+    "http://localhost/" + "a".repeat(1984),
   ];
   for (let currentURL of URLS) {
     try {
       var cantAddUri = uri(currentURL);
     }
-    catch(e) {
+    catch (e) {
       // nsIIOService.newURI() can throw if e.g. our app knows about imap://
       // but the account is not set up and so the URL is invalid for us.
       // Note this in the log but ignore as it's not the subject of this test.
       do_print("Could not construct URI for '" + currentURL + "'; ignoring");
     }
     if (cantAddUri) {
-      try {
-        yield PlacesTestUtils.addVisits({uri: cantAddUri, referrer: referrer});
-        do_throw("Should have generated an exception.");
-      } catch(ex if ex && ex.result == Cr.NS_ERROR_ILLEGAL_VALUE) {
-      }
+      PlacesTestUtils.addVisits({uri: cantAddUri, referrer: referrer}).then(() => {
+        do_throw("Should not have added history for invalid URI.");
+      }, error => {
+        do_check_true(error.message.includes("No items were added to history"));
+      });
       do_check_false(yield promiseIsURIVisited(cantAddUri));
     }
   }

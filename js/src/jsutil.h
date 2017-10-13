@@ -14,6 +14,8 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Compiler.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/HashFunctions.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
 #include <limits.h>
@@ -44,17 +46,6 @@ js_memcpy(void* dst_, const void* src_, size_t len)
 }
 
 namespace js {
-
-template <class T>
-struct AlignmentTestStruct
-{
-    char c;
-    T t;
-};
-
-/* This macro determines the alignment requirements of a type. */
-#define JS_ALIGNMENT_OF(t_) \
-  (sizeof(js::AlignmentTestStruct<t_>) - sizeof(t_))
 
 template <class T>
 class AlignedPtrAndFlag
@@ -134,6 +125,28 @@ ForEach(InputIterT begin, InputIterT end, CallableT f)
         f(*begin);
 }
 
+template <class Container1, class Container2>
+static inline bool
+EqualContainers(const Container1& lhs, const Container2& rhs)
+{
+    if (lhs.length() != rhs.length())
+        return false;
+    for (size_t i = 0, n = lhs.length(); i < n; i++) {
+        if (lhs[i] != rhs[i])
+            return false;
+    }
+    return true;
+}
+
+template <class Container>
+static inline HashNumber
+AddContainerToHash(const Container& c, HashNumber hn = 0)
+{
+    for (size_t i = 0; i < c.length(); i++)
+        hn = mozilla::AddToHash(hn, HashNumber(c[i]));
+    return hn;
+}
+
 template <class T>
 static inline T
 Min(T t1, T t2)
@@ -184,18 +197,14 @@ class MOZ_RAII AutoScopedAssign
     T old;
 };
 
-template <typename T>
-static inline bool
-IsPowerOfTwo(T t)
-{
-    return t && !(t & (t - 1));
-}
-
 template <typename T, typename U>
 static inline U
 ComputeByteAlignment(T bytes, U alignment)
 {
-    MOZ_ASSERT(IsPowerOfTwo(alignment));
+    static_assert(mozilla::IsUnsigned<U>::value,
+                  "alignment amount must be unsigned");
+
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
     return (alignment - (bytes % alignment)) % alignment;
 }
 
@@ -203,13 +212,10 @@ template <typename T, typename U>
 static inline T
 AlignBytes(T bytes, U alignment)
 {
-    return bytes + ComputeByteAlignment(bytes, alignment);
-}
+    static_assert(mozilla::IsUnsigned<U>::value,
+                  "alignment amount must be unsigned");
 
-static MOZ_ALWAYS_INLINE size_t
-UnsignedPtrDiff(const void* bigger, const void* smaller)
-{
-    return size_t(bigger) - size_t(smaller);
+    return bytes + ComputeByteAlignment(bytes, alignment);
 }
 
 /*****************************************************************************/
@@ -239,13 +245,13 @@ BitArrayIndexToWordMask(size_t i)
 }
 
 static inline bool
-IsBitArrayElementSet(size_t* array, size_t length, size_t i)
+IsBitArrayElementSet(const size_t* array, size_t length, size_t i)
 {
     return array[BitArrayIndexToWordIndex(length, i)] & BitArrayIndexToWordMask(i);
 }
 
 static inline bool
-IsAnyBitArrayElementSet(size_t* array, size_t length)
+IsAnyBitArrayElementSet(const size_t* array, size_t length)
 {
     unsigned numWords = NumWordsForBitArrayOfLength(length);
     for (unsigned i = 0; i < numWords; ++i) {
@@ -283,7 +289,7 @@ namespace mozilla {
  */
 template<typename T>
 static MOZ_ALWAYS_INLINE void
-PodSet(T* aDst, T aSrc, size_t aNElem)
+PodSet(T* aDst, const T& aSrc, size_t aNElem)
 {
     for (const T* dstend = aDst + aNElem; aDst < dstend; ++aDst)
         *aDst = aSrc;
@@ -340,11 +346,11 @@ Poison(void* ptr, uint8_t value, size_t num)
 # if defined(JS_PUNBOX64)
     obj = obj & ((uintptr_t(1) << JSVAL_TAG_SHIFT) - 1);
 # endif
-    const jsval_layout layout = OBJECT_TO_JSVAL_IMPL((JSObject*)obj);
+    JS::Value v = JS::PoisonedObjectValue(reinterpret_cast<JSObject*>(obj));
 
-    size_t value_count = num / sizeof(jsval_layout);
-    size_t byte_count = num % sizeof(jsval_layout);
-    mozilla::PodSet((jsval_layout*)ptr, layout, value_count);
+    size_t value_count = num / sizeof(v);
+    size_t byte_count = num % sizeof(v);
+    mozilla::PodSet(reinterpret_cast<JS::Value*>(ptr), v, value_count);
     if (byte_count) {
         uint8_t* bytes = static_cast<uint8_t*>(ptr);
         uint8_t* end = bytes + num;

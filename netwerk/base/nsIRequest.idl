@@ -143,8 +143,7 @@ interface nsIRequest : nsISupports
 
     /**
      * This flag prevents caching on disk (or other persistent media), which
-     * may be needed to preserve privacy.  For HTTPS, this flag is set auto-
-     * matically.
+     * may be needed to preserve privacy.
      */
     const unsigned long INHIBIT_PERSISTENT_CACHING = 1 << 8;
 
@@ -181,7 +180,7 @@ interface nsIRequest : nsISupports
      * cached content is automatically validated if necessary before reuse.
      * 
      * VALIDATE_ALWAYS forces validation of any cached content independent of
-     * its expiration time.
+     * its expiration time (unless it is https with Cache-Control: immutable)
      * 
      * VALIDATE_NEVER disables validation of cached content, unless it arrived
      * with the "Cache: no-store" header, or arrived via HTTPS with the

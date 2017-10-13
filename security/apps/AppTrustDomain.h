@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_psm_AppsTrustDomain_h
-#define mozilla_psm_AppsTrustDomain_h
+#ifndef AppTrustDomain_h
+#define AppTrustDomain_h
 
 #include "pkix/pkixtypes.h"
 #include "mozilla/StaticMutex.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsDebug.h"
 #include "nsIX509CertDB.h"
 #include "ScopedNSSTypes.h"
@@ -21,7 +21,7 @@ class AppTrustDomain final : public mozilla::pkix::TrustDomain
 public:
   typedef mozilla::pkix::Result Result;
 
-  AppTrustDomain(ScopedCERTCertList&, void* pinArg);
+  AppTrustDomain(UniqueCERTCertList& certChain, void* pinArg);
 
   SECStatus SetTrustedRoot(AppTrustedRoot trustedRoot);
 
@@ -61,22 +61,28 @@ public:
                    mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
+  virtual Result NetscapeStepUpMatchesServerAuth(
+                   mozilla::pkix::Time notBefore,
+                   /*out*/ bool& matches) override;
+  virtual void NoteAuxiliaryExtension(
+                   mozilla::pkix::AuxiliaryExtension extension,
+                   mozilla::pkix::Input extensionData) override;
   virtual Result DigestBuf(mozilla::pkix::Input item,
                            mozilla::pkix::DigestAlgorithm digestAlg,
                            /*out*/ uint8_t* digestBuf,
                            size_t digestBufLen) override;
 
 private:
-  /*out*/ ScopedCERTCertList& mCertChain;
+  /*out*/ UniqueCERTCertList& mCertChain;
   void* mPinArg; // non-owning!
-  ScopedCERTCertificate mTrustedRoot;
+  UniqueCERTCertificate mTrustedRoot;
   unsigned int mMinRSABits;
 
   static StaticMutex sMutex;
-  static nsAutoArrayPtr<unsigned char> sDevImportedDERData;
+  static UniquePtr<unsigned char[]> sDevImportedDERData;
   static unsigned int sDevImportedDERLen;
 };
 
 } } // namespace mozilla::psm
 
-#endif // mozilla_psm_AppsTrustDomain_h
+#endif // AppTrustDomain_h

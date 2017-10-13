@@ -5,8 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const EXCLUDE_FROM_BACKUP_ANNO = "places/excludeFromBackup";
-// Menu, Toolbar, Unsorted, Tags
-const PLACES_ROOTS_COUNT  = 4;
+// Menu, Toolbar, Unsorted, Tags, Mobile
+const PLACES_ROOTS_COUNT  = 5;
 var tests = [];
 
 /*
@@ -52,7 +52,7 @@ var test = {
                                               EXCLUDE_FROM_BACKUP_ANNO, 1, 0,
                                               PlacesUtils.annotations.EXPIRE_NEVER);
 
-    // create a root to be exclude 
+    // create a root to be exclude
     this._excludeRootTitle = "exclude root";
     this._excludeRootId = PlacesUtils.bookmarks
                                      .createFolder(PlacesUtils.placesRootId,
@@ -90,7 +90,7 @@ var test = {
     else {
       // exclude root should not exist anymore
       do_check_eq(rootNode.childCount, PLACES_ROOTS_COUNT + 1);
-      var restoreRootIndex = PLACES_ROOTS_COUNT;
+      restoreRootIndex = PLACES_ROOTS_COUNT;
     }
 
     var restoreRootNode = rootNode.getChild(restoreRootIndex);

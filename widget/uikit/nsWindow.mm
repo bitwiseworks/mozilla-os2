@@ -33,7 +33,7 @@
 
 #include "mozilla/BasicEvents.h"
 #include "mozilla/TouchEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "GeckoProfiler.h"
 
@@ -51,7 +51,7 @@ UIKitPointsToDevPixels(CGPoint aPoint, CGFloat aBackingScale)
 }
 
 static CGRect
-DevPixelsToUIKitPoints(const nsIntRect& aRect, CGFloat aBackingScale)
+DevPixelsToUIKitPoints(const LayoutDeviceIntRect& aRect, CGFloat aBackingScale)
 {
     return CGRectMake((CGFloat)aRect.x / aBackingScale,
                       (CGFloat)aRect.y / aBackingScale,
@@ -143,10 +143,10 @@ private:
     WidgetMouseEvent event(true, aType, aWindow,
                            WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
 
-    event.refPoint = aPoint;
-    event.clickCount = 1;
+    event.mRefPoint = aPoint;
+    event.mClickCount = 1;
     event.button = WidgetMouseEvent::eLeftButton;
-    event.time = PR_IntervalNow();
+    event.mTime = PR_IntervalNow();
     event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
     nsEventStatus status;
@@ -169,8 +169,8 @@ private:
     WidgetTouchEvent event(true, aType, aWindow);
     //XXX: I think nativeEvent.timestamp * 1000 is probably usable here but
     // I don't care that much right now.
-    event.time = PR_IntervalNow();
-    event.touches.SetCapacity(aTouches.count);
+    event.mTime = PR_IntervalNow();
+    event.mTouches.SetCapacity(aTouches.count);
     for (UITouch* touch in aTouches) {
         LayoutDeviceIntPoint loc = UIKitPointsToDevPixels([touch locationInView:self], [self contentScaleFactor]);
         LayoutDeviceIntPoint radius = UIKitPointsToDevPixels([touch majorRadius], [touch majorRadius]);
@@ -182,10 +182,10 @@ private:
         }
         int id = reinterpret_cast<int>(value);
         RefPtr<Touch> t = new Touch(id, loc, radius, 0.0f, 1.0f);
-        event.refPoint = loc;
-        event.touches.AppendElement(t);
+        event.mRefPoint = loc;
+        event.mTouches.AppendElement(t);
     }
-    aWindow->DispatchAPZAwareEvent(&event);
+    aWindow->DispatchInputEvent(&event);
 }
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
@@ -278,8 +278,7 @@ private:
 
   mWaitingForPaint = NO;
 
-  LayoutDeviceIntRect geckoBounds;
-  mGeckoChild->GetBounds(geckoBounds);
+  LayoutDeviceIntRect geckoBounds = mGeckoChild->GetBounds();
   LayoutDeviceIntRegion region(geckoBounds);
 
   mGeckoChild->PaintWindow(region);
@@ -305,8 +304,7 @@ private:
 - (void)drawRect:(CGRect)aRect inContext:(CGContextRef)aContext
 {
 #ifdef DEBUG_UPDATE
-  LayoutDeviceIntRect geckoBounds;
-  mGeckoChild->GetBounds(geckoBounds);
+  LayoutDeviceIntRect geckoBounds = mGeckoChild->GetBounds();
 
   fprintf (stderr, "---- Update[%p][%p] [%f %f %f %f] cgc: %p\n  gecko bounds: [%d %d %d %d]\n",
            self, mGeckoChild,
@@ -340,7 +338,7 @@ private:
   CGContextScaleCTM(aContext, 1.0 / scale, 1.0 / scale);
 
   CGSize viewSize = [self bounds].size;
-  nsIntSize backingSize(viewSize.width * scale, viewSize.height * scale);
+  gfx::IntSize backingSize(viewSize.width * scale, viewSize.height * scale);
 
   CGContextSaveGState(aContext);
 
@@ -354,36 +352,30 @@ private:
   RefPtr<gfxQuartzSurface> targetSurface;
 
   RefPtr<gfxContext> targetContext;
-  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::COREGRAPHICS)) {
-    RefPtr<gfx::DrawTarget> dt =
-      gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
-                                                      gfx::IntSize(backingSize.width,
-                                                                   backingSize.height));
-    dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-    targetContext = new gfxContext(dt);
-  } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
+  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
     // This is dead code unless you mess with prefs, but keep it around for
     // debugging.
     targetSurface = new gfxQuartzSurface(aContext, backingSize);
     targetSurface->SetAllowUseAsSource(false);
     RefPtr<gfx::DrawTarget> dt =
       gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(targetSurface,
-                                                             gfx::IntSize(backingSize.width,
-                                                                          backingSize.height));
+                                                             backingSize);
+    if (!dt || !dt->IsValid()) {
+        gfxDevCrash(mozilla::gfx::LogReason::InvalidContext) << "Window context problem 2 " << backingSize;
+        return;
+    }
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-    targetContext = new gfxContext(dt);
+    targetContext = gfxContext::CreateOrNull(dt);
   } else {
-    MOZ_ASSERT_UNREACHABLE("COREGRAPHICS is the only supported backed");
+    MOZ_ASSERT_UNREACHABLE("COREGRAPHICS is the only supported backend");
   }
+  MOZ_ASSERT(targetContext); // already checked for valid draw targets above
 
   // Set up the clip region.
-  LayoutDeviceIntRegion::RectIterator iter(region);
   targetContext->NewPath();
-  for (;;) {
-    const LayoutDeviceIntRect* r = iter.Next();
-    if (!r)
-      break;
-    targetContext->Rectangle(gfxRect(r->x, r->y, r->width, r->height));
+  for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
+    const LayoutDeviceIntRect& r = iter.Get();
+    targetContext->Rectangle(gfxRect(r.x, r.y, r.width, r.height));
   }
   targetContext->Clip();
 
@@ -466,7 +458,7 @@ nsWindow::IsTopLevel()
 // nsIWidget
 //
 
-NS_IMETHODIMP
+nsresult
 nsWindow::Create(nsIWidget* aParent,
                  nsNativeWidget aNativeParent,
                  const LayoutDeviceIntRect& aRect,
@@ -493,7 +485,7 @@ nsWindow::Create(nsIWidget* aParent,
             mBounds.height = cgRect.size.height;
         }
     } else {
-        mBounds = aRect.ToUnknownRect();
+        mBounds = aRect;
     }
 
     ALOG("nsWindow[%p]::Create bounds: %d %d %d %d", (void*)this,
@@ -503,9 +495,7 @@ nsWindow::Create(nsIWidget* aParent,
     mWindowType = eWindowType_toplevel;
     mBorderStyle = eBorderStyle_default;
 
-    Inherited::BaseCreate(aParent,
-                          LayoutDeviceIntRect::FromUnknownRect(mBounds),
-                          aInitData);
+    Inherited::BaseCreate(aParent, aInitData);
 
     NS_ASSERTION(IsTopLevel() || parent, "non top level window doesn't have a parent!");
 
@@ -529,8 +519,8 @@ nsWindow::Create(nsIWidget* aParent,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsWindow::Destroy(void)
+void
+nsWindow::Destroy()
 {
     for (uint32_t i = 0; i < mChildren.Length(); ++i) {
         // why do we still have children?
@@ -569,12 +559,6 @@ nsWindow::ConfigureChildren(const nsTArray<nsIWidget::Configuration>& config)
 }
 
 NS_IMETHODIMP
-nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 nsWindow::Show(bool aState)
 {
   if (aState != mVisible) {
@@ -586,20 +570,6 @@ nsWindow::Show(bool aState)
       }
       mVisible = aState;
   }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindow::SetModal(bool aModal)
-{
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindow::ConstrainPosition(bool aAllowSlop,
-                            int32_t *aX,
-                            int32_t *aY)
-{
   return NS_OK;
 }
 
@@ -675,29 +645,19 @@ NS_IMETHODIMP nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
-                      nsIWidget *aWidget,
-                      bool aActivate)
-{
-  return NS_OK;
-}
-
-NS_IMETHODIMP
+void
 nsWindow::SetSizeMode(nsSizeMode aMode)
 {
     if (aMode == static_cast<int32_t>(mSizeMode)) {
-        return NS_OK;
+        return;
     }
 
-    nsresult rv = NS_OK;
     mSizeMode = static_cast<nsSizeMode>(aMode);
     if (aMode == nsSizeMode_Maximized || aMode == nsSizeMode_Fullscreen) {
         // Resize to fill screen
-        rv = nsBaseWidget::MakeFullScreen(true);
+        nsBaseWidget::InfallibleMakeFullScreen(true);
     }
     ReportSizeModeEvent(aMode);
-    return rv;
 }
 
 NS_IMETHODIMP
@@ -773,23 +733,15 @@ void nsWindow::ReportSizeModeEvent(nsSizeMode aMode)
 void nsWindow::ReportSizeEvent()
 {
     if (mWidgetListener) {
-        LayoutDeviceIntRect innerBounds;
-        GetClientBounds(innerBounds);
+        LayoutDeviceIntRect innerBounds = GetClientBounds();
         mWidgetListener->WindowResized(this, innerBounds.width, innerBounds.height);
     }
 }
 
-NS_IMETHODIMP
-nsWindow::GetScreenBounds(LayoutDeviceIntRect& aRect)
+LayoutDeviceIntRect
+nsWindow::GetScreenBounds()
 {
-    LayoutDeviceIntPoint p = WidgetToScreenOffset();
-
-    aRect.x = p.x;
-    aRect.y = p.y;
-    aRect.width = mBounds.width;
-    aRect.height = mBounds.height;
-
-    return NS_OK;
+    return LayoutDeviceIntRect(WidgetToScreenOffset(), mBounds.Size());
 }
 
 LayoutDeviceIntPoint nsWindow::WidgetToScreenOffset()
@@ -817,7 +769,7 @@ nsWindow::DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                         nsEventStatus& aStatus)
 {
   aStatus = nsEventStatus_eIgnore;
-  nsCOMPtr<nsIWidget> kungFuDeathGrip = do_QueryInterface(aEvent->widget);
+  nsCOMPtr<nsIWidget> kungFuDeathGrip(aEvent->mWidget);
 
   if (mWidgetListener)
     aStatus = mWidgetListener->HandleEvent(aEvent, mUseAttachedEvents);
@@ -880,6 +832,10 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
         break;
 
     case NS_RAW_NATIVE_IME_CONTEXT:
+      retVal = GetPseudoIMEContext();
+      if (retVal) {
+        break;
+      }
       retVal = NS_ONLY_ONE_NATIVE_IME_CONTEXT;
       break;
   }

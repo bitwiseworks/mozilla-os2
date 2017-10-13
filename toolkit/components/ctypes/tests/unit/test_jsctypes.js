@@ -7,7 +7,7 @@ try {
   // We might be running without privileges, in which case it's up to the
   // harness to give us the 'ctypes' object.
   Components.utils.import("resource://gre/modules/ctypes.jsm");
-} catch(e) {
+} catch (e) {
 }
 
 CTYPES_TEST_LIB = ctypes.libraryName("jsctypes-test");
@@ -33,14 +33,6 @@ function do_check_throws(f, type, stack)
     do_throw("expected " + type.name + " exception, caught " + exc, stack);
   }
   do_throw("expected " + type.name + " exception, none thrown", stack);
-}
-
-function do_check_class(obj, classname, stack)
-{
-  if (!stack)
-    stack = Components.stack.caller;
-
-  do_check_eq(Object.prototype.toString.call(obj), "[object " + classname + "]", stack);
 }
 
 function run_test()
@@ -182,6 +174,7 @@ function run_test()
   run_closure_tests(library);
   run_variadic_tests(library);
   run_static_data_tests(library);
+  run_cpp_class_tests(library);
 
   // test library.close
   let test_void_t = library.declare("test_void_t_cdecl", ctypes.default_abi, ctypes.void_t);
@@ -228,16 +221,12 @@ function run_test()
 function run_abstract_class_tests()
 {
   // Test that ctypes.CType is an abstract constructor that throws.
-  do_check_throws(function() { ctypes.CType(); }, Error);
-  do_check_throws(function() { new ctypes.CType() }, Error);
-
-  // Test that classes and prototypes are set up correctly.
-  do_check_class(ctypes.CType, "Function");
-  do_check_class(ctypes.CType.prototype, "CType");
+  do_check_throws(function() { ctypes.CType(); }, TypeError);
+  do_check_throws(function() { new ctypes.CType() }, TypeError);
 
   do_check_true(ctypes.CType.hasOwnProperty("prototype"));
-  do_check_throws(function() { ctypes.CType.prototype(); }, Error);
-  do_check_throws(function() { new ctypes.CType.prototype() }, Error);
+  do_check_throws(function() { ctypes.CType.prototype(); }, TypeError);
+  do_check_throws(function() { new ctypes.CType.prototype() }, TypeError);
 
   do_check_true(ctypes.CType.prototype.hasOwnProperty("constructor"));
   do_check_true(ctypes.CType.prototype.constructor === ctypes.CType);
@@ -257,7 +246,7 @@ function run_abstract_class_tests()
   do_check_throws(function() { ctypes.CType.prototype.name; }, TypeError);
   do_check_throws(function() { ctypes.CType.prototype.size; }, TypeError);
   do_check_throws(function() { ctypes.CType.prototype.ptr; }, TypeError);
-  do_check_throws(function() { ctypes.CType.prototype.array(); }, Error);
+  do_check_throws(function() { ctypes.CType.prototype.array(); }, TypeError);
 
 
   // toString and toSource are called by the web console during inspection,
@@ -266,12 +255,8 @@ function run_abstract_class_tests()
   do_check_eq(typeof ctypes.CType.prototype.toSource(), 'string');
 
   // Test that ctypes.CData is an abstract constructor that throws.
-  do_check_throws(function() { ctypes.CData(); }, Error);
-  do_check_throws(function() { new ctypes.CData() }, Error);
-
-  // Test that classes and prototypes are set up correctly.
-  do_check_class(ctypes.CData, "Function");
-  do_check_class(ctypes.CData.prototype, "CData");
+  do_check_throws(function() { ctypes.CData(); }, TypeError);
+  do_check_throws(function() { new ctypes.CData() }, TypeError);
 
   do_check_true(ctypes.CData.__proto__ === ctypes.CType.prototype);
   do_check_true(ctypes.CData instanceof ctypes.CType);
@@ -290,8 +275,8 @@ function run_abstract_class_tests()
   // Check that the shared properties and functions on ctypes.CData.prototype throw.
   do_check_throws(function() { ctypes.CData.prototype.value; }, TypeError);
   do_check_throws(function() { ctypes.CData.prototype.value = null; }, TypeError);
-  do_check_throws(function() { ctypes.CData.prototype.address(); }, Error);
-  do_check_throws(function() { ctypes.CData.prototype.readString(); }, Error);
+  do_check_throws(function() { ctypes.CData.prototype.address(); }, TypeError);
+  do_check_throws(function() { ctypes.CData.prototype.readString(); }, TypeError);
 
   // toString and toSource are called by the web console during inspection,
   // so we don't want them to throw.
@@ -301,10 +286,6 @@ function run_abstract_class_tests()
 
 function run_Int64_tests() {
   do_check_throws(function() { ctypes.Int64(); }, TypeError);
-
-  // Test that classes and prototypes are set up correctly.
-  do_check_class(ctypes.Int64, "Function");
-  do_check_class(ctypes.Int64.prototype, "Int64");
 
   do_check_true(ctypes.Int64.hasOwnProperty("prototype"));
   do_check_true(ctypes.Int64.prototype.hasOwnProperty("constructor"));
@@ -320,116 +301,115 @@ function run_Int64_tests() {
   do_check_true(ctypes.Int64.prototype.hasOwnProperty("toSource"));
 
   // Check that the shared functions on ctypes.Int64.prototype throw.
-  do_check_throws(function() { ctypes.Int64.prototype.toString(); }, Error);
-  do_check_throws(function() { ctypes.Int64.prototype.toSource(); }, Error);
+  do_check_throws(function() { ctypes.Int64.prototype.toString(); }, TypeError);
+  do_check_throws(function() { ctypes.Int64.prototype.toSource(); }, TypeError);
 
-  let i = ctypes.Int64(0);
-  do_check_true(i.__proto__ === ctypes.Int64.prototype);
-  do_check_true(i instanceof ctypes.Int64);
+  let int64 = ctypes.Int64(0);
+  do_check_true(int64.__proto__ === ctypes.Int64.prototype);
+  do_check_true(int64 instanceof ctypes.Int64);
 
   // Test Int64.toString([radix]).
-  do_check_eq(i.toString(), "0");
+  do_check_eq(int64.toString(), "0");
   for (let radix = 2; radix <= 36; ++radix)
-    do_check_eq(i.toString(radix), "0");
-  do_check_throws(function() { i.toString(0); }, RangeError);
-  do_check_throws(function() { i.toString(1); }, RangeError);
-  do_check_throws(function() { i.toString(37); }, RangeError);
-  do_check_throws(function() { i.toString(10, 2); }, TypeError);
+    do_check_eq(int64.toString(radix), "0");
+  do_check_throws(function() { int64.toString(0); }, RangeError);
+  do_check_throws(function() { int64.toString(1); }, RangeError);
+  do_check_throws(function() { int64.toString(37); }, RangeError);
+  do_check_throws(function() { int64.toString(10, 2); }, TypeError);
 
   // Test Int64.toSource().
-  do_check_eq(i.toSource(), "ctypes.Int64(\"0\")");
-  do_check_throws(function() { i.toSource(10); }, TypeError);
+  do_check_eq(int64.toSource(), "ctypes.Int64(\"0\")");
+  do_check_throws(function() { int64.toSource(10); }, TypeError);
 
-  i = ctypes.Int64("0x28590a1c921def71");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "2907366152271163249");
-  do_check_eq(i.toString(16), "28590a1c921def71");
-  do_check_eq(i.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
-  do_check_eq(i.toSource(), "ctypes.Int64(\"" + i.toString(10) + "\")");
+  int64 = ctypes.Int64("0x28590a1c921def71");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "2907366152271163249");
+  do_check_eq(int64.toString(16), "28590a1c921def71");
+  do_check_eq(int64.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
+  do_check_eq(int64.toSource(), "ctypes.Int64(\"" + int64.toString(10) + "\")");
 
-  i = ctypes.Int64("-0x28590a1c921def71");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-2907366152271163249");
-  do_check_eq(i.toString(16), "-28590a1c921def71");
-  do_check_eq(i.toString(2), "-10100001011001000010100001110010010010000111011110111101110001");
-  do_check_eq(i.toSource(), "ctypes.Int64(\"" + i.toString(10) + "\")");
+  int64 = ctypes.Int64("-0x28590a1c921def71");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-2907366152271163249");
+  do_check_eq(int64.toString(16), "-28590a1c921def71");
+  do_check_eq(int64.toString(2), "-10100001011001000010100001110010010010000111011110111101110001");
+  do_check_eq(int64.toSource(), "ctypes.Int64(\"" + int64.toString(10) + "\")");
 
-  i = ctypes.Int64("-0X28590A1c921DEf71");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-2907366152271163249");
-  do_check_eq(i.toString(16), "-28590a1c921def71");
-  do_check_eq(i.toString(2), "-10100001011001000010100001110010010010000111011110111101110001");
-  do_check_eq(i.toSource(), "ctypes.Int64(\"" + i.toString(10) + "\")");
+  int64 = ctypes.Int64("-0X28590A1c921DEf71");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-2907366152271163249");
+  do_check_eq(int64.toString(16), "-28590a1c921def71");
+  do_check_eq(int64.toString(2), "-10100001011001000010100001110010010010000111011110111101110001");
+  do_check_eq(int64.toSource(), "ctypes.Int64(\"" + int64.toString(10) + "\")");
 
   // Test Int64(primitive double) constructor.
-  i = ctypes.Int64(-0);
-  do_check_eq(i.toString(), "0");
+  int64 = ctypes.Int64(-0);
+  do_check_eq(int64.toString(), "0");
 
-  i = ctypes.Int64(0x7ffffffffffff000);
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854771712");
-  do_check_eq(i.toString(16), "7ffffffffffff000");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111000000000000");
+  int64 = ctypes.Int64(0x7ffffffffffff000);
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "9223372036854771712");
+  do_check_eq(int64.toString(16), "7ffffffffffff000");
+  do_check_eq(int64.toString(2), "111111111111111111111111111111111111111111111111111000000000000");
 
-  i = ctypes.Int64(-0x8000000000000000);
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-9223372036854775808");
-  do_check_eq(i.toString(16), "-8000000000000000");
-  do_check_eq(i.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
+  int64 = ctypes.Int64(-0x8000000000000000);
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-9223372036854775808");
+  do_check_eq(int64.toString(16), "-8000000000000000");
+  do_check_eq(int64.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
 
   // Test Int64(string) constructor.
-  i = ctypes.Int64("0x7fffffffffffffff");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854775807");
-  do_check_eq(i.toString(16), "7fffffffffffffff");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
+  int64 = ctypes.Int64("0x7fffffffffffffff");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "9223372036854775807");
+  do_check_eq(int64.toString(16), "7fffffffffffffff");
+  do_check_eq(int64.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.Int64("-0x8000000000000000");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-9223372036854775808");
-  do_check_eq(i.toString(16), "-8000000000000000");
-  do_check_eq(i.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
+  int64 = ctypes.Int64("-0x8000000000000000");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-9223372036854775808");
+  do_check_eq(int64.toString(16), "-8000000000000000");
+  do_check_eq(int64.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
 
-  i = ctypes.Int64("9223372036854775807");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854775807");
-  do_check_eq(i.toString(16), "7fffffffffffffff");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
+  int64 = ctypes.Int64("9223372036854775807");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "9223372036854775807");
+  do_check_eq(int64.toString(16), "7fffffffffffffff");
+  do_check_eq(int64.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.Int64("-9223372036854775808");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-9223372036854775808");
-  do_check_eq(i.toString(16), "-8000000000000000");
-  do_check_eq(i.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
+  int64 = ctypes.Int64("-9223372036854775808");
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-9223372036854775808");
+  do_check_eq(int64.toString(16), "-8000000000000000");
+  do_check_eq(int64.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
 
   // Test Int64(other Int64) constructor.
-  i = ctypes.Int64(ctypes.Int64(0));
-  do_check_eq(i.toString(), "0");
+  int64 = ctypes.Int64(ctypes.Int64(0));
+  do_check_eq(int64.toString(), "0");
 
-  i = ctypes.Int64(ctypes.Int64("0x7fffffffffffffff"));
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854775807");
-  do_check_eq(i.toString(16), "7fffffffffffffff");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
+  int64 = ctypes.Int64(ctypes.Int64("0x7fffffffffffffff"));
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "9223372036854775807");
+  do_check_eq(int64.toString(16), "7fffffffffffffff");
+  do_check_eq(int64.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.Int64(ctypes.Int64("-0x8000000000000000"));
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "-9223372036854775808");
-  do_check_eq(i.toString(16), "-8000000000000000");
-  do_check_eq(i.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
+  int64 = ctypes.Int64(ctypes.Int64("-0x8000000000000000"));
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "-9223372036854775808");
+  do_check_eq(int64.toString(16), "-8000000000000000");
+  do_check_eq(int64.toString(2), "-1000000000000000000000000000000000000000000000000000000000000000");
 
   // Test Int64(other UInt64) constructor.
-  i = ctypes.Int64(ctypes.UInt64(0));
-  do_check_eq(i.toString(), "0");
+  int64 = ctypes.Int64(ctypes.UInt64(0));
+  do_check_eq(int64.toString(), "0");
 
-  i = ctypes.Int64(ctypes.UInt64("0x7fffffffffffffff"));
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854775807");
-  do_check_eq(i.toString(16), "7fffffffffffffff");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
+  int64 = ctypes.Int64(ctypes.UInt64("0x7fffffffffffffff"));
+  do_check_eq(int64.toString(), int64.toString(10));
+  do_check_eq(int64.toString(10), "9223372036854775807");
+  do_check_eq(int64.toString(16), "7fffffffffffffff");
+  do_check_eq(int64.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
 
   let vals = [-0x8000000000001000, 0x8000000000000000,
-              "-0x8000000000000001", "0x8000000000000000",
               ctypes.UInt64("0x8000000000000000"),
               Infinity, -Infinity, NaN, 0.1,
               5.68e21, null, undefined, "", {}, [], new Number(16),
@@ -437,6 +417,10 @@ function run_Int64_tests() {
               {valueOf: function () { return 7; }}];
   for (let i = 0; i < vals.length; i++)
     do_check_throws(function () { ctypes.Int64(vals[i]); }, TypeError);
+
+  vals = ["-0x8000000000000001", "0x8000000000000000"];
+  for (let i = 0; i < vals.length; i++)
+    do_check_throws(function () { ctypes.Int64(vals[i]); }, RangeError);
 
   // Test ctypes.Int64.compare.
   do_check_eq(ctypes.Int64.compare(ctypes.Int64(5), ctypes.Int64(5)), 0);
@@ -473,10 +457,6 @@ function run_Int64_tests() {
 function run_UInt64_tests() {
   do_check_throws(function() { ctypes.UInt64(); }, TypeError);
 
-  // Test that classes and prototypes are set up correctly.
-  do_check_class(ctypes.UInt64, "Function");
-  do_check_class(ctypes.UInt64.prototype, "UInt64");
-
   do_check_true(ctypes.UInt64.hasOwnProperty("prototype"));
   do_check_true(ctypes.UInt64.prototype.hasOwnProperty("constructor"));
   do_check_true(ctypes.UInt64.prototype.constructor === ctypes.UInt64);
@@ -491,102 +471,106 @@ function run_UInt64_tests() {
   do_check_true(ctypes.UInt64.prototype.hasOwnProperty("toSource"));
 
   // Check that the shared functions on ctypes.UInt64.prototype throw.
-  do_check_throws(function() { ctypes.UInt64.prototype.toString(); }, Error);
-  do_check_throws(function() { ctypes.UInt64.prototype.toSource(); }, Error);
+  do_check_throws(function() { ctypes.UInt64.prototype.toString(); }, TypeError);
+  do_check_throws(function() { ctypes.UInt64.prototype.toSource(); }, TypeError);
 
-  let i = ctypes.UInt64(0);
-  do_check_true(i.__proto__ === ctypes.UInt64.prototype);
-  do_check_true(i instanceof ctypes.UInt64);
+  let uint64 = ctypes.UInt64(0);
+  do_check_true(uint64.__proto__ === ctypes.UInt64.prototype);
+  do_check_true(uint64 instanceof ctypes.UInt64);
 
   // Test UInt64.toString([radix]).
-  do_check_eq(i.toString(), "0");
+  do_check_eq(uint64.toString(), "0");
   for (let radix = 2; radix <= 36; ++radix)
-    do_check_eq(i.toString(radix), "0");
-  do_check_throws(function() { i.toString(0); }, RangeError);
-  do_check_throws(function() { i.toString(1); }, RangeError);
-  do_check_throws(function() { i.toString(37); }, RangeError);
-  do_check_throws(function() { i.toString(10, 2); }, TypeError);
+    do_check_eq(uint64.toString(radix), "0");
+  do_check_throws(function() { uint64.toString(0); }, RangeError);
+  do_check_throws(function() { uint64.toString(1); }, RangeError);
+  do_check_throws(function() { uint64.toString(37); }, RangeError);
+  do_check_throws(function() { uint64.toString(10, 2); }, TypeError);
 
   // Test UInt64.toSource().
-  do_check_eq(i.toSource(), "ctypes.UInt64(\"0\")");
-  do_check_throws(function() { i.toSource(10); }, TypeError);
+  do_check_eq(uint64.toSource(), "ctypes.UInt64(\"0\")");
+  do_check_throws(function() { uint64.toSource(10); }, TypeError);
 
-  i = ctypes.UInt64("0x28590a1c921def71");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "2907366152271163249");
-  do_check_eq(i.toString(16), "28590a1c921def71");
-  do_check_eq(i.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
-  do_check_eq(i.toSource(), "ctypes.UInt64(\"" + i.toString(10) + "\")");
+  uint64 = ctypes.UInt64("0x28590a1c921def71");
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "2907366152271163249");
+  do_check_eq(uint64.toString(16), "28590a1c921def71");
+  do_check_eq(uint64.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
+  do_check_eq(uint64.toSource(), "ctypes.UInt64(\"" + uint64.toString(10) + "\")");
 
-  i = ctypes.UInt64("0X28590A1c921DEf71");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "2907366152271163249");
-  do_check_eq(i.toString(16), "28590a1c921def71");
-  do_check_eq(i.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
-  do_check_eq(i.toSource(), "ctypes.UInt64(\"" + i.toString(10) + "\")");
+  uint64 = ctypes.UInt64("0X28590A1c921DEf71");
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "2907366152271163249");
+  do_check_eq(uint64.toString(16), "28590a1c921def71");
+  do_check_eq(uint64.toString(2), "10100001011001000010100001110010010010000111011110111101110001");
+  do_check_eq(uint64.toSource(), "ctypes.UInt64(\"" + uint64.toString(10) + "\")");
 
   // Test UInt64(primitive double) constructor.
-  i = ctypes.UInt64(-0);
-  do_check_eq(i.toString(), "0");
+  uint64 = ctypes.UInt64(-0);
+  do_check_eq(uint64.toString(), "0");
 
-  i = ctypes.UInt64(0xfffffffffffff000);
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "18446744073709547520");
-  do_check_eq(i.toString(16), "fffffffffffff000");
-  do_check_eq(i.toString(2), "1111111111111111111111111111111111111111111111111111000000000000");
+  uint64 = ctypes.UInt64(0xfffffffffffff000);
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "18446744073709547520");
+  do_check_eq(uint64.toString(16), "fffffffffffff000");
+  do_check_eq(uint64.toString(2), "1111111111111111111111111111111111111111111111111111000000000000");
 
   // Test UInt64(string) constructor.
-  i = ctypes.UInt64("0xffffffffffffffff");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "18446744073709551615");
-  do_check_eq(i.toString(16), "ffffffffffffffff");
-  do_check_eq(i.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
+  uint64 = ctypes.UInt64("0xffffffffffffffff");
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "18446744073709551615");
+  do_check_eq(uint64.toString(16), "ffffffffffffffff");
+  do_check_eq(uint64.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.UInt64("0x0");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "0");
-  do_check_eq(i.toString(16), "0");
-  do_check_eq(i.toString(2), "0");
+  uint64 = ctypes.UInt64("0x0");
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "0");
+  do_check_eq(uint64.toString(16), "0");
+  do_check_eq(uint64.toString(2), "0");
 
-  i = ctypes.UInt64("18446744073709551615");
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "18446744073709551615");
-  do_check_eq(i.toString(16), "ffffffffffffffff");
-  do_check_eq(i.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
+  uint64 = ctypes.UInt64("18446744073709551615");
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "18446744073709551615");
+  do_check_eq(uint64.toString(16), "ffffffffffffffff");
+  do_check_eq(uint64.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.UInt64("0");
-  do_check_eq(i.toString(), "0");
+  uint64 = ctypes.UInt64("0");
+  do_check_eq(uint64.toString(), "0");
 
   // Test UInt64(other UInt64) constructor.
-  i = ctypes.UInt64(ctypes.UInt64(0));
-  do_check_eq(i.toString(), "0");
+  uint64 = ctypes.UInt64(ctypes.UInt64(0));
+  do_check_eq(uint64.toString(), "0");
 
-  i = ctypes.UInt64(ctypes.UInt64("0xffffffffffffffff"));
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "18446744073709551615");
-  do_check_eq(i.toString(16), "ffffffffffffffff");
-  do_check_eq(i.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
+  uint64 = ctypes.UInt64(ctypes.UInt64("0xffffffffffffffff"));
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "18446744073709551615");
+  do_check_eq(uint64.toString(16), "ffffffffffffffff");
+  do_check_eq(uint64.toString(2), "1111111111111111111111111111111111111111111111111111111111111111");
 
-  i = ctypes.UInt64(ctypes.UInt64("0x0"));
-  do_check_eq(i.toString(), "0");
+  uint64 = ctypes.UInt64(ctypes.UInt64("0x0"));
+  do_check_eq(uint64.toString(), "0");
 
   // Test UInt64(other Int64) constructor.
-  i = ctypes.UInt64(ctypes.Int64(0));
-  do_check_eq(i.toString(), "0");
+  uint64 = ctypes.UInt64(ctypes.Int64(0));
+  do_check_eq(uint64.toString(), "0");
 
-  i = ctypes.UInt64(ctypes.Int64("0x7fffffffffffffff"));
-  do_check_eq(i.toString(), i.toString(10));
-  do_check_eq(i.toString(10), "9223372036854775807");
-  do_check_eq(i.toString(16), "7fffffffffffffff");
-  do_check_eq(i.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
+  uint64 = ctypes.UInt64(ctypes.Int64("0x7fffffffffffffff"));
+  do_check_eq(uint64.toString(), uint64.toString(10));
+  do_check_eq(uint64.toString(10), "9223372036854775807");
+  do_check_eq(uint64.toString(16), "7fffffffffffffff");
+  do_check_eq(uint64.toString(2), "111111111111111111111111111111111111111111111111111111111111111");
 
-  let vals = [-1, 0x10000000000000000, "-1", "-0x1", "0x10000000000000000",
+  let vals = [-1, 0x10000000000000000, "-1", "-0x1",
               ctypes.Int64("-1"), Infinity, -Infinity, NaN, 0.1,
               5.68e21, null, undefined, "", {}, [], new Number(16),
               {toString: function () { return 7; }},
               {valueOf: function () { return 7; }}];
   for (let i = 0; i < vals.length; i++)
     do_check_throws(function () { ctypes.UInt64(vals[i]); }, TypeError);
+
+  vals = ["0x10000000000000000"];
+  for (let i = 0; i < vals.length; i++)
+    do_check_throws(function () { ctypes.UInt64(vals[i]); }, RangeError);
 
   // Test ctypes.UInt64.compare.
   do_check_eq(ctypes.UInt64.compare(ctypes.UInt64(5), ctypes.UInt64(5)), 0);
@@ -653,7 +637,7 @@ function run_basic_abi_tests(library, t, name, toprimitive,
   let exn;
   try {
     ctypes.default_abi.toSource.call(null);
-  } catch(x) {
+  } catch (x) {
     exn = x;
   }
   do_check_true(!!exn); // Check that some exception was raised
@@ -738,10 +722,6 @@ function offsetof(struct, member) {
 // Test the class and prototype hierarchy for a given basic type 't'.
 function run_basic_class_tests(t)
 {
-  // Test that classes and prototypes are set up correctly.
-  do_check_class(t, "CType");
-  do_check_class(t.prototype, "CData");
-
   do_check_true(t.__proto__ === ctypes.CType.prototype);
   do_check_true(t instanceof ctypes.CType);
 
@@ -752,8 +732,8 @@ function run_basic_class_tests(t)
   // Check that the shared properties and functions on 't.prototype' throw.
   do_check_throws(function() { t.prototype.value; }, TypeError);
   do_check_throws(function() { t.prototype.value = null; }, TypeError);
-  do_check_throws(function() { t.prototype.address(); }, Error);
-  do_check_throws(function() { t.prototype.readString(); }, Error);
+  do_check_throws(function() { t.prototype.address(); }, TypeError);
+  do_check_throws(function() { t.prototype.readString(); }, TypeError);
 
   // toString and toSource are called by the web console during inspection,
   // so we don't want them to throw.
@@ -762,7 +742,6 @@ function run_basic_class_tests(t)
 
   // Test that an instance 'd' of 't' is a CData.
   let d = t();
-  do_check_class(d, "CData");
   do_check_true(d.__proto__ === t.prototype);
   do_check_true(d instanceof t);
   do_check_true(d.constructor === t);
@@ -972,9 +951,9 @@ function run_float_tests(library, t, name, size) {
     do_check_throws(function () { d.value = vals[i]; }, TypeError);
 
   // Check that values roundtrip through toSource() correctly.
-  function test_roundtrip(t, val)
+  function test_roundtrip(tFn, val)
   {
-    let f1 = t(val);
+    let f1 = tFn(val);
     eval("var f2 = " + f1.toSource());
     do_check_eq(f1.value, f2.value);
   }
@@ -1283,10 +1262,6 @@ function run_char16_tests(library, t, name, limits) {
 // Test the class and prototype hierarchy for a given type constructor 'c'.
 function run_type_ctor_class_tests(c, t, t2, props=[], fns=[], instanceProps=[], instanceFns=[], specialProps=[])
 {
-  // Test that classes and prototypes are set up correctly on the type ctor 'c'.
-  do_check_class(c, "Function");
-  do_check_class(c.prototype, "CType");
-
   do_check_true(c.prototype.__proto__ === ctypes.CType.prototype);
   do_check_true(c.prototype instanceof ctypes.CType);
   do_check_true(c.prototype.constructor === c);
@@ -1301,17 +1276,11 @@ function run_type_ctor_class_tests(c, t, t2, props=[], fns=[], instanceProps=[],
   for (let p of props)
     do_check_throws(function() { c.prototype[p]; }, TypeError);
   for (let f of fns)
-    do_check_throws(function() { c.prototype[f](); }, Error);
-
-  // Test that classes and prototypes are set up correctly on a constructed
-  // type 't'.
-  do_check_class(t, "CType");
-  do_check_class(t.prototype, "CData");
+    do_check_throws(function() { c.prototype[f](); }, TypeError);
 
   do_check_true(t.__proto__ === c.prototype);
   do_check_true(t instanceof c);
 
-  do_check_class(t.prototype.__proto__, "CData");
   // 't.prototype.__proto__' is the common ancestor of all types constructed
   // from 'c'; while not available from 'c' directly, it should be identically
   // equal to 't2.prototype.__proto__' where 't2' is a different CType
@@ -1338,8 +1307,8 @@ function run_type_ctor_class_tests(c, t, t2, props=[], fns=[], instanceProps=[],
     do_check_throws(function() { t.prototype[p]; }, TypeError);
   }
   for (let f of instanceFns) {
-    do_check_throws(function() { t.prototype.__proto__[f]() }, Error);
-    do_check_throws(function() { t.prototype[f]() }, Error);
+    do_check_throws(function() { t.prototype.__proto__[f]() }, TypeError);
+    do_check_throws(function() { t.prototype[f]() }, TypeError);
   }
 
   // Check that 't.prototype' has the correct special properties.
@@ -1348,7 +1317,7 @@ function run_type_ctor_class_tests(c, t, t2, props=[], fns=[], instanceProps=[],
 
   // Check that the shared special properties on 't.prototype' throw.
   for (let p of specialProps)
-    do_check_throws(function() { t.prototype[p]; }, Error);
+    do_check_throws(function() { t.prototype[p]; }, TypeError);
 
   // Make sure we can access 'prototype' on a CTypeProto.
   if (t instanceof ctypes.FunctionType)
@@ -1359,7 +1328,6 @@ function run_type_ctor_class_tests(c, t, t2, props=[], fns=[], instanceProps=[],
   // Test that an instance 'd' of 't' is a CData.
   if (t.__proto__ != ctypes.FunctionType.prototype) {
     let d = t();
-    do_check_class(d, "CData");
     do_check_true(d.__proto__ === t.prototype);
     do_check_true(d instanceof t);
     do_check_true(d.constructor === t);
@@ -1380,25 +1348,25 @@ function run_StructType_tests() {
   // Check that malformed descriptors are an error.
   do_check_throws(function() {
     ctypes.StructType("a", [{"x":ctypes.int32_t}, {"x":ctypes.int8_t}]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [5]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [{}]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [{5:ctypes.int32_t}]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [{"5":ctypes.int32_t}]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [{"x":5}]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("a", [{"x":ctypes.int32_t()}]);
-  }, Error);
+  }, TypeError);
 
   // Check that opaque structs work.
   let opaque_t = ctypes.StructType("a");
@@ -1426,19 +1394,19 @@ function run_StructType_tests() {
   // Check that 'define' works.
   do_check_throws(function() { opaque_t.define(); }, TypeError);
   do_check_throws(function() { opaque_t.define([], 0); }, TypeError);
-  do_check_throws(function() { opaque_t.define([{}]); }, Error);
-  do_check_throws(function() { opaque_t.define([{ a: 0 }]); }, Error);
+  do_check_throws(function() { opaque_t.define([{}]); }, TypeError);
+  do_check_throws(function() { opaque_t.define([{ a: 0 }]); }, TypeError);
   do_check_throws(function() {
     opaque_t.define([{ a: ctypes.int32_t, b: ctypes.int64_t }]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     opaque_t.define([{ a: ctypes.int32_t }, { b: 0 }]);
-  }, Error);
+  }, TypeError);
   do_check_false(opaque_t.hasOwnProperty("prototype"));
 
   // Check that circular references work with opaque structs...
   // but not crazy ones.
-  do_check_throws(function() { opaque_t.define([{ b: opaque_t }]); }, Error);
+  do_check_throws(function() { opaque_t.define([{ b: opaque_t }]); }, TypeError);
   let circular_t = ctypes.StructType("circular", [{ a: opaqueptr_t }]);
   opaque_t.define([{ b: circular_t }]);
   let opaque = opaque_t();
@@ -1469,7 +1437,6 @@ function run_StructType_tests() {
   do_check_eq(g_t.array().name, name + "[]");
   do_check_eq(g_t.array(5).name, name + "[5]");
 
-  let h_t = ctypes.StructType("h_t", [{ a: ctypes.int32_t }, { b: ctypes.int16_t }]);
   let s_t = new ctypes.StructType("s_t", [{ a: ctypes.int32_t }, { b: g_t }, { c: ctypes.int8_t }]);
 
   let fields = [{ a: ctypes.int32_t }, { b: ctypes.int8_t }, { c: g_t }, { d: ctypes.int8_t }];
@@ -1495,7 +1462,7 @@ function run_StructType_tests() {
     do_check_eq(large_t.size, 0xffffffff);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": ctypes.int8_t}]);
-    }, Error);
+    }, RangeError);
 
     // Test 2: overflow struct size + struct tail padding.
     // To do this, we use a struct with maximum size and alignment 2.
@@ -1504,7 +1471,7 @@ function run_StructType_tests() {
     do_check_eq(large_t.size, 0xfffffffe);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": ctypes.int8_t}]);
-    }, Error);
+    }, RangeError);
 
   } else {
     // Test 1: overflow struct size when converting from size_t to jsdouble.
@@ -1513,25 +1480,25 @@ function run_StructType_tests() {
     do_check_eq(large_t.size, 0xfffffffffffff800);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": ctypes.int8_t}]);
-    }, Error);
+    }, RangeError);
     let small_t = ctypes.int8_t.array(0x400);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": small_t}]);
-    }, Error);
+    }, RangeError);
 
     large_t = ctypes.StructType("large_t",
       [{"a": ctypes.int8_t.array(0x1fffffffffffff)}]);
     do_check_eq(large_t.size, 0x1fffffffffffff);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t.array(2)}, {"b": ctypes.int8_t}]);
-    }, Error);
+    }, RangeError);
 
     // Test 2: overflow struct size + field padding + field size.
     large_t = ctypes.int8_t.array(0xfffffffffffff800);
     small_t = ctypes.int8_t.array(0x800);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": small_t}]);
-    }, Error);
+    }, RangeError);
 
     // Test 3: overflow struct size + struct tail padding.
     // To do this, we use a struct with maximum size and alignment 2.
@@ -1541,7 +1508,7 @@ function run_StructType_tests() {
     small_t = ctypes.int8_t.array(0xfff);
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": small_t}]);
-    }, Error);
+    }, RangeError);
   }
 
   let g = g_t();
@@ -1577,7 +1544,7 @@ function run_StructType_tests() {
   do_check_true(g_a.constructor === g_t.ptr);
   do_check_eq(g_a.contents.a, s.b.a);
   do_check_throws(function() { s.addressOfField(); }, TypeError);
-  do_check_throws(function() { s.addressOfField("d"); }, Error);
+  do_check_throws(function() { s.addressOfField("d"); }, TypeError);
   do_check_throws(function() { s.addressOfField("a", 2); }, TypeError);
 
   do_check_eq(s.toSource(), "s_t(4, {\"a\": 7, \"b\": 2}, 10)");
@@ -1638,10 +1605,10 @@ function run_StructType_tests() {
   // are illegal, but arrays of defined length work.
   do_check_throws(function() {
     ctypes.StructType("z_t", [{ a: ctypes.int32_t.array() }]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.StructType("z_t", [{ a: ctypes.int32_t.array(0) }]);
-  }, Error);
+  }, TypeError);
   z_t = ctypes.StructType("z_t", [{ a: ctypes.int32_t.array(6) }]);
   do_check_eq(z_t.size, ctypes.int32_t.size * 6);
   let z = z_t([1, 2, 3, 4, 5, 6]);
@@ -1684,8 +1651,8 @@ function run_PointerType_tests() {
   let p = p_t();
   do_check_throws(function() { p.value; }, TypeError);
   do_check_eq(ptrValue(p), 0);
-  do_check_throws(function() { p.contents; }, Error);
-  do_check_throws(function() { p.contents = g; }, Error);
+  do_check_throws(function() { p.contents; }, TypeError);
+  do_check_throws(function() { p.contents = g; }, TypeError);
   p = p_t(5);
   do_check_eq(ptrValue(p), 5);
   p = p_t(ctypes.UInt64(10));
@@ -1701,10 +1668,10 @@ function run_PointerType_tests() {
   do_check_eq(f_t.name, "FILE*");
   do_check_eq(f_t.toSource(), 'ctypes.StructType("FILE").ptr');
   let f = new f_t();
-  do_check_throws(function() { f.contents; }, Error);
-  do_check_throws(function() { f.contents = 0; }, Error);
+  do_check_throws(function() { f.contents; }, TypeError);
+  do_check_throws(function() { f.contents = 0; }, TypeError);
   f = f_t(5);
-  do_check_throws(function() { f.contents = 0; }, Error);
+  do_check_throws(function() { f.contents = 0; }, TypeError);
   do_check_eq(f.toSource(), 'FILE.ptr(ctypes.UInt64("0x5"))');
 
   do_check_throws(function() { f_t(p); }, TypeError);
@@ -1718,11 +1685,11 @@ function run_PointerType_tests() {
   do_check_eq(ptrValue(v), ptrValue(p));
 
   // Test 'contents'.
-  let i = ctypes.int32_t(9);
-  p = i.address();
-  do_check_eq(p.contents, i.value);
+  let int32_t = ctypes.int32_t(9);
+  p = int32_t.address();
+  do_check_eq(p.contents, int32_t.value);
   p.contents = ctypes.int32_t(12);
-  do_check_eq(i.value, 12);
+  do_check_eq(int32_t.value, 12);
 
   // Test 'isNull'.
   let n = f_t(0);
@@ -1747,7 +1714,7 @@ function run_PointerType_tests() {
   // but that the former cannot be dereferenced.
   let z_t = ctypes.int32_t.array().ptr;
   do_check_eq(ptrValue(z_t()), 0);
-  do_check_throws(function() { z_t().contents }, Error);
+  do_check_throws(function() { z_t().contents }, TypeError);
   z_t = ctypes.int32_t.array(0).ptr;
   do_check_eq(ptrValue(z_t()), 0);
   let z = ctypes.int32_t.array(0)().address();
@@ -1859,7 +1826,7 @@ function run_FunctionType_tests() {
   do_check_throws(function() { ctypes.FunctionType(); }, TypeError);
   do_check_throws(function() {
     ctypes.FunctionType(ctypes.default_abi, ctypes.void_t, [ ctypes.void_t ]);
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.FunctionType(ctypes.default_abi, ctypes.void_t, [ ctypes.void_t ], 5);
   }, TypeError);
@@ -1871,13 +1838,12 @@ function run_FunctionType_tests() {
   }, TypeError);
   do_check_throws(function() {
     ctypes.FunctionType(ctypes.default_abi, ctypes.int32_t());
-  }, Error);
+  }, TypeError);
   do_check_throws(function() {
     ctypes.FunctionType(ctypes.void_t, ctypes.void_t);
   }, Error);
 
   let g_t = ctypes.StructType("g_t", [{ a: ctypes.int32_t }, { b: ctypes.double }]);
-  let g = g_t(1, 2);
 
   let f_t = ctypes.FunctionType(ctypes.default_abi, g_t);
   let name = "g_t()";
@@ -1901,7 +1867,7 @@ function run_FunctionType_tests() {
     "ctypes.FunctionType(ctypes.default_abi, g_t).ptr");
 
   // Check that constructing a FunctionType CData directly throws.
-  do_check_throws(function() { f_t(); }, Error);
+  do_check_throws(function() { f_t(); }, TypeError);
 
   // Test ExplicitConvert.
   let f = fp_t();
@@ -2009,9 +1975,9 @@ function run_ArrayType_tests() {
   a[0] = g;
   do_check_eq(a[0].a, 1);
   do_check_eq(a[0].b, 2);
-  do_check_throws(function() { a[-1]; }, Error);
+  do_check_throws(function() { a[-1]; }, TypeError);
   do_check_eq(a[9].a, 0);
-  do_check_throws(function() { a[10]; }, Error);
+  do_check_throws(function() { a[10]; }, RangeError);
 
   do_check_eq(a[ctypes.Int64(0)].a, 1);
   do_check_eq(a[ctypes.UInt64(0)].b, 2);
@@ -2049,10 +2015,10 @@ function run_ArrayType_tests() {
     }, TypeError);
     do_check_throws(function() {
       ctypes.ArrayType(ctypes.int16_t, 0x80000000);
-    }, Error);
+    }, RangeError);
 
     let large_t = ctypes.int8_t.array(0x80000000);
-    do_check_throws(function() { large_t.array(2); }, Error);
+    do_check_throws(function() { large_t.array(2); }, RangeError);
 
   } else {
     do_check_throws(function() {
@@ -2060,10 +2026,10 @@ function run_ArrayType_tests() {
     }, TypeError);
     do_check_throws(function() {
       ctypes.ArrayType(ctypes.int16_t, ctypes.UInt64("0x8000000000000000"));
-    }, Error);
+    }, RangeError);
 
     let large_t = ctypes.int8_t.array(0x8000000000000000);
-    do_check_throws(function() { large_t.array(2); }, Error);
+    do_check_throws(function() { large_t.array(2); }, RangeError);
   }
 
   // Test that arrays ImplicitConvert to pointers.
@@ -2197,14 +2163,13 @@ function run_cast_tests() {
   do_check_eq(i.value, k.value);
 
   // Test casting to a type of undefined or larger size.
-  do_check_throws(function() { ctypes.cast(i, ctypes.void_t); }, Error);
-  do_check_throws(function() { ctypes.cast(i, ctypes.int32_t.array()); }, Error);
-  do_check_throws(function() { ctypes.cast(i, ctypes.int64_t); }, Error);
+  do_check_throws(function() { ctypes.cast(i, ctypes.void_t); }, TypeError);
+  do_check_throws(function() { ctypes.cast(i, ctypes.int32_t.array()); }, TypeError);
+  do_check_throws(function() { ctypes.cast(i, ctypes.int64_t); }, TypeError);
 
   // Test casting between special types.
   let g_t = ctypes.StructType("g_t", [{ a: ctypes.int32_t }, { b: ctypes.double }]);
   let a_t = ctypes.ArrayType(g_t, 4);
-  let p_t = ctypes.PointerType(g_t);
   let f_t = ctypes.FunctionType(ctypes.default_abi, ctypes.void_t).ptr;
 
   let a = a_t();
@@ -2216,7 +2181,6 @@ function run_cast_tests() {
   let a2 = ctypes.cast(g, g_t.array(1));
   do_check_eq(ptrValue(a2.address()), ptrValue(g.address()));
   do_check_eq(a2[0].a, g.a);
-  let a3 = ctypes.cast(g, g_t.array(0));
 
   let p = g.address();
   let ip = ctypes.cast(p, ctypes.int32_t.ptr);
@@ -2237,7 +2201,7 @@ function run_void_tests(library) {
   // Test that library.declare throws with void function args.
   do_check_throws(function() {
     library.declare("test_void_t_cdecl", ctypes.default_abi, ctypes.void_t, ctypes.void_t);
-  }, Error);
+  }, TypeError);
 
   if ("winLastError" in ctypes) {
     test_void_t = library.declare("test_void_t_stdcall", ctypes.stdcall_abi, ctypes.void_t);
@@ -2247,7 +2211,7 @@ function run_void_tests(library) {
     // Win32 (it's all the same on Win64 though).
     if (ctypes.voidptr_t.size == 4) {
       do_check_throws(function() {
-        let test_winapi_t = library.declare("test_void_t_stdcall", ctypes.winapi_abi, ctypes.void_t);
+        library.declare("test_void_t_stdcall", ctypes.winapi_abi, ctypes.void_t);
       }, Error);
     }
   }
@@ -2630,7 +2594,7 @@ function run_single_closure_tests(library, abi, suffix)
     if (fail)
       throw "Just following orders, sir!";
     return bignum1;
-  };
+  }
   var closure64 = fn_64_t(closure_fn_64, null, bignum2);
   do_check_eq(ctypes.UInt64.compare(closure64(false), bignum1), 0);
   do_check_eq(ctypes.UInt64.compare(closure64(true), bignum2), 0);
@@ -2644,7 +2608,7 @@ function run_single_closure_tests(library, abi, suffix)
   // mismatch with the cx stashed in the closure.
   try {
     var sb = Components.utils.Sandbox("http://www.example.com");
-    sb.fn = fn_v_t(function() {sb.foo = {};});
+    sb.fn = fn_v_t(function() { sb.foo = {}; });
     Components.utils.evalInSandbox("fn();", sb);
   } catch (e) {} // Components not available in workers.
 
@@ -2652,7 +2616,7 @@ function run_single_closure_tests(library, abi, suffix)
   var sentinelThrew = false;
   try {
   fn_v_t(function() {}, null, -1);
-  } catch(e) {
+  } catch (e) {
     sentinelThrew = true;
   }
   do_check_true(sentinelThrew);
@@ -2698,7 +2662,7 @@ function run_variadic_tests(library) {
 
   do_check_throws(function() {
     // No variadic closure callbacks allowed.
-    sum_va_type(function(){});
+    sum_va_type(function() {});
   }, Error);
 
   let count_true_va = library.declare("test_sum_va_cdecl", ctypes.default_abi, ctypes.uint8_t,
@@ -2726,9 +2690,9 @@ function run_variadic_tests(library) {
 
   do_check_eq(result.value, 3 + 5 + 7 + 11);
 
-  result = ctypes.int32_t.array(3)([1,1,1]),
-      v1 = ctypes.int32_t.array(4)([1,2,3,5]),
-      v2 = ctypes.int32_t.array(3)([7,11,13]),
+  result = ctypes.int32_t.array(3)([1, 1, 1]),
+      v1 = ctypes.int32_t.array(4)([1, 2, 3, 5]),
+      v2 = ctypes.int32_t.array(3)([7, 11, 13]),
       vector_add_va = library.declare("test_vector_add_va_cdecl",
                                       ctypes.default_abi, ctypes.int32_t.ptr,
                                       ctypes.uint8_t, ctypes.uint8_t, "..."),
@@ -2782,6 +2746,42 @@ function run_static_data_tests(library)
   do_check_eq(data_rect_2.bottom, -11);
   do_check_eq(data_rect_2.right, -12);
   do_check_eq(ptrValue(data_rect.address()), ptrValue(data_rect_2.address()));
+}
+
+function run_cpp_class_tests(library)
+{
+  // try the gcc mangling, unless we're using MSVC.
+  let OS = get_os();
+  let ctor_symbol;
+  let add_symbol;
+  let abi;
+  if (OS == "WINNT") {
+    // for compatibility for Win32 vs Win64
+    abi = ctypes.thiscall_abi;
+    if (ctypes.size_t.size == 8) {
+      ctor_symbol = '??0TestClass@@QEAA@H@Z';
+      add_symbol = '?Add@TestClass@@QEAAHH@Z';
+    } else {
+      ctor_symbol = '??0TestClass@@QAE@H@Z';
+      add_symbol = '?Add@TestClass@@QAEHH@Z';
+    }
+  } else {
+    abi = ctypes.default_abi;
+    ctor_symbol = "_ZN9TestClassC1Ei";
+    add_symbol = "_ZN9TestClass3AddEi";
+  }
+
+  let test_class_ctor = library.declare(ctor_symbol, abi, ctypes.void_t,
+                                        ctypes.int32_t.ptr, ctypes.int32_t);
+  let i = ctypes.int32_t();
+  test_class_ctor(i.address(), 8);
+  do_check_eq(i.value, 8);
+
+  let test_class_add = library.declare(add_symbol, abi, ctypes.int32_t,
+                                       ctypes.int32_t.ptr, ctypes.int32_t);
+  let j = test_class_add(i.address(), 5);
+  do_check_eq(j, 13);
+  do_check_eq(i.value, 13);
 }
 
 // bug 522360 - try loading system library without full path

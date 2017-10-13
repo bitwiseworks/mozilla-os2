@@ -6,7 +6,7 @@
 
 #include "mozilla/chrome/RegistryMessageUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "SubstitutingProtocolHandler.h"
 #include "nsIChannel.h"
@@ -20,6 +20,7 @@
 using mozilla::dom::ContentParent;
 
 namespace mozilla {
+namespace net {
 
 // Log module for Substituting Protocol logging. We keep the pre-existing module
 // name of "nsResProtocol" to avoid disruption.
@@ -54,7 +55,7 @@ SubstitutingURL::EnsureFile()
     return rv;
 
   nsAutoCString scheme;
-  rv = net_ExtractURLScheme(spec, nullptr, nullptr, &scheme);
+  rv = net_ExtractURLScheme(spec, scheme);
   if (NS_FAILED(rv))
     return rv;
 
@@ -112,45 +113,51 @@ SubstitutingProtocolHandler::ConstructInternal()
 // IPC marshalling.
 //
 
-void
+nsresult
 SubstitutingProtocolHandler::CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aMappings)
 {
   for (auto iter = mSubstitutions.ConstIter(); !iter.Done(); iter.Next()) {
     nsCOMPtr<nsIURI> uri = iter.Data();
     SerializedURI serialized;
     if (uri) {
-      uri->GetSpec(serialized.spec);
+      nsresult rv = uri->GetSpec(serialized.spec);
+      NS_ENSURE_SUCCESS(rv, rv);
       uri->GetOriginCharset(serialized.charset);
     }
     SubstitutionMapping substitution = { mScheme, nsCString(iter.Key()), serialized };
     aMappings.AppendElement(substitution);
   }
+
+  return NS_OK;
 }
 
-void
+nsresult
 SubstitutingProtocolHandler::SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI)
 {
   if (GeckoProcessType_Content == XRE_GetProcessType()) {
-    return;
+    return NS_OK;
   }
 
   nsTArray<ContentParent*> parents;
   ContentParent::GetAll(parents);
   if (!parents.Length()) {
-    return;
+    return NS_OK;
   }
 
   SubstitutionMapping mapping;
   mapping.scheme = mScheme;
   mapping.path = aRoot;
   if (aBaseURI) {
-    aBaseURI->GetSpec(mapping.resolvedURI.spec);
+    nsresult rv = aBaseURI->GetSpec(mapping.resolvedURI.spec);
+    NS_ENSURE_SUCCESS(rv, rv);
     aBaseURI->GetOriginCharset(mapping.resolvedURI.charset);
   }
 
   for (uint32_t i = 0; i < parents.Length(); i++) {
     Unused << parents[i]->SendRegisterChromeItem(mapping);
   }
+
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -282,8 +289,7 @@ SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *bas
 {
   if (!baseURI) {
     mSubstitutions.Remove(root);
-    SendSubstitution(root, baseURI);
-    return NS_OK;
+    return SendSubstitution(root, baseURI);
   }
 
   // If baseURI isn't a same-scheme URI, we can set the substitution immediately.
@@ -298,8 +304,7 @@ SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *bas
     }
 
     mSubstitutions.Put(root, baseURI);
-    SendSubstitution(root, baseURI);
-    return NS_OK;
+    return SendSubstitution(root, baseURI);
   }
 
   // baseURI is a same-type substituting URI, let's resolve it first.
@@ -312,8 +317,7 @@ SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *bas
   NS_ENSURE_SUCCESS(rv, rv);
 
   mSubstitutions.Put(root, newBaseURI);
-  SendSubstitution(root, newBaseURI);
-  return NS_OK;
+  return SendSubstitution(root, newBaseURI);
 }
 
 nsresult
@@ -342,6 +346,12 @@ SubstitutingProtocolHandler::ResolveURI(nsIURI *uri, nsACString &result)
 
   nsAutoCString host;
   nsAutoCString path;
+  nsAutoCString pathname;
+
+  nsCOMPtr<nsIURL> url = do_QueryInterface(uri);
+  if (!url) {
+    return NS_ERROR_MALFORMED_URI;
+  }
 
   rv = uri->GetAsciiHost(host);
   if (NS_FAILED(rv)) return rv;
@@ -349,32 +359,38 @@ SubstitutingProtocolHandler::ResolveURI(nsIURI *uri, nsACString &result)
   rv = uri->GetPath(path);
   if (NS_FAILED(rv)) return rv;
 
-  if (ResolveSpecialCases(host, path, result)) {
+  rv = url->GetFilePath(pathname);
+  if (NS_FAILED(rv)) return rv;
+
+  if (ResolveSpecialCases(host, path, pathname, result)) {
     return NS_OK;
   }
-
-  // Unescape the path so we can perform some checks on it.
-  nsAutoCString unescapedPath(path);
-  NS_UnescapeURL(unescapedPath);
-
-  // Don't misinterpret the filepath as an absolute URI.
-  if (unescapedPath.FindChar(':') != -1)
-    return NS_ERROR_MALFORMED_URI;
-
-  if (unescapedPath.FindChar('\\') != -1)
-    return NS_ERROR_MALFORMED_URI;
-
-  const char *p = path.get() + 1; // path always starts with a slash
-  NS_ASSERTION(*(p-1) == '/', "Path did not begin with a slash!");
-
-  if (*p == '/')
-    return NS_ERROR_MALFORMED_URI;
 
   nsCOMPtr<nsIURI> baseURI;
   rv = GetSubstitution(host, getter_AddRefs(baseURI));
   if (NS_FAILED(rv)) return rv;
 
-  rv = baseURI->Resolve(nsDependentCString(p, path.Length()-1), result);
+  // Unescape the path so we can perform some checks on it.
+  NS_UnescapeURL(pathname);
+  if (pathname.FindChar('\\') != -1) {
+    return NS_ERROR_MALFORMED_URI;
+  }
+
+  // Some code relies on an empty path resolving to a file rather than a
+  // directory.
+  NS_ASSERTION(path.CharAt(0) == '/', "Path must begin with '/'");
+  if (path.Length() == 1) {
+    rv = baseURI->GetSpec(result);
+  } else {
+    // Make sure we always resolve the path as file-relative to our target URI.
+    path.InsertLiteral(".", 0);
+
+    rv = baseURI->Resolve(path, result);
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   if (MOZ_LOG_TEST(gResLog, LogLevel::Debug)) {
     nsAutoCString spec;
@@ -384,4 +400,5 @@ SubstitutingProtocolHandler::ResolveURI(nsIURI *uri, nsACString &result)
   return rv;
 }
 
+} // namespace net
 } // namespace mozilla

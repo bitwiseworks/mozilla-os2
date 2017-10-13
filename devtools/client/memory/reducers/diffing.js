@@ -3,23 +3,34 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { assert } = require("devtools/shared/DevToolsUtils");
-const { actions, diffingState } = require("../constants");
-const { immutableUpdate, snapshotIsDiffable } = require("../utils");
+const Immutable = require("devtools/client/shared/vendor/immutable");
+const { immutableUpdate, assert } = require("devtools/shared/DevToolsUtils");
+const { actions, diffingState, viewState } = require("../constants");
+const { snapshotIsDiffable } = require("../utils");
 
 const handlers = Object.create(null);
 
-handlers[actions.TOGGLE_DIFFING] = function (diffing, action) {
-  if (diffing) {
-    return null;
+handlers[actions.POP_VIEW] = function (diffing, { previousView }) {
+  if (previousView.state === viewState.DIFFING) {
+    assert(previousView.diffing, "Should have previousView.diffing");
+    return previousView.diffing;
   }
 
-  return Object.freeze({
-    firstSnapshotId: null,
-    secondSnapshotId: null,
-    census: null,
-    state: diffingState.SELECTING,
-  });
+  return null;
+};
+
+handlers[actions.CHANGE_VIEW] = function (diffing, { newViewState }) {
+  if (newViewState === viewState.DIFFING) {
+    assert(!diffing, "Should not switch to diffing view when already diffing");
+    return Object.freeze({
+      firstSnapshotId: null,
+      secondSnapshotId: null,
+      census: null,
+      state: diffingState.SELECTING,
+    });
+  }
+
+  return null;
 };
 
 handlers[actions.SELECT_SNAPSHOT_FOR_DIFFING] = function (diffing, { snapshot }) {
@@ -64,7 +75,7 @@ handlers[actions.TAKE_CENSUS_DIFF_START] = function (diffing, action) {
       report: null,
       inverted: action.inverted,
       filter: action.filter,
-      breakdown: action.breakdown,
+      display: action.display,
     }
   });
 };
@@ -80,18 +91,53 @@ handlers[actions.TAKE_CENSUS_DIFF_END] = function (diffing, action) {
     state: diffingState.TOOK_DIFF,
     census: {
       report: action.report,
+      parentMap: action.parentMap,
+      expanded: Immutable.Set(),
       inverted: action.inverted,
       filter: action.filter,
-      breakdown: action.breakdown,
+      display: action.display,
     }
   });
 };
 
-handlers[actions.DIFFFING_ERROR] = function (diffing, action) {
+handlers[actions.DIFFING_ERROR] = function (diffing, action) {
   return {
     state: diffingState.ERROR,
     error: action.error
   };
+};
+
+handlers[actions.EXPAND_DIFFING_CENSUS_NODE] = function (diffing, { node }) {
+  assert(diffing, "Should be diffing if expanding diffing's census nodes");
+  assert(diffing.state === diffingState.TOOK_DIFF,
+         "Should have taken the census diff if expanding nodes");
+  assert(diffing.census, "Should have a census");
+  assert(diffing.census.report, "Should have a census report");
+  assert(diffing.census.expanded, "Should have a census's expanded set");
+
+  const expanded = diffing.census.expanded.add(node.id);
+  const census = immutableUpdate(diffing.census, { expanded });
+  return immutableUpdate(diffing, { census });
+};
+
+handlers[actions.COLLAPSE_DIFFING_CENSUS_NODE] = function (diffing, { node }) {
+  assert(diffing, "Should be diffing if expanding diffing's census nodes");
+  assert(diffing.state === diffingState.TOOK_DIFF,
+         "Should have taken the census diff if expanding nodes");
+  assert(diffing.census, "Should have a census");
+  assert(diffing.census.report, "Should have a census report");
+  assert(diffing.census.expanded, "Should have a census's expanded set");
+
+  const expanded = diffing.census.expanded.delete(node.id);
+  const census = immutableUpdate(diffing.census, { expanded });
+  return immutableUpdate(diffing, { census });
+};
+
+handlers[actions.FOCUS_DIFFING_CENSUS_NODE] = function (diffing, { node }) {
+  assert(diffing, "Should be diffing.");
+  assert(diffing.census, "Should have a census");
+  const census = immutableUpdate(diffing.census, { focused: node });
+  return immutableUpdate(diffing, { census });
 };
 
 module.exports = function (diffing = null, action) {

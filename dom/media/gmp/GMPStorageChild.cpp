@@ -6,6 +6,7 @@
 #include "GMPStorageChild.h"
 #include "GMPChild.h"
 #include "gmp-storage.h"
+#include "base/task.h"
 
 #define ON_GMP_THREAD() (mPlugin->GMPMessageLoop() == MessageLoop::current())
 
@@ -15,7 +16,7 @@
       _func(__VA_ARGS__); \
     } else { \
       mPlugin->GMPMessageLoop()->PostTask( \
-        FROM_HERE, NewRunnableMethod(this, &GMPStorageChild::_func, ##__VA_ARGS__) \
+        dont_add_new_uses_of_this::NewRunnableMethod(this, &GMPStorageChild::_func, ##__VA_ARGS__) \
       ); \
     } \
   } while(false)
@@ -305,7 +306,7 @@ public:
     mRecordNames.Sort();
   }
 
-  virtual GMPErr GetName(const char** aOutName, uint32_t* aOutNameLength) override {
+  GMPErr GetName(const char** aOutName, uint32_t* aOutNameLength) override {
     if (!aOutName || !aOutNameLength) {
       return GMPInvalidArgErr;
     }
@@ -317,7 +318,7 @@ public:
     return GMPNoErr;
   }
 
-  virtual GMPErr NextRecord() override {
+  GMPErr NextRecord() override {
     if (mIndex < mRecordNames.Length()) {
       mIndex++;
     }
@@ -325,7 +326,7 @@ public:
                                             : GMPEndOfEnumeration;
   }
 
-  virtual void Close() override {
+  void Close() override {
     delete this;
   }
 

@@ -34,16 +34,19 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/SandboxInfo.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/dump_bpf.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/seccomp-bpf/trap.h"
+#include "sandbox/linux/system_headers/linux_filter.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 #if defined(ANDROID)
-#include "sandbox/linux/services/android_ucontext.h"
+#include "sandbox/linux/system_headers/linux_ucontext.h"
 #endif
-#include "sandbox/linux/services/linux_syscalls.h"
 
 #ifdef MOZ_ASAN
 // Copy libsanitizer declarations to avoid depending on ASAN headers.
@@ -65,11 +68,13 @@ __sanitizer_sandbox_on_notify(__sanitizer_sandbox_arguments *args);
 } // extern "C"
 #endif // MOZ_ASAN
 
+// Signal number used to enable seccomp on each thread.
+int gSeccompTsyncBroadcastSignum = 0;
+
 namespace mozilla {
 
-#ifdef ANDROID
+// This is initialized by SandboxSetCrashFunc().
 SandboxCrashFunc gSandboxCrashFunc;
-#endif
 
 #ifdef MOZ_GMP_SANDBOX
 // For media plugins, we can start the sandbox before we dlopen the
@@ -207,15 +212,20 @@ InstallSigSysHandler(void)
  * program).  The kernel won't allow seccomp-bpf without doing this,
  * because otherwise it could be used for privilege escalation attacks.
  *
- * Returns false (and sets errno) on failure.
+ * Returns false if the filter was already installed (see the
+ * PR_SET_NO_NEW_PRIVS rule in SandboxFilter.cpp).  Crashes on any
+ * other error condition.
  *
  * @see SandboxInfo
  * @see BroadcastSetThreadSandbox
  */
-static bool MOZ_WARN_UNUSED_RESULT
+static bool MOZ_MUST_USE
 InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
 {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+    if (!aUseTSync && errno == ETXTBSY) {
+      return false;
+    }
     SANDBOX_LOG_ERROR("prctl(PR_SET_NO_NEW_PRIVS) failed: %s", strerror(errno));
     MOZ_CRASH("prctl(PR_SET_NO_NEW_PRIVS)");
   }
@@ -225,13 +235,13 @@ InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
                 SECCOMP_FILTER_FLAG_TSYNC, aProg) != 0) {
       SANDBOX_LOG_ERROR("thread-synchronized seccomp failed: %s",
                         strerror(errno));
-      return false;
+      MOZ_CRASH("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)");
     }
   } else {
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, (unsigned long)aProg, 0, 0)) {
       SANDBOX_LOG_ERROR("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER) failed: %s",
                         strerror(errno));
-      return false;
+      MOZ_CRASH("seccomp+tsync failed, but kernel supports tsync");
     }
   }
   return true;
@@ -241,7 +251,7 @@ InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
 // The communication channel from the signal handler back to the main thread.
 static mozilla::Atomic<int> gSetSandboxDone;
 // Pass the filter itself through a global.
-static const sock_fprog* gSetSandboxFilter;
+const sock_fprog* gSetSandboxFilter;
 
 // We have to dynamically allocate the signal number; see bug 1038900.
 // This function returns the first realtime signal currently set to
@@ -253,7 +263,7 @@ static const sock_fprog* gSetSandboxFilter;
 static int
 FindFreeSignalNumber()
 {
-  for (int signum = SIGRTMIN; signum <= SIGRTMAX; ++signum) {
+  for (int signum = SIGRTMAX; signum >= SIGRTMIN; --signum) {
     struct sigaction sa;
 
     if (sigaction(signum, nullptr, &sa) == 0 &&
@@ -270,13 +280,7 @@ FindFreeSignalNumber()
 static bool
 SetThreadSandbox()
 {
-  if (prctl(PR_GET_SECCOMP, 0, 0, 0, 0) == 0) {
-    if (!InstallSyscallFilter(gSetSandboxFilter, false)) {
-      MOZ_CRASH("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)");
-    }
-    return true;
-  }
-  return false;
+  return InstallSyscallFilter(gSetSandboxFilter, false);
 }
 
 static void
@@ -307,7 +311,6 @@ EnterChroot()
 static void
 BroadcastSetThreadSandbox(const sock_fprog* aFilter)
 {
-  int signum;
   pid_t pid, tid, myTid;
   DIR *taskdp;
   struct dirent *de;
@@ -328,19 +331,6 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
 
   EnterChroot();
 
-  signum = FindFreeSignalNumber();
-  if (signum == 0) {
-    SANDBOX_LOG_ERROR("No available signal numbers!");
-    MOZ_CRASH();
-  }
-  void (*oldHandler)(int);
-  oldHandler = signal(signum, SetThreadSandboxHandler);
-  if (oldHandler != SIG_DFL) {
-    // See the comment on FindFreeSignalNumber about race conditions.
-    SANDBOX_LOG_ERROR("signal %d in use by handler %p!\n", signum, oldHandler);
-    MOZ_CRASH();
-  }
-
   // In case this races with a not-yet-deprivileged thread cloning
   // itself, repeat iterating over all threads until we find none
   // that are still privileged.
@@ -360,9 +350,12 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
         // continue to signal other threads.
         continue;
       }
+
+      MOZ_RELEASE_ASSERT(gSeccompTsyncBroadcastSignum != 0);
+
       // Reset the futex cell and signal.
       gSetSandboxDone = 0;
-      if (syscall(__NR_tgkill, pid, tid, signum) != 0) {
+      if (syscall(__NR_tgkill, pid, tid, gSeccompTsyncBroadcastSignum) != 0) {
         if (errno == ESRCH) {
           SANDBOX_LOG_ERROR("Thread %d unexpectedly exited.", tid);
           // Rescan threads, in case it forked before exiting.
@@ -432,11 +425,14 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
     }
     rewinddir(taskdp);
   } while (sandboxProgress);
-  oldHandler = signal(signum, SIG_DFL);
+
+  void (*oldHandler)(int);
+  oldHandler = signal(gSeccompTsyncBroadcastSignum, SIG_DFL);
+  gSeccompTsyncBroadcastSignum = 0;
   if (oldHandler != SetThreadSandboxHandler) {
     // See the comment on FindFreeSignalNumber about race conditions.
     SANDBOX_LOG_ERROR("handler for signal %d was changed to %p!",
-                      signum, oldHandler);
+                      gSeccompTsyncBroadcastSignum, oldHandler);
     MOZ_CRASH();
   }
   Unused << closedir(taskdp);
@@ -454,7 +450,7 @@ ApplySandboxWithTSync(sock_fprog* aFilter)
   // isn't used... but this failure shouldn't happen in the first
   // place, so let's not make extra special cases for it.)
   if (!InstallSyscallFilter(aFilter, true)) {
-    MOZ_CRASH("seccomp+tsync failed, but kernel supports tsync");
+    MOZ_CRASH();
   }
 }
 
@@ -468,9 +464,9 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
   // lifetime, but does not take ownership of them.
   sandbox::bpf_dsl::PolicyCompiler compiler(aPolicy.get(),
                                             sandbox::Trap::Registry());
-  auto program = compiler.Compile();
+  sandbox::CodeGen::Program program = compiler.Compile();
   if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
-    sandbox::bpf_dsl::DumpBPF::PrintProgram(*program);
+    sandbox::bpf_dsl::DumpBPF::PrintProgram(program);
   }
 
   InstallSigSysHandler();
@@ -484,10 +480,10 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
 #endif
 
   // The syscall takes a C-style array, so copy the vector into one.
-  size_t programLen = program->size();
+  size_t programLen = program.size();
   UniquePtr<sock_filter[]> flatProgram(new sock_filter[programLen]);
-  for (auto i = program->begin(); i != program->end(); ++i) {
-    flatProgram[i - program->begin()] = *i;
+  for (auto i = program.begin(); i != program.end(); ++i) {
+    flatProgram[i - program.begin()] = *i;
   }
 
   sock_fprog fprog;
@@ -511,19 +507,8 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
 }
 
 void
-SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
+SandboxEarlyInit(GeckoProcessType aType)
 {
-  // Bug 1168555: Nuwa isn't reliably single-threaded at this point;
-  // it starts an IPC I/O thread and then shuts it down before calling
-  // the plugin-container entry point, but that thread may not have
-  // finished exiting.  If/when any type of sandboxing is used for the
-  // Nuwa process (e.g., unsharing the network namespace there instead
-  // of for each content process, to save memory), this will need to be
-  // changed by moving the SandboxEarlyInit call to an earlier point.
-  if (aIsNuwa) {
-    return;
-  }
-
   const SandboxInfo info = SandboxInfo::Get();
   if (info.Test(SandboxInfo::kUnexpectedThreads)) {
     return;
@@ -556,6 +541,25 @@ SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
   default:
     // Other cases intentionally left blank.
     break;
+  }
+
+  // If TSYNC is not supported, set up signal handler
+  // used to enable seccomp on each thread.
+  if (!info.Test(SandboxInfo::kHasSeccompTSync)) {
+    gSeccompTsyncBroadcastSignum = FindFreeSignalNumber();
+    if (gSeccompTsyncBroadcastSignum == 0) {
+      SANDBOX_LOG_ERROR("No available signal numbers!");
+      MOZ_CRASH();
+    }
+
+    void (*oldHandler)(int);
+    oldHandler = signal(gSeccompTsyncBroadcastSignum, SetThreadSandboxHandler);
+    if (oldHandler != SIG_DFL) {
+      // See the comment on FindFreeSignalNumber about race conditions.
+      SANDBOX_LOG_ERROR("signal %d in use by handler %p!\n",
+        gSeccompTsyncBroadcastSignum, oldHandler);
+      MOZ_CRASH();
+    }
   }
 
   // If there's nothing to do, then we're done.
@@ -629,14 +633,14 @@ SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
  *
  * Will normally make the process exit on failure.
 */
-void
+bool
 SetContentProcessSandbox(int aBrokerFd)
 {
   if (!SandboxInfo::Get().Test(SandboxInfo::kEnabledForContent)) {
     if (aBrokerFd >= 0) {
       close(aBrokerFd);
     }
-    return;
+    return false;
   }
 
   // This needs to live until the process exits.
@@ -646,6 +650,7 @@ SetContentProcessSandbox(int aBrokerFd)
   }
 
   SetCurrentProcessSandbox(GetContentSandboxPolicy(sBroker.ptrOr(nullptr)));
+  return true;
 }
 #endif // MOZ_CONTENT_SANDBOX
 

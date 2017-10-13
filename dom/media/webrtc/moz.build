@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -33,7 +33,6 @@ if CONFIG['MOZ_WEBRTC']:
         'MediaEngineRemoteVideoSource.cpp',
         'MediaEngineTabVideoSource.cpp',
         'MediaEngineWebRTCAudio.cpp',
-        'MediaTrackConstraints.cpp',
         'RTCCertificate.cpp',
         'RTCIdentityProviderRegistrar.cpp',
     ]
@@ -43,22 +42,11 @@ if CONFIG['MOZ_WEBRTC']:
     ]
     LOCAL_INCLUDES += [
         '/dom/base',
-        '/dom/camera',
         '/media/libyuv/include',
         '/media/webrtc/signaling/src/common',
         '/media/webrtc/signaling/src/common/browser_logging',
         '/media/webrtc/trunk',
     ]
-    # Gonk camera source.
-    if CONFIG['MOZ_B2G_CAMERA'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-        EXPORTS += [
-            'GonkCameraImage.h',
-            'MediaEngineGonkVideoSource.h',
-        ]
-        UNIFIED_SOURCES += [
-            'GonkCameraImage.cpp',
-            'MediaEngineGonkVideoSource.cpp',
-        ]
 
 XPIDL_SOURCES += [
     'nsITabSource.idl'
@@ -66,6 +54,7 @@ XPIDL_SOURCES += [
 
 UNIFIED_SOURCES += [
     'MediaEngineDefault.cpp',
+    'MediaTrackConstraints.cpp',
     'PeerIdentity.cpp',
 ]
 
@@ -84,7 +73,8 @@ include('/ipc/chromium/chromium-config.mozbuild')
 #    android API types
 if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
     CXXFLAGS += [
-        '-Wno-error=attributes'
+        '-Wno-error=attributes',
+        '-Wno-error=shadow',
     ]
 
 FINAL_LIBRARY = 'xul'
@@ -92,5 +82,7 @@ FINAL_LIBRARY = 'xul'
 if CONFIG['_MSC_VER']:
     CXXFLAGS += [
         '-wd4275', # non dll-interface class used as base for dll-interface class
+        '-wd4312', # This is intended as a temporary hack to support building with VS2015
+                   # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
     ]
     DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'

@@ -32,9 +32,10 @@
 #include "nsBindingManager.h"
 #include "nsCCUncollectableMarker.h"
 #include "mozAutoDocUpdate.h"
+#include "nsTextNode.h"
 
 #include "PLDHashTable.h"
-#include "prprf.h"
+#include "mozilla/Sprintf.h"
 #include "nsWrapperCacheInlines.h"
 
 using namespace mozilla;
@@ -64,7 +65,7 @@ nsGenericDOMDataNode::nsGenericDOMDataNode(already_AddRefed<mozilla::dom::NodeIn
 
 nsGenericDOMDataNode::~nsGenericDOMDataNode()
 {
-  NS_PRECONDITION(!IsInDoc(),
+  NS_PRECONDITION(!IsInUncomposedDoc(),
                   "Please remove this from the document properly");
   if (GetParent()) {
     NS_RELEASE(mParent);
@@ -90,8 +91,8 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGenericDOMDataNode)
   if (MOZ_UNLIKELY(cb.WantDebugInfo())) {
     char name[40];
-    PR_snprintf(name, sizeof(name), "nsGenericDOMDataNode (len=%d)",
-                tmp->mText.GetLength());
+    SprintfLiteral(name, "nsGenericDOMDataNode (len=%d)",
+                   tmp->mText.GetLength());
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name);
   } else {
     NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsGenericDOMDataNode, tmp->mRefCnt.get())
@@ -310,7 +311,7 @@ nsGenericDOMDataNode::SetTextInternal(uint32_t aOffset, uint32_t aCount,
   if (haveMutationListeners) {
     oldValue = GetCurrentValueAtom();
   }
-    
+
   if (aNotify) {
     CharacterDataChangeInfo info = {
       aOffset == textLength,
@@ -371,7 +372,10 @@ nsGenericDOMDataNode::SetTextInternal(uint32_t aOffset, uint32_t aCount,
   }
 
   if (dirAffectsAncestor) {
-    TextNodeChangedDirection(this, oldDir, aNotify);
+    // dirAffectsAncestor being true implies that we have a text node, see
+    // above.
+    MOZ_ASSERT(NodeType() == nsIDOMNode::TEXT_NODE);
+    TextNodeChangedDirection(static_cast<nsTextNode*>(this), oldDir, aNotify);
   }
 
   // Notify observers
@@ -392,7 +396,7 @@ nsGenericDOMDataNode::SetTextInternal(uint32_t aOffset, uint32_t aCount,
       if (aLength > 0) {
         nsAutoString val;
         mText.AppendTo(val);
-        mutation.mNewAttrValue = do_GetAtom(val);
+        mutation.mNewAttrValue = NS_Atomize(val);
       }
 
       mozAutoSubtreeModified subtree(OwnerDoc(), this);
@@ -426,7 +430,7 @@ nsGenericDOMDataNode::ToCString(nsAString& aBuf, int32_t aOffset,
         aBuf.AppendLiteral("&gt;");
       } else if ((ch < ' ') || (ch >= 127)) {
         char buf[10];
-        PR_snprintf(buf, sizeof(buf), "\\u%04x", ch);
+        SprintfLiteral(buf, "\\u%04x", ch);
         AppendASCIItoUTF16(buf, aBuf);
       } else {
         aBuf.Append(ch);
@@ -446,7 +450,7 @@ nsGenericDOMDataNode::ToCString(nsAString& aBuf, int32_t aOffset,
         aBuf.AppendLiteral("&gt;");
       } else if ((ch < ' ') || (ch >= 127)) {
         char buf[10];
-        PR_snprintf(buf, sizeof(buf), "\\u%04x", ch);
+        SprintfLiteral(buf, "\\u%04x", ch);
         AppendASCIItoUTF16(buf, aBuf);
       } else {
         aBuf.Append(ch);
@@ -467,7 +471,7 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                   "Must have the same owner document");
   NS_PRECONDITION(!aParent || aDocument == aParent->GetUncomposedDoc(),
                   "aDocument must be current doc of aParent");
-  NS_PRECONDITION(!GetUncomposedDoc() && !IsInDoc(),
+  NS_PRECONDITION(!GetUncomposedDoc() && !IsInUncomposedDoc(),
                   "Already have a document.  Unbind first!");
   // Note that as we recurse into the kids, they'll have a non-null parent.  So
   // only assert if our parent is _changing_ while we have a parent.
@@ -480,7 +484,7 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                   "Already have a binding parent.  Unbind first!");
   NS_PRECONDITION(aBindingParent != this,
                   "Content must not be its own binding parent");
-  NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() || 
+  NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() ||
                   aBindingParent == aParent,
                   "Native anonymous content must have its parent as its "
                   "own binding parent");
@@ -536,7 +540,7 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     ClearSubtreeRootPointer();
 
     // XXX See the comment in Element::BindToTree
-    SetInDocument();
+    SetIsInDocument();
     if (mText.IsBidi()) {
       aDocument->SetBidiEnabled();
     }
@@ -554,6 +558,18 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   }
 
   UpdateEditableState(false);
+
+  // It would be cleanest to mark nodes as dirty when (a) they're created and
+  // (b) they're unbound from a tree. However, we can't easily do (a) right now,
+  // because IsStyledByServo() is not always easy to check at node creation time,
+  // and the bits have different meaning in the non-IsStyledByServo case.
+  //
+  // So for now, we just mark nodes as dirty when they're inserted into a
+  // document or shadow tree.
+  if (IsStyledByServo() && IsInComposedDoc()) {
+    MOZ_ASSERT(!HasServoData());
+    SetIsDirtyForServo();
+  }
 
   NS_POSTCONDITION(aDocument == GetUncomposedDoc(), "Bound to wrong document");
   NS_POSTCONDITION(aParent == GetParent(), "Bound to wrong parent");
@@ -585,6 +601,16 @@ nsGenericDOMDataNode::UnbindFromTree(bool aDeep, bool aNullParent)
     SetParentIsContent(false);
   }
   ClearInDocument();
+
+  // Computed styled data isn't useful for detached nodes, and we'll need to
+  // recomputed it anyway if we ever insert the nodes back into a document.
+  if (IsStyledByServo()) {
+    ClearServoData();
+  } else {
+#ifdef MOZ_STYLO
+    MOZ_ASSERT(!HasServoData());
+#endif
+  }
 
   if (aNullParent || !mParent->IsInShadowTree()) {
     UnsetFlags(NODE_IS_IN_SHADOW_TREE);
@@ -643,6 +669,12 @@ nsGenericDOMDataNode::GetAttrNameAt(uint32_t aIndex) const
   return nullptr;
 }
 
+BorrowedAttrInfo
+nsGenericDOMDataNode::GetAttrInfoAt(uint32_t aIndex) const
+{
+  return BorrowedAttrInfo(nullptr, nullptr);
+}
+
 uint32_t
 nsGenericDOMDataNode::GetAttrCount() const
 {
@@ -691,12 +723,6 @@ nsGenericDOMDataNode::GetBindingParent() const
 {
   nsDataSlots *slots = GetExistingDataSlots();
   return slots ? slots->mBindingParent : nullptr;
-}
-
-ShadowRoot *
-nsGenericDOMDataNode::GetShadowRoot() const
-{
-  return nullptr;
 }
 
 ShadowRoot *
@@ -793,14 +819,6 @@ nsGenericDOMDataNode::SaveSubtreeState()
 {
 }
 
-void
-nsGenericDOMDataNode::DestroyContent()
-{
-  // XXX We really should let cycle collection do this, but that currently still
-  //     leaks (see https://bugzilla.mozilla.org/show_bug.cgi?id=406684).
-  ReleaseWrapper(this);
-}
-
 #ifdef DEBUG
 void
 nsGenericDOMDataNode::List(FILE* out, int32_t aIndent) const
@@ -809,7 +827,7 @@ nsGenericDOMDataNode::List(FILE* out, int32_t aIndent) const
 
 void
 nsGenericDOMDataNode::DumpContent(FILE* out, int32_t aIndent,
-                                  bool aDumpAll) const 
+                                  bool aDumpAll) const
 {
 }
 #endif
@@ -952,9 +970,9 @@ nsGenericDOMDataNode::GetWholeText(nsAString& aWholeText)
     return GetData(aWholeText);
 
   int32_t index = parent->IndexOf(this);
-  NS_WARN_IF_FALSE(index >= 0,
-                   "Trying to use .wholeText with an anonymous"
-                    "text node child of a binding parent?");
+  NS_WARNING_ASSERTION(index >= 0,
+                       "Trying to use .wholeText with an anonymous"
+                       "text node child of a binding parent?");
   NS_ENSURE_TRUE(index >= 0, NS_ERROR_DOM_NOT_SUPPORTED_ERR);
   int32_t first =
     FirstLogicallyAdjacentTextNode(parent, index);
@@ -1097,7 +1115,7 @@ nsGenericDOMDataNode::GetCurrentValueAtom()
 {
   nsAutoString val;
   GetData(val);
-  return NS_NewAtom(val);
+  return NS_Atomize(val);
 }
 
 NS_IMETHODIMP

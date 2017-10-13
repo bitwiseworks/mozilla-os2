@@ -8,6 +8,8 @@
 
 #include "builtin/Profilers.h"
 
+#include "mozilla/Sprintf.h"
+
 #include <stdarg.h>
 
 #ifdef MOZ_CALLGRIND
@@ -39,17 +41,13 @@ static char gLastError[2000];
 
 #if defined(__APPLE__) || defined(__linux__) || defined(MOZ_CALLGRIND)
 static void
-#ifdef __GNUC__
-__attribute__((format(printf,1,2)))
-#endif
+MOZ_FORMAT_PRINTF(1, 2)
 UnsafeError(const char* format, ...)
 {
     va_list args;
     va_start(args, format);
-    (void) vsnprintf(gLastError, sizeof(gLastError), format, args);
+    (void) VsprintfLiteral(gLastError, format, args);
     va_end(args);
-
-    gLastError[sizeof(gLastError) - 1] = '\0';
 }
 #endif
 
@@ -196,9 +194,9 @@ struct RequiredStringArg {
         : mCx(cx), mBytes(nullptr)
     {
         if (args.length() <= argi) {
-            JS_ReportError(cx, "%s: not enough arguments", caller);
+            JS_ReportErrorASCII(cx, "%s: not enough arguments", caller);
         } else if (!args[argi].isString()) {
-            JS_ReportError(cx, "%s: invalid arguments (string expected)", caller);
+            JS_ReportErrorASCII(cx, "%s: invalid arguments (string expected)", caller);
         } else {
             mBytes = JS_EncodeString(cx, args[argi].toString());
         }
@@ -230,7 +228,7 @@ StartProfiling(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (!args[1].isInt32()) {
-        JS_ReportError(cx, "startProfiling: invalid arguments (int expected)");
+        JS_ReportErrorASCII(cx, "startProfiling: invalid arguments (int expected)");
         return false;
     }
     pid_t pid = static_cast<pid_t>(args[1].toInt32());
@@ -505,36 +503,37 @@ bool js_StartPerf()
 
     pid_t childPid = fork();
     if (childPid == 0) {
-        /* perf record --append --pid $mainPID --output=$outfile $MOZ_PROFILE_PERF_FLAGS */
+        /* perf record --pid $mainPID --output=$outfile $MOZ_PROFILE_PERF_FLAGS */
 
         char mainPidStr[16];
-        snprintf(mainPidStr, sizeof(mainPidStr), "%d", mainPid);
-        const char* defaultArgs[] = {"perf", "record", "--append",
-                                     "--pid", mainPidStr, "--output", outfile};
+        SprintfLiteral(mainPidStr, "%d", mainPid);
+        const char* defaultArgs[] = {"perf", "record", "--pid", mainPidStr, "--output", outfile};
 
         Vector<const char*, 0, SystemAllocPolicy> args;
-        args.append(defaultArgs, ArrayLength(defaultArgs));
+        if (!args.append(defaultArgs, ArrayLength(defaultArgs)))
+            return false;
 
         const char* flags = getenv("MOZ_PROFILE_PERF_FLAGS");
         if (!flags) {
             flags = "--call-graph";
         }
 
-        char* flags2 = (char*)js_malloc(strlen(flags) + 1);
+        UniqueChars flags2((char*)js_malloc(strlen(flags) + 1));
         if (!flags2)
             return false;
-        strcpy(flags2, flags);
+        strcpy(flags2.get(), flags);
 
-        // Split |flags2| on spaces.  (Don't bother to free it -- we're going to
-        // exec anyway.)
+        // Split |flags2| on spaces.
         char* toksave;
-        char* tok = strtok_r(flags2, " ", &toksave);
+        char* tok = strtok_r(flags2.get(), " ", &toksave);
         while (tok) {
-            args.append(tok);
+            if (!args.append(tok))
+                return false;
             tok = strtok_r(nullptr, " ", &toksave);
         }
 
-        args.append((char*) nullptr);
+        if (!args.append((char*) nullptr))
+            return false;
 
         execvp("perf", const_cast<char**>(args.begin()));
 
@@ -542,17 +541,15 @@ bool js_StartPerf()
         fprintf(stderr, "Unable to start perf.\n");
         exit(1);
     }
-    else if (childPid > 0) {
+    if (childPid > 0) {
         perfPid = childPid;
 
         /* Give perf a chance to warm up. */
         usleep(500 * 1000);
         return true;
     }
-    else {
-        UnsafeError("js_StartPerf: fork() failed\n");
-        return false;
-    }
+    UnsafeError("js_StartPerf: fork() failed\n");
+    return false;
 }
 
 bool js_StopPerf()

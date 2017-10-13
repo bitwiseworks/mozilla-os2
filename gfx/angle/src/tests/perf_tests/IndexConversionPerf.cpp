@@ -23,6 +23,11 @@ struct IndexConversionPerfParams final : public RenderTestParams
     {
         std::stringstream strstr;
 
+        if (indexRangeOffset > 0)
+        {
+            strstr << "_index_range";
+        }
+
         strstr << RenderTestParams::suffix();
 
         return strstr.str();
@@ -30,15 +35,15 @@ struct IndexConversionPerfParams final : public RenderTestParams
 
     unsigned int iterations;
     unsigned int numIndexTris;
+
+    // A second test, which covers using index ranges with an offset.
+    unsigned int indexRangeOffset;
 };
 
-// Provide a custom gtest parameter name function for IndexConversionPerfParams
-// that includes the number of iterations and triangles in the test parameter name.
-// This also fixes the resolution of the overloaded operator<< on MSVC.
+// Provide a custom gtest parameter name function for IndexConversionPerfParams.
 std::ostream &operator<<(std::ostream &stream, const IndexConversionPerfParams &param)
 {
-    const PlatformParameters &platform = param;
-    stream << platform << "_" << param.iterations << "_" << param.numIndexTris;
+    stream << param.suffix().substr(1);
     return stream;
 }
 
@@ -50,12 +55,13 @@ class IndexConversionPerfTest : public ANGLERenderTest,
 
     void initializeBenchmark() override;
     void destroyBenchmark() override;
-    void beginDrawBenchmark() override;
     void drawBenchmark() override;
 
-    void updateBufferData();
-
   private:
+    void updateBufferData();
+    void drawConversion();
+    void drawIndexRange();
+
     GLuint mProgram;
     GLuint mVertexBuffer;
     GLuint mIndexBuffer;
@@ -75,10 +81,8 @@ void IndexConversionPerfTest::initializeBenchmark()
 {
     const auto &params = GetParam();
 
-    ASSERT_TRUE(params.iterations > 0);
-    ASSERT_TRUE(params.numIndexTris > 0);
-
-    mDrawIterations = params.iterations;
+    ASSERT_LT(0u, params.iterations);
+    ASSERT_LT(0u, params.numIndexTris);
 
     const std::string vs = SHADER_SOURCE
     (
@@ -101,7 +105,7 @@ void IndexConversionPerfTest::initializeBenchmark()
     );
 
     mProgram = CompileProgram(vs, fs);
-    ASSERT_TRUE(mProgram != 0);
+    ASSERT_NE(0u, mProgram);
 
     // Use the program object
     glUseProgram(mProgram);
@@ -132,7 +136,16 @@ void IndexConversionPerfTest::initializeBenchmark()
     // Initialize the index buffer
     for (unsigned int triIndex = 0; triIndex < params.numIndexTris; ++triIndex)
     {
-        mIndexData.push_back(std::numeric_limits<GLushort>::max());
+        // Handle two different types of tests, one with index conversion triggered by a -1 index.
+        if (params.indexRangeOffset == 0)
+        {
+            mIndexData.push_back(std::numeric_limits<GLushort>::max());
+        }
+        else
+        {
+            mIndexData.push_back(0);
+        }
+
         mIndexData.push_back(1);
         mIndexData.push_back(2);
     }
@@ -150,7 +163,7 @@ void IndexConversionPerfTest::initializeBenchmark()
     glUniform1f(glGetUniformLocation(mProgram, "uScale"), scale);
     glUniform1f(glGetUniformLocation(mProgram, "uOffset"), offset);
 
-    ASSERT_TRUE(glGetError() == GL_NO_ERROR);
+    ASSERT_GL_NO_ERROR();
 }
 
 void IndexConversionPerfTest::updateBufferData()
@@ -165,13 +178,21 @@ void IndexConversionPerfTest::destroyBenchmark()
     glDeleteBuffers(1, &mIndexBuffer);
 }
 
-void IndexConversionPerfTest::beginDrawBenchmark()
+void IndexConversionPerfTest::drawBenchmark()
 {
-    // Clear the color buffer
-    glClear(GL_COLOR_BUFFER_BIT);
+    const auto &params = GetParam();
+
+    if (params.indexRangeOffset == 0)
+    {
+        drawConversion();
+    }
+    else
+    {
+        drawIndexRange();
+    }
 }
 
-void IndexConversionPerfTest::drawBenchmark()
+void IndexConversionPerfTest::drawConversion()
 {
     const auto &params = GetParam();
 
@@ -186,7 +207,28 @@ void IndexConversionPerfTest::drawBenchmark()
                        reinterpret_cast<GLvoid*>(0));
     }
 
-    EXPECT_TRUE(glGetError() == GL_NO_ERROR);
+    ASSERT_GL_NO_ERROR();
+}
+
+void IndexConversionPerfTest::drawIndexRange()
+{
+    const auto &params = GetParam();
+
+    unsigned int indexCount = 3;
+    size_t offset           = static_cast<size_t>(indexCount * getNumStepsPerformed());
+
+    offset %= (params.numIndexTris * 3);
+
+    // This test increments an offset each step. Drawing repeatedly may cause the system memory
+    // to release. Then, using a fresh offset will require index range validation, which pages
+    // it back in. The performance should be good even if the data is was used quite a bit.
+    for (unsigned int it = 0; it < params.iterations; it++)
+    {
+        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount), GL_UNSIGNED_SHORT,
+                       reinterpret_cast<GLvoid *>(offset));
+    }
+
+    ASSERT_GL_NO_ERROR();
 }
 
 IndexConversionPerfParams IndexConversionPerfD3D11Params()
@@ -197,8 +239,23 @@ IndexConversionPerfParams IndexConversionPerfD3D11Params()
     params.minorVersion = 0;
     params.windowWidth = 256;
     params.windowHeight = 256;
-    params.iterations = 15;
+    params.iterations    = 225;
     params.numIndexTris = 3000;
+    params.indexRangeOffset = 0;
+    return params;
+}
+
+IndexConversionPerfParams IndexRangeOffsetPerfD3D11Params()
+{
+    IndexConversionPerfParams params;
+    params.eglParameters    = egl_platform::D3D11_NULL();
+    params.majorVersion     = 2;
+    params.minorVersion     = 0;
+    params.windowWidth      = 256;
+    params.windowHeight     = 256;
+    params.iterations       = 16;
+    params.numIndexTris     = 50000;
+    params.indexRangeOffset = 64;
     return params;
 }
 
@@ -208,6 +265,7 @@ TEST_P(IndexConversionPerfTest, Run)
 }
 
 ANGLE_INSTANTIATE_TEST(IndexConversionPerfTest,
-                       IndexConversionPerfD3D11Params());
+                       IndexConversionPerfD3D11Params(),
+                       IndexRangeOffsetPerfD3D11Params());
 
-} // namespace
+}  // namespace

@@ -35,12 +35,12 @@ function run_test()
 function init()
 {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect(function onConnect() {
-    gClient.listTabs(function onListTabs(aResponse) {
+  gClient.connect()
+    .then(() => gClient.listTabs())
+    .then(aResponse => {
       gActors = aResponse;
       run_next_test();
     });
-  });
 }
 
 function test_pre_init_global_actor()
@@ -103,5 +103,5 @@ function test_stable_global_actor_instances()
 }
 
 function close_client() {
-  gClient.close(() => run_next_test());
+  gClient.close().then(() => run_next_test());
 }

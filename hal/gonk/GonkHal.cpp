@@ -43,6 +43,7 @@
 #include "utils/threads.h"
 
 #include "base/message_loop.h"
+#include "base/task.h"
 
 #include "Hal.h"
 #include "HalImpl.h"
@@ -55,8 +56,10 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/UniquePtrExtensions.h"
 #include "nsAlgorithm.h"
 #include "nsPrintfCString.h"
 #include "nsIObserver.h"
@@ -421,9 +424,9 @@ CancelVibrate(const hal::WindowIdentifier &)
 
 namespace {
 
-class BatteryUpdater : public nsRunnable {
+class BatteryUpdater : public Runnable {
 public:
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     hal::BatteryInformation info;
     hal_impl::GetCurrentBatteryInformation(&info);
@@ -523,7 +526,6 @@ void
 EnableBatteryNotifications()
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(RegisterBatteryObserverIOThread));
 }
 
@@ -541,7 +543,6 @@ void
 DisableBatteryNotifications()
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(UnregisterBatteryObserverIOThread));
 }
 
@@ -708,27 +709,6 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
 
 namespace {
 
-/**
- * RAII class to help us remember to close file descriptors.
- */
-
-bool WriteToFile(const char *filename, const char *toWrite)
-{
-  int fd = open(filename, O_WRONLY);
-  ScopedClose autoClose(fd);
-  if (fd < 0) {
-    HAL_LOG("Unable to open file %s.", filename);
-    return false;
-  }
-
-  if (write(fd, toWrite, strlen(toWrite)) < 0) {
-    HAL_LOG("Unable to write to file %s.", filename);
-    return false;
-  }
-
-  return true;
-}
-
 // We can write to screenEnabledFilename to enable/disable the screen, but when
 // we read, we always get "mem"!  So we have to keep track ourselves whether
 // the screen is on or not.
@@ -741,7 +721,7 @@ bool sScreenEnabled = true;
 bool sCpuSleepAllowed = true;
 
 // Some CPU wake locks may be acquired internally in HAL. We use a counter to
-// keep track of these needs. Note we have to hold |sInternalLockCpuMonitor|
+// keep track of these needs. Note we have to hold |sInternalLockCpuMutex|
 // when reading or writing this variable to ensure thread-safe.
 int32_t sInternalLockCpuCount = 0;
 
@@ -839,7 +819,7 @@ SetScreenBrightness(double brightness)
   }
 }
 
-static Monitor* sInternalLockCpuMonitor = nullptr;
+static StaticMutex sInternalLockCpuMutex;
 
 static void
 UpdateCpuSleepState()
@@ -847,21 +827,21 @@ UpdateCpuSleepState()
   const char *wakeLockFilename = "/sys/power/wake_lock";
   const char *wakeUnlockFilename = "/sys/power/wake_unlock";
 
-  sInternalLockCpuMonitor->AssertCurrentThreadOwns();
+  sInternalLockCpuMutex.AssertCurrentThreadOwns();
   bool allowed = sCpuSleepAllowed && !sInternalLockCpuCount;
-  WriteToFile(allowed ? wakeUnlockFilename : wakeLockFilename, "gecko");
+  WriteSysFile(allowed ? wakeUnlockFilename : wakeLockFilename, "gecko");
 }
 
 static void
 InternalLockCpu() {
-  MonitorAutoLock monitor(*sInternalLockCpuMonitor);
+  StaticMutexAutoLock lock(sInternalLockCpuMutex);
   ++sInternalLockCpuCount;
   UpdateCpuSleepState();
 }
 
 static void
 InternalUnlockCpu() {
-  MonitorAutoLock monitor(*sInternalLockCpuMonitor);
+  StaticMutexAutoLock lock(sInternalLockCpuMutex);
   --sInternalLockCpuCount;
   UpdateCpuSleepState();
 }
@@ -875,7 +855,7 @@ GetCpuSleepAllowed()
 void
 SetCpuSleepAllowed(bool aAllowed)
 {
-  MonitorAutoLock monitor(*sInternalLockCpuMonitor);
+  StaticMutexAutoLock lock(sInternalLockCpuMutex);
   sCpuSleepAllowed = aAllowed;
   UpdateCpuSleepState();
 }
@@ -1062,11 +1042,11 @@ int AlarmData::sNextGeneration = 0;
 
 AlarmData* sAlarmData = nullptr;
 
-class AlarmFiredEvent : public nsRunnable {
+class AlarmFiredEvent : public Runnable {
 public:
   AlarmFiredEvent(int aGeneration) : mGeneration(aGeneration) {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     // Guard against spurious notifications caused by an alarm firing
     // concurrently with it being disabled.
     if (sAlarmData && !sAlarmData->mShuttingDown &&
@@ -1146,7 +1126,7 @@ EnableAlarm()
     return false;
   }
 
-  nsAutoPtr<AlarmData> alarmData(new AlarmData(alarmFd));
+  UniquePtr<AlarmData> alarmData = MakeUnique<AlarmData>(alarmFd);
 
   struct sigaction actions;
   memset(&actions, 0, sizeof(actions));
@@ -1162,14 +1142,10 @@ EnableAlarm()
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-  // Initialize the monitor for internally locking CPU to ensure thread-safe
-  // before running the alarm-watcher thread.
-  sInternalLockCpuMonitor = new Monitor("sInternalLockCpuMonitor");
   int status = pthread_create(&sAlarmFireWatcherThread, &attr, WaitForAlarm,
                               alarmData.get());
   if (status) {
-    alarmData = nullptr;
-    delete sInternalLockCpuMonitor;
+    alarmData.reset();
     HAL_LOG("Failed to create alarm-watcher thread. Status: %d.", status);
     return false;
   }
@@ -1177,7 +1153,7 @@ EnableAlarm()
   pthread_attr_destroy(&attr);
 
   // The thread owns this now.  We only hold a pointer.
-  sAlarmData = alarmData.forget();
+  sAlarmData = alarmData.release();
   return true;
 }
 
@@ -1193,8 +1169,6 @@ DisableAlarm()
   // data pointed at by sAlarmData.
   DebugOnly<int> err = pthread_kill(sAlarmFireWatcherThread, SIGUSR1);
   MOZ_ASSERT(!err);
-
-  delete sInternalLockCpuMonitor;
 }
 
 bool
@@ -1257,7 +1231,7 @@ public:
       mRegexes(nullptr)
   {
     // Enable timestamps in kernel's printk
-    WriteToFile("/sys/module/printk/parameters/time", "Y");
+    WriteSysFile("/sys/module/printk/parameters/time", "Y");
   }
 
   NS_DECL_ISUPPORTS
@@ -1268,7 +1242,7 @@ protected:
 
 private:
   double mLastLineChecked;
-  ScopedFreePtr<regex_t> mRegexes;
+  UniqueFreePtr<regex_t> mRegexes;
 };
 NS_IMPL_ISUPPORTS(OomVictimLogger, nsIObserver);
 
@@ -1302,9 +1276,13 @@ OomVictimLogger::Observe(
 
   // Compile our regex just in time
   if (!mRegexes) {
-    mRegexes = static_cast<regex_t*>(malloc(sizeof(regex_t) * regex_count));
+    UniqueFreePtr<regex_t> regexes(
+      static_cast<regex_t*>(malloc(sizeof(regex_t) * regex_count))
+    );
+    mRegexes.swap(regexes);
     for (size_t i = 0; i < regex_count; i++) {
-      int compilation_err = regcomp(&(mRegexes[i]), regexes_raw[i], REG_NOSUB);
+      int compilation_err =
+        regcomp(&(mRegexes.get()[i]), regexes_raw[i], REG_NOSUB);
       if (compilation_err) {
         OOM_LOG(ANDROID_LOG_ERROR, "Cannot compile regex \"%s\"\n", regexes_raw[i]);
         return NS_OK;
@@ -1318,22 +1296,22 @@ OomVictimLogger::Observe(
   // deprecated the old klog defs.
   // Our current bionic does not hit this
   // change yet so handle the future change.
-  // (ICS doesn't have KLOG_SIZE_BUFFER but 
+  // (ICS doesn't have KLOG_SIZE_BUFFER but
   // JB and onwards does.)
   #define KLOG_SIZE_BUFFER KLOG_WRITE
 #endif
   // Retreive kernel log
   int msg_buf_size = klogctl(KLOG_SIZE_BUFFER, NULL, 0);
-  ScopedFreePtr<char> msg_buf(static_cast<char *>(malloc(msg_buf_size + 1)));
-  int read_size = klogctl(KLOG_READ_ALL, msg_buf.rwget(), msg_buf_size);
+  UniqueFreePtr<char> msg_buf(static_cast<char *>(malloc(msg_buf_size + 1)));
+  int read_size = klogctl(KLOG_READ_ALL, msg_buf.get(), msg_buf_size);
 
   // Turn buffer into cstring
   read_size = read_size > msg_buf_size ? msg_buf_size : read_size;
-  msg_buf.rwget()[read_size] = '\0';
+  msg_buf.get()[read_size] = '\0';
 
   // Foreach line
   char* line_end;
-  char* line_begin = msg_buf.rwget();
+  char* line_begin = msg_buf.get();
   for (; (line_end = strchr(line_begin, '\n')); line_begin = line_end + 1) {
     // make line into cstring
     *line_end = '\0';
@@ -1366,7 +1344,7 @@ OomVictimLogger::Observe(
 
     // Log interesting lines
     for (size_t i = 0; i < regex_count; i++) {
-      int matching = !regexec(&(mRegexes[i]), line_begin, 0, NULL, 0);
+      int matching = !regexec(&(mRegexes.get()[i]), line_begin, 0, NULL, 0);
       if (matching) {
         // Log content of kernel message. We try to skip the ], but if for
         // some reason (most likely due to buffer overflow/wraparound), we
@@ -1484,7 +1462,7 @@ private:
     nsCString cgroupName = mGroup;
 
     /* If mGroup is empty, our cgroup.procs file is the root procs file,
-     * located at /sys/fs/cgroup/memory/cgroup.procs.  Otherwise our procs 
+     * located at /sys/fs/cgroup/memory/cgroup.procs.  Otherwise our procs
      * file is /sys/fs/cgroup/memory/NAME/cgroup.procs. */
 
     if (!mGroup.IsEmpty()) {
@@ -1559,16 +1537,16 @@ EnsureCpuCGroupExists(const nsACString &aGroup)
 
   nsAutoCString pathPrefix(kDevCpuCtl + aGroup + kSlash);
   nsAutoCString cpuSharesPath(pathPrefix + NS_LITERAL_CSTRING("cpu.shares"));
-  if (cpuShares && !WriteToFile(cpuSharesPath.get(),
-                                nsPrintfCString("%d", cpuShares).get())) {
+  if (cpuShares && !WriteSysFile(cpuSharesPath.get(),
+                                 nsPrintfCString("%d", cpuShares).get())) {
     HAL_LOG("Could not set the cpu share for group %s", cpuSharesPath.get());
     return false;
   }
 
   nsAutoCString notifyOnMigratePath(pathPrefix
     + NS_LITERAL_CSTRING("cpu.notify_on_migrate"));
-  if (!WriteToFile(notifyOnMigratePath.get(),
-                   nsPrintfCString("%d", cpuNotifyOnMigrate).get())) {
+  if (!WriteSysFile(notifyOnMigratePath.get(),
+                    nsPrintfCString("%d", cpuNotifyOnMigrate).get())) {
     HAL_LOG("Could not set the cpu migration notification flag for group %s",
             notifyOnMigratePath.get());
     return false;
@@ -1616,8 +1594,8 @@ EnsureMemCGroupExists(const nsACString &aGroup)
 
   nsAutoCString pathPrefix(kMemCtl + aGroup + kSlash);
   nsAutoCString memSwappinessPath(pathPrefix + NS_LITERAL_CSTRING("memory.swappiness"));
-  if (!WriteToFile(memSwappinessPath.get(),
-                   nsPrintfCString("%d", memSwappiness).get())) {
+  if (!WriteSysFile(memSwappinessPath.get(),
+                    nsPrintfCString("%d", memSwappiness).get())) {
     HAL_LOG("Could not set the memory.swappiness for group %s", memSwappinessPath.get());
     return false;
   }
@@ -1809,9 +1787,9 @@ EnsureKernelLowMemKillerParamsSet()
   adjParams.Cut(adjParams.Length() - 1, 1);
   minfreeParams.Cut(minfreeParams.Length() - 1, 1);
   if (!adjParams.IsEmpty() && !minfreeParams.IsEmpty()) {
-    WriteToFile("/sys/module/lowmemorykiller/parameters/adj", adjParams.get());
-    WriteToFile("/sys/module/lowmemorykiller/parameters/minfree",
-                minfreeParams.get());
+    WriteSysFile("/sys/module/lowmemorykiller/parameters/adj", adjParams.get());
+    WriteSysFile("/sys/module/lowmemorykiller/parameters/minfree",
+                 minfreeParams.get());
   }
 
   // Set the low-memory-notification threshold.
@@ -1821,7 +1799,7 @@ EnsureKernelLowMemKillerParamsSet()
         &lowMemNotifyThresholdKB))) {
 
     // notify_trigger is in pages.
-    WriteToFile("/sys/module/lowmemorykiller/parameters/notify_trigger",
+    WriteSysFile("/sys/module/lowmemorykiller/parameters/notify_trigger",
       nsPrintfCString("%ld", lowMemNotifyThresholdKB * 1024 / page_size).get());
   }
 
@@ -1856,11 +1834,11 @@ SetProcessPriority(int aPid, ProcessPriority aPriority, uint32_t aLRU)
 
   // We try the newer interface first, and fall back to the older interface
   // on failure.
-  if (!WriteToFile(nsPrintfCString("/proc/%d/oom_score_adj", aPid).get(),
-                   nsPrintfCString("%d", oomScoreAdj).get()))
+  if (!WriteSysFile(nsPrintfCString("/proc/%d/oom_score_adj", aPid).get(),
+                    nsPrintfCString("%d", oomScoreAdj).get()))
   {
-    WriteToFile(nsPrintfCString("/proc/%d/oom_adj", aPid).get(),
-                nsPrintfCString("%d", OomAdjOfOomScoreAdj(oomScoreAdj)).get());
+    WriteSysFile(nsPrintfCString("/proc/%d/oom_adj", aPid).get(),
+                 nsPrintfCString("%d", OomAdjOfOomScoreAdj(oomScoreAdj)).get());
   }
 
   HAL_LOG("Assigning pid %d to cgroup %s", aPid, pc->CGroup().get());
@@ -1997,7 +1975,7 @@ namespace {
  * We have to run this from the main thread since preferences can only be read on
  * main thread.
  */
-class SetThreadPriorityRunnable : public nsRunnable
+class SetThreadPriorityRunnable : public Runnable
 {
 public:
   SetThreadPriorityRunnable(pid_t aThreadId, hal::ThreadPriority aThreadPriority)
@@ -2005,7 +1983,7 @@ public:
     , mThreadPriority(aThreadPriority)
   { }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     NS_ASSERTION(NS_IsMainThread(), "Can only set thread priorities on main thread");
     hal_impl::DoSetThreadPriority(mThreadId, mThreadPriority);

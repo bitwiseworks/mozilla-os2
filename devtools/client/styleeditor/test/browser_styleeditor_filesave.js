@@ -8,9 +8,6 @@
 const TESTCASE_URI_HTML = TEST_BASE_HTTP + "simple.html";
 const TESTCASE_URI_CSS = TEST_BASE_HTTP + "simple.css";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-
 var tempScope = {};
 Components.utils.import("resource://gre/modules/FileUtils.jsm", tempScope);
 Components.utils.import("resource://gre/modules/NetUtil.jsm", tempScope);
@@ -42,7 +39,7 @@ add_task(function* () {
   info("Saving the changes.");
   dirty = editor.sourceEditor.once("dirty-change");
 
-  editor.saveToFile(null, function(file) {
+  editor.saveToFile(null, function (file) {
     ok(file, "file should get saved directly when using a file:// URI");
   });
 
@@ -54,7 +51,7 @@ add_task(function* () {
 });
 
 function copy(srcChromeURL, destFileName) {
-  let deferred = promise.defer();
+  let deferred = defer();
   let destFile = FileUtils.getFile("ProfD", [destFileName]);
   write(read(srcChromeURL), destFile, deferred.resolve);
 
@@ -65,18 +62,11 @@ function read(srcChromeURL) {
   let scriptableStream = Cc["@mozilla.org/scriptableinputstream;1"]
     .getService(Ci.nsIScriptableInputStream);
 
-  let channel = Services.io.newChannel2(srcChromeURL,
-                                        null,
-                                        null,
-                                        // aLoadingNode
-                                        null,
-                                        Services.scriptSecurityManager
-                                                .getSystemPrincipal(),
-                                        // aTriggeringPrincipal
-                                        null,
-                                        Ci.nsILoadInfo.SEC_NORMAL,
-                                        Ci.nsIContentPolicy.TYPE_OTHER);
-  let input = channel.open();
+  let channel = NetUtil.newChannel({
+    uri: srcChromeURL,
+    loadUsingSystemPrincipal: true
+  });
+  let input = channel.open2();
   scriptableStream.init(input);
 
   let data = "";
@@ -98,7 +88,7 @@ function write(data, file, callback) {
   let istream = converter.convertToInputStream(data);
   let ostream = FileUtils.openSafeFileOutputStream(file);
 
-  NetUtil.asyncCopy(istream, ostream, function(status) {
+  NetUtil.asyncCopy(istream, ostream, function (status) {
     if (!Components.isSuccessCode(status)) {
       info("Couldn't write to " + file.path);
       return;

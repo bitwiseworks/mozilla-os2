@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,16 +12,17 @@ XPIDL_SOURCES += [
     'nsIASN1Sequence.idl',
     'nsIAssociatedContentSecurity.idl',
     'nsIBadCertListener2.idl',
-    'nsIBufEntropyCollector.idl',
     'nsICertBlocklist.idl',
     'nsICertificateDialogs.idl',
     'nsICertOverrideService.idl',
-    'nsICertPickDialogs.idl',
     'nsIClientAuthDialogs.idl',
+    'nsIContentSignatureVerifier.idl',
     'nsIDataSignatureVerifier.idl',
     'nsIGenKeypairInfoDlg.idl',
     'nsIKeygenThread.idl',
     'nsIKeyModule.idl',
+    'nsILocalCertService.idl',
+    'nsINSSU2FToken.idl',
     'nsINSSVersion.idl',
     'nsIPK11Token.idl',
     'nsIPK11TokenDB.idl',
@@ -30,13 +31,14 @@ XPIDL_SOURCES += [
     'nsIPKCS11ModuleDB.idl',
     'nsIPKCS11Slot.idl',
     'nsIProtectedAuthThread.idl',
+    'nsISecretDecoderRing.idl',
     'nsISecurityUITelemetry.idl',
     'nsISiteSecurityService.idl',
     'nsISSLStatus.idl',
     'nsISSLStatusProvider.idl',
     'nsITokenDialogs.idl',
     'nsITokenPasswordDialogs.idl',
-    'nsIUserCertPicker.idl',
+    'nsIU2FToken.idl',
     'nsIWeakCryptoOverride.idl',
     'nsIX509Cert.idl',
     'nsIX509CertDB.idl',
@@ -51,6 +53,11 @@ if CONFIG['MOZ_XUL']:
 
 XPIDL_MODULE = 'pipnss'
 
+EXTRA_JS_MODULES.psm += [
+    'DER.jsm',
+    'X509.jsm',
+]
+
 EXPORTS += [
     'CryptoTask.h',
     'nsClientAuthRemember.h',
@@ -60,7 +67,9 @@ EXPORTS += [
     'nsNSSComponent.h',
     'nsNSSHelper.h',
     'nsNSSShutDown.h',
+    'nsNSSU2FToken.h',
     'nsRandomGenerator.h',
+    'nsSecurityHeaderParser.h',
     'NSSErrorsService.h',
     'ScopedNSSTypes.h',
     'SharedCertVerifier.h',
@@ -81,16 +90,16 @@ EXPORTS.ipc += [
 
 UNIFIED_SOURCES += [
     'CertBlocklist.cpp',
+    'ContentSignatureVerifier.cpp',
     'CryptoTask.cpp',
+    'CSTrustDomain.cpp',
     'DataStorage.cpp',
+    'LocalCertService.cpp',
     'nsCertOverrideService.cpp',
-    'nsCertPicker.cpp',
-    'nsCertVerificationThread.cpp',
     'nsClientAuthRemember.cpp',
     'nsCrypto.cpp',
     'nsCryptoHash.cpp',
     'nsDataSignatureVerifier.cpp',
-    'nsEntropyCollector.cpp',
     'nsKeygenHandler.cpp',
     'nsKeygenHandlerContent.cpp',
     'nsKeygenThread.cpp',
@@ -99,6 +108,7 @@ UNIFIED_SOURCES += [
     'nsNSSCallbacks.cpp',
     'nsNSSCertHelper.cpp',
     'nsNSSCertificate.cpp',
+    'nsNSSCertificateDB.cpp',
     'nsNSSCertificateFakeTransport.cpp',
     'nsNSSCertTrust.cpp',
     'nsNSSCertValidity.cpp',
@@ -107,15 +117,14 @@ UNIFIED_SOURCES += [
     'nsNSSIOLayer.cpp',
     'nsNSSModule.cpp',
     'nsNSSShutDown.cpp',
+    'nsNSSU2FToken.cpp',
     'nsNSSVersion.cpp',
     'nsNTLMAuthModule.cpp',
     'nsPK11TokenDB.cpp',
     'nsPKCS11Slot.cpp',
     'nsPKCS12Blob.cpp',
     'nsProtectedAuthThread.cpp',
-    'nsPSMBackgroundThread.cpp',
     'nsRandomGenerator.cpp',
-    'nsSDR.cpp',
     'nsSecureBrowserUIImpl.cpp',
     'nsSecurityHeaderParser.cpp',
     'NSSErrorsService.cpp',
@@ -123,20 +132,15 @@ UNIFIED_SOURCES += [
     'nsSSLSocketProvider.cpp',
     'nsSSLStatus.cpp',
     'nsTLSSocketProvider.cpp',
-    'nsUsageArrayHelper.cpp',
     'PSMContentListener.cpp',
     'PSMRunnable.cpp',
     'PublicKeyPinningService.cpp',
     'RootCertificateTelemetryUtils.cpp',
+    'SecretDecoderRing.cpp',
     'SharedSSLState.cpp',
     'SSLServerCertVerification.cpp',
     'TransportSecurityInfo.cpp',
     'WeakCryptoOverride.cpp',
-]
-
-# nsNSSCertificateDB.cpp needs to include nscert.h before everything else.
-SOURCES += [
-    'nsNSSCertificateDB.cpp',
 ]
 
 IPDL_SOURCES += [
@@ -161,6 +165,7 @@ FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '/dom/base',
+    '/dom/crypto',
     '/security/certverifier',
     '/security/pkix/include',
 ]
@@ -177,8 +182,13 @@ DEFINES['NSS_ENABLE_ECC'] = 'True'
 for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
     DEFINES[var] = '"%s"' % CONFIG[var]
 
+DEFINES['CERT_AddTempCertToPerm'] = '__CERT_AddTempCertToPerm'
+
 USE_LIBS += [
     'crmf',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

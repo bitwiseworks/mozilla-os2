@@ -24,6 +24,7 @@
 #include "nsIParser.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsScannerString.h"
+#include "mozilla/CheckedInt.h"
 
 class nsReadEndCondition {
 public:
@@ -59,95 +60,6 @@ class nsScanner {
        *  @return  error code reflecting read status
        */
       nsresult GetChar(char16_t& ch);
-
-      /**
-       *  peek ahead to consume next char from scanner's internal
-       *  input buffer
-       *  
-       *  @update  gess 3/25/98
-       *  @param   ch is the char to accept new value
-       *  @return  error code reflecting read status
-       */
-      nsresult Peek(char16_t& ch, uint32_t aOffset=0);
-
-      nsresult Peek(nsAString& aStr, int32_t aNumChars, int32_t aOffset = 0);
-
-      /**
-       *  Skip over chars as long as they equal given char
-       *  
-       *  @update  gess 3/25/98
-       *  @param   char to be skipped
-       *  @return  error code
-       */
-      nsresult SkipOver(char16_t aSkipChar);
-
-      /**
-       *  Skip whitespace on scanner input stream
-       *  
-       *  @update  gess 3/25/98
-       *  @return  error status
-       */
-      nsresult SkipWhitespace(int32_t& aNewlinesSkipped);
-
-      /**
-       *  Consume characters until you run into space, a '<', a '>', or a '/'.
-       *  
-       *  @param   aString - receives new data from stream
-       *  @return  error code
-       */
-      nsresult ReadTagIdentifier(nsScannerSharedSubstring& aString);
-
-      /**
-       *  Consume characters until you run into a char that's not valid in an
-       *  entity name
-       *  
-       *  @param   aString - receives new data from stream
-       *  @return  error code
-       */
-      nsresult ReadEntityIdentifier(nsString& aString);
-      nsresult ReadNumber(nsString& aString,int32_t aBase);
-      nsresult ReadWhitespace(nsScannerSharedSubstring& aString, 
-                              int32_t& aNewlinesSkipped,
-                              bool& aHaveCR);
-      nsresult ReadWhitespace(nsScannerIterator& aStart, 
-                              nsScannerIterator& aEnd,
-                              int32_t& aNewlinesSkipped);
-
-      /**
-       *  Consume characters until you find the terminal char
-       *  
-       *  @update  gess 3/25/98
-       *  @param   aString receives new data from stream
-       *  @param   aTerminal contains terminating char
-       *  @param   addTerminal tells us whether to append terminal to aString
-       *  @return  error code
-       */
-      nsresult ReadUntil(nsAString& aString,
-                         char16_t aTerminal,
-                         bool addTerminal);
-
-      /**
-       *  Consume characters until you find one contained in given
-       *  terminal set.
-       *  
-       *  @update  gess 3/25/98
-       *  @param   aString receives new data from stream
-       *  @param   aTermSet contains set of terminating chars
-       *  @param   addTerminal tells us whether to append terminal to aString
-       *  @return  error code
-       */
-      nsresult ReadUntil(nsAString& aString,
-                         const nsReadEndCondition& aEndCondition, 
-                         bool addTerminal);
-
-      nsresult ReadUntil(nsScannerSharedSubstring& aString,
-                         const nsReadEndCondition& aEndCondition,
-                         bool addTerminal);
-
-      nsresult ReadUntil(nsScannerIterator& aStart,
-                         nsScannerIterator& aEnd,
-                         const nsReadEndCondition& aEndCondition, 
-                         bool addTerminal);
 
       /**
        *  Records current offset position in input stream. This allows us
@@ -198,8 +110,7 @@ class nsScanner {
        *  @param   
        *  @return  
        */
-      nsresult Append(const char* aBuffer, uint32_t aLen,
-                      nsIRequest *aRequest);
+      nsresult Append(const char* aBuffer, uint32_t aLen);
 
       /**
        *  Call this to copy bytes out of the scanner that have not yet been consumed
@@ -237,10 +148,7 @@ class nsScanner {
       void CurrentPosition(nsScannerIterator& aPosition);
       void EndReading(nsScannerIterator& aPosition);
       void SetPosition(nsScannerIterator& aPosition,
-                       bool aTruncate = false,
-                       bool aReverse = false);
-      void ReplaceCharacter(nsScannerIterator& aPosition,
-                            char16_t aChar);
+                       bool aTruncate = false);
 
       /**
        * Internal method used to cause the internal buffer to
@@ -251,34 +159,15 @@ class nsScanner {
       bool      IsIncremental(void) {return mIncremental;}
       void      SetIncremental(bool anIncrValue) {mIncremental=anIncrValue;}
 
-      /**
-       * Return the position of the first non-whitespace
-       * character. This is only reliable before consumers start
-       * reading from this scanner.
-       */
-      int32_t FirstNonWhitespacePosition()
-      {
-        return mFirstNonWhitespacePosition;
-      }
-
-      /**
-       * Override replacement character used by nsIUnicodeDecoder.
-       * Default behavior is that it uses nsIUnicodeDecoder's mapping.
-       *
-       * @param aReplacementCharacter the replacement character
-       *        XML (expat) parser uses 0xffff
-       */
-      void OverrideReplacementCharacter(char16_t aReplacementCharacter);
-
   protected:
 
-      bool AppendToBuffer(nsScannerString::Buffer *, nsIRequest *aRequest, int32_t aErrorPos = -1);
+      bool AppendToBuffer(nsScannerString::Buffer* aBuffer);
       bool AppendToBuffer(const nsAString& aStr)
       {
         nsScannerString::Buffer* buf = nsScannerString::AllocBufferFromString(aStr);
         if (!buf)
           return false;
-        AppendToBuffer(buf, nullptr);
+        AppendToBuffer(buf);
         return true;
       }
 
@@ -286,14 +175,8 @@ class nsScanner {
       nsScannerIterator            mCurrentPosition; // The position we will next read from in the scanner buffer
       nsScannerIterator            mMarkPosition;    // The position last marked (we may rewind to here)
       nsScannerIterator            mEndPosition;     // The current end of the scanner buffer
-      nsScannerIterator            mFirstInvalidPosition; // The position of the first invalid character that was detected
       nsString        mFilename;
-      uint32_t        mCountRemaining; // The number of bytes still to be read
-                                       // from the scanner buffer
       bool            mIncremental;
-      bool            mHasInvalidCharacter;
-      char16_t       mReplacementCharacter;
-      int32_t         mFirstNonWhitespacePosition;
       int32_t         mCharsetSource;
       nsCString       mCharset;
       nsCOMPtr<nsIUnicodeDecoder> mUnicodeDecoder;

@@ -9,26 +9,14 @@
  * epoch of the performance entry.
  */
 
-const {
-  method, Arg, Option, RetVal, Front, FrontClass, Actor, ActorClass
-} = require("devtools/server/protocol");
+const { Actor, ActorClassWithSpec } = require("devtools/shared/protocol");
+const performanceSpec = require("devtools/shared/specs/performance-entries");
 const events = require("sdk/event/core");
 
-var PerformanceEntriesActor = exports.PerformanceEntriesActor = ActorClass({
-
-  typeName: "performanceEntries",
-
+var PerformanceEntriesActor = ActorClassWithSpec(performanceSpec, {
   listenerAdded: false,
 
-  events: {
-    "entry" : {
-      type: "entry",
-      detail: Arg(0, "json") // object containing performance entry name, type,
-                             // origin, and epoch.
-    }
-  },
-
-  initialize: function(conn, tabActor) {
+  initialize: function (conn, tabActor) {
     Actor.prototype.initialize.call(this, conn);
     this.window = tabActor.window;
   },
@@ -36,29 +24,29 @@ var PerformanceEntriesActor = exports.PerformanceEntriesActor = ActorClass({
   /**
    * Start tracking the user timings.
    */
-  start: method(function() {
+  start: function () {
     if (!this.listenerAdded) {
       this.onPerformanceEntry = this.onPerformanceEntry.bind(this);
       this.window.addEventListener("performanceentry", this.onPerformanceEntry, true);
       this.listenerAdded = true;
     }
-  }),
+  },
 
   /**
    * Stop tracking the user timings.
    */
-  stop: method(function() {
+  stop: function () {
     if (this.listenerAdded) {
       this.window.removeEventListener("performanceentry", this.onPerformanceEntry, true);
       this.listenerAdded = false;
     }
-  }),
+  },
 
-  disconnect: function() {
+  disconnect: function () {
     this.destroy();
   },
 
-  destroy: function() {
+  destroy: function () {
     this.stop();
     Actor.prototype.destroy.call(this);
   },
@@ -70,14 +58,8 @@ var PerformanceEntriesActor = exports.PerformanceEntriesActor = ActorClass({
       origin: e.origin,
       epoch: e.epoch
     };
-    events.emit(this, 'entry', emitDetail);
+    events.emit(this, "entry", emitDetail);
   }
 });
 
-exports.PerformanceEntriesFront = FrontClass(PerformanceEntriesActor, {
-  initialize: function(client, form) {
-    Front.prototype.initialize.call(this, client);
-    this.actorID = form.performanceEntriesActor;
-    this.manage(this);
-  },
-});
+exports.PerformanceEntriesActor = PerformanceEntriesActor;

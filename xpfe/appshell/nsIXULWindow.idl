@@ -17,6 +17,7 @@ interface nsIDocShell;
 interface nsIDocShellTreeItem;
 interface nsIXULBrowserWindow;
 interface nsITabParent;
+interface mozIDOMWindowProxy;
 
 [scriptable, uuid(d6d7a014-e28d-4c9d-8727-1cf6d870619b)]
 interface nsIXULWindow : nsISupports
@@ -120,10 +121,12 @@ interface nsIXULWindow : nsISupports
    * @param aChromeFlags see nsIWebBrowserChrome
    * @param aOpeningTab the TabParent that requested this new window be opened.
    *                    Can be left null.
+   * @param aOpener The window which is requesting that this new window be opened.
    * @return the newly minted window
    */
   nsIXULWindow createNewWindow(in int32_t aChromeFlags,
-                               in nsITabParent aOpeningTab);
+                               in nsITabParent aOpeningTab,
+                               in mozIDOMWindowProxy aOpener);
 
   attribute nsIXULBrowserWindow XULBrowserWindow;
 
@@ -134,4 +137,32 @@ interface nsIXULWindow : nsISupports
    * docshell could cause problems.
    */
   [noscript] void applyChromeFlags();
+
+  /**
+   * Given the dimensions of some content area held within this
+   * XUL window, and assuming that that content area will change
+   * its dimensions in linear proportion to the dimensions of this
+   * XUL window, changes the size of the XUL window so that the
+   * content area reaches a particular size.
+   *
+   * We need to supply the content area dimensions because sometimes
+   * the child's nsDocShellTreeOwner needs to propagate a SizeShellTo
+   * call to the parent. But the shellItem argument of the call will
+   * not be available on the parent side.
+   *
+   * Note: this is an internal method, other consumers should never call this.
+   *
+   * @param aDesiredWidth
+   *        The desired width of the content area in device pixels.
+   * @param aDesiredHeight
+   *        The desired height of the content area in device pixels.
+   * @param shellItemWidth
+   *        The current width of the content area.
+   * @param shellItemHeight
+   *        The current height of the content area.
+   */
+  [noscript, notxpcom] void sizeShellToWithLimit(in int32_t aDesiredWidth,
+                                                 in int32_t aDesiredHeight,
+                                                 in int32_t shellItemWidth,
+                                                 in int32_t shellItemHeight);
 };

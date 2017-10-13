@@ -14,7 +14,6 @@ const TELEMETRY_LOG_PREF = "toolkit.telemetry.log.level";
 const telemetryOriginalLogPref = Preferences.get(TELEMETRY_LOG_PREF, null);
 
 const originalReportUrl = Services.prefs.getCharPref("datareporting.healthreport.about.reportUrl");
-const originalReportUrlUnified = Services.prefs.getCharPref("datareporting.healthreport.about.reportUrlUnified");
 
 registerCleanupFunction(function() {
   // Ensure we don't pollute prefs for next tests.
@@ -26,13 +25,7 @@ registerCleanupFunction(function() {
 
   try {
     Services.prefs.setCharPref("datareporting.healthreport.about.reportUrl", originalReportUrl);
-    Services.prefs.setCharPref("datareporting.healthreport.about.reportUrlUnified", originalReportUrlUnified);
-    let policy = Cc["@mozilla.org/datareporting/service;1"]
-                 .getService(Ci.nsISupports)
-                 .wrappedJSObject
-                 .policy;
-    policy.recordHealthReportUploadEnabled(true,
-                                           "Resetting after tests.");
+    Services.prefs.setBoolPref("datareporting.healthreport.uploadEnabled", true);
   } catch (ex) {}
 });
 
@@ -52,7 +45,7 @@ function fakeTelemetryNow(...args) {
   return date;
 }
 
-function setupPingArchive() {
+function* setupPingArchive() {
   let scope = {};
   Cu.import("resource://gre/modules/TelemetryController.jsm", scope);
   Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader)
@@ -74,18 +67,10 @@ var gTests = [
     yield setupPingArchive();
     Preferences.set("datareporting.healthreport.about.reportUrl",
                     HTTPS_BASE + "healthreport_testRemoteCommands.html");
-    Preferences.set("datareporting.healthreport.about.reportUrlUnified",
-                    HTTPS_BASE + "healthreport_testRemoteCommands.html");
   }),
   run: function (iframe)
   {
     let deferred = Promise.defer();
-
-    let policy = Cc["@mozilla.org/datareporting/service;1"]
-                 .getService(Ci.nsISupports)
-                 .wrappedJSObject
-                 .policy;
-
     let results = 0;
     try {
       iframe.contentWindow.addEventListener("FirefoxHealthReportTestResponse", function evtHandler(event) {
@@ -101,7 +86,7 @@ var gTests = [
         }
       }, true);
 
-    } catch(e) {
+    } catch (e) {
       ok(false, "Failed to get all commands");
       deferred.reject();
     }
@@ -118,14 +103,14 @@ function test()
   // xxxmpc leaving this here until we resolve bug 854038 and bug 854060
   requestLongerTimeout(10);
 
-  Task.spawn(function () {
-    for (let test of gTests) {
-      info(test.desc);
-      yield test.setup();
+  Task.spawn(function* () {
+    for (let testCase of gTests) {
+      info(testCase.desc);
+      yield testCase.setup();
 
       let iframe = yield promiseNewTabLoadEvent("about:healthreport");
 
-      yield test.run(iframe);
+      yield testCase.run(iframe);
 
       gBrowser.removeCurrentTab();
     }

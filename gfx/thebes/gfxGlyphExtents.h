@@ -15,6 +15,12 @@
 class gfxContext;
 struct gfxRect;
 
+namespace mozilla {
+namespace gfx {
+class DrawTarget;
+} // namespace gfx
+} // namespace mozilla
+
 /**
  * This stores glyph bounds information for a particular gfxFont, at
  * a particular appunits-per-dev-pixel ratio (because the compressed glyph
@@ -29,6 +35,8 @@ struct gfxRect;
  * assumed to be zero.
  */
 class gfxGlyphExtents {
+    typedef mozilla::gfx::DrawTarget DrawTarget;
+
 public:
     explicit gfxGlyphExtents(int32_t aAppUnitsPerDevUnit) :
         mAppUnitsPerDevUnit(aAppUnitsPerDevUnit) {
@@ -62,8 +70,8 @@ public:
     // Get glyph extents; a rectangle relative to the left baseline origin
     // Returns true on success. Can fail on OOM or when aContext is null
     // and extents were not (successfully) prefetched.
-    bool GetTightGlyphExtentsAppUnits(gfxFont *aFont,
-            gfxContext *aContext, uint32_t aGlyphID, gfxRect *aExtents);
+    bool GetTightGlyphExtentsAppUnits(gfxFont* aFont,
+            DrawTarget* aDrawTarget, uint32_t aGlyphID, gfxRect* aExtents);
 
     void SetContainedGlyphWidthAppUnits(uint32_t aGlyphID, uint16_t aWidth) {
         mContainedGlyphWidths.Set(aGlyphID, aWidth);

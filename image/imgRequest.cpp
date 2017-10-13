@@ -108,7 +108,10 @@ imgRequest::Init(nsIURI *aURI,
   mProperties = do_CreateInstance("@mozilla.org/properties;1");
 
   // Use ImageURL to ensure access to URI data off main thread.
-  mURI = new ImageURL(aURI);
+  nsresult rv;
+  mURI = new ImageURL(aURI, rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   mCurrentURI = aCurrentURI;
   mRequest = aRequest;
   mChannel = aChannel;
@@ -308,7 +311,7 @@ imgRequest::CancelAndAbort(nsresult aStatus)
   }
 }
 
-class imgRequestMainThreadCancel : public nsRunnable
+class imgRequestMainThreadCancel : public Runnable
 {
 public:
   imgRequestMainThreadCancel(imgRequest* aImgRequest, nsresult aStatus)
@@ -319,7 +322,7 @@ public:
     MOZ_ASSERT(aImgRequest);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread(), "I should be running on the main thread!");
     mImgRequest->ContinueCancel(mStatus);
@@ -358,7 +361,7 @@ imgRequest::ContinueCancel(nsresult aStatus)
   }
 }
 
-class imgRequestMainThreadEvict : public nsRunnable
+class imgRequestMainThreadEvict : public Runnable
 {
 public:
   explicit imgRequestMainThreadEvict(imgRequest* aImgRequest)
@@ -368,7 +371,7 @@ public:
     MOZ_ASSERT(aImgRequest);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread(), "I should be running on the main thread!");
     mImgRequest->ContinueEvict();
@@ -795,6 +798,12 @@ imgRequest::OnStopRequest(nsIRequest* aRequest,
 
   RefPtr<Image> image = GetImage();
 
+  RefPtr<imgRequest> strongThis = this;
+
+  if (mIsMultiPartChannel && mNewPartPending) {
+    OnDataAvailable(aRequest, ctxt, nullptr, 0, 0);
+  }
+
   // XXXldb What if this is a non-last part of a multipart request?
   // xxx before we release our reference to mRequest, lets
   // save the last status that we saw so that the
@@ -876,7 +885,7 @@ struct mimetype_closure
 };
 
 /* prototype for these defined below */
-static NS_METHOD
+static nsresult
 sniff_mimetype_callback(nsIInputStream* in, void* closure,
                         const char* fromRawSegment, uint32_t toOffset,
                         uint32_t count, uint32_t* writeCount);
@@ -916,13 +925,15 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
 {
   NewPartResult result(aExistingImage);
 
-  mimetype_closure closure;
-  closure.newType = &result.mContentType;
+  if (aInStr) {
+    mimetype_closure closure;
+    closure.newType = &result.mContentType;
 
-  // Look at the first few bytes and see if we can tell what the data is from
-  // that since servers tend to lie. :(
-  uint32_t out;
-  aInStr->ReadSegments(sniff_mimetype_callback, &closure, aCount, &out);
+    // Look at the first few bytes and see if we can tell what the data is from
+    // that since servers tend to lie. :(
+    uint32_t out;
+    aInStr->ReadSegments(sniff_mimetype_callback, &closure, aCount, &out);
+  }
 
   nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
   if (result.mContentType.IsEmpty()) {
@@ -932,7 +943,9 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
       MOZ_LOG(gImgLog,
               LogLevel::Error, ("imgRequest::PrepareForNewPart -- "
                                 "Content type unavailable from the channel\n"));
-      return result;
+      if (!aIsMultipart) {
+        return result;
+      }
     }
   }
 
@@ -992,7 +1005,7 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
   return result;
 }
 
-class FinishPreparingForNewPartRunnable final : public nsRunnable
+class FinishPreparingForNewPartRunnable final : public Runnable
 {
 public:
   FinishPreparingForNewPartRunnable(imgRequest* aImgRequest,
@@ -1102,15 +1115,17 @@ imgRequest::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
   }
 
   // Notify the image that it has new data.
-  nsresult rv =
-    image->OnImageDataAvailable(aRequest, aContext, aInStr, aOffset, aCount);
+  if (aInStr) {
+    nsresult rv =
+      image->OnImageDataAvailable(aRequest, aContext, aInStr, aOffset, aCount);
 
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gImgLog, LogLevel::Warning,
-           ("[this=%p] imgRequest::OnDataAvailable -- "
-            "copy to RasterImage failed\n", this));
-    Cancel(NS_IMAGELIB_ERROR_FAILURE);
-    return NS_BINDING_ABORTED;
+    if (NS_FAILED(rv)) {
+      MOZ_LOG(gImgLog, LogLevel::Warning,
+             ("[this=%p] imgRequest::OnDataAvailable -- "
+              "copy to RasterImage failed\n", this));
+      Cancel(NS_IMAGELIB_ERROR_FAILURE);
+      return NS_BINDING_ABORTED;
+    }
   }
 
   return NS_OK;
@@ -1139,7 +1154,7 @@ imgRequest::SetProperties(const nsACString& aContentType,
   }
 }
 
-static NS_METHOD
+static nsresult
 sniff_mimetype_callback(nsIInputStream* in,
                         void* data,
                         const char* fromRawSegment,
@@ -1225,12 +1240,10 @@ imgRequest::OnRedirectVerifyCallback(nsresult result)
   mNewRedirectChannel = nullptr;
 
   if (LOG_TEST(LogLevel::Debug)) {
-    nsAutoCString spec;
-    if (mCurrentURI) {
-      mCurrentURI->GetSpec(spec);
-    }
     LOG_MSG_WITH_PARAM(gImgLog,
-                       "imgRequest::OnChannelRedirect", "old", spec.get());
+                       "imgRequest::OnChannelRedirect", "old",
+                       mCurrentURI ? mCurrentURI->GetSpecOrDefault().get()
+                                   : "");
   }
 
   // If the previous URI is a non-HTTPS URI, record that fact for later use by
@@ -1263,12 +1276,9 @@ imgRequest::OnRedirectVerifyCallback(nsresult result)
   mChannel->GetURI(getter_AddRefs(mCurrentURI));
 
   if (LOG_TEST(LogLevel::Debug)) {
-    nsAutoCString spec;
-    if (mCurrentURI) {
-      mCurrentURI->GetSpec(spec);
-    }
-    LOG_MSG_WITH_PARAM(gImgLog, "imgRequest::OnChannelRedirect",
-                       "new", spec.get());
+    LOG_MSG_WITH_PARAM(gImgLog, "imgRequest::OnChannelRedirect", "new",
+                       mCurrentURI ? mCurrentURI->GetSpecOrDefault().get()
+                                   : "");
   }
 
   // Make sure we have a protocol that returns data rather than opens an

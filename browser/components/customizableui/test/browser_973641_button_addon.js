@@ -7,7 +7,7 @@
 const kButton = "test_button_for_addon";
 var initialLocation = gBrowser.currentURI.spec;
 
-add_task(function() {
+add_task(function*() {
   info("Check addon button functionality");
 
   // create mocked addon button on the navigation bar
@@ -30,9 +30,8 @@ add_task(function() {
 
   resetTabs();
 
-  //move the add-on button in the Panel Menu
+  // move the add-on button in the Panel Menu
   CustomizableUI.addWidgetToArea(kButton, CustomizableUI.AREA_PANEL);
-  let addonButtonInNavbar = navBar.getElementsByAttribute("id", kButton);
   ok(!navBar.contains(addonButton), "Addon button was removed from the browser bar");
 
   // check the addon button's functionality in the Panel Menu
@@ -43,7 +42,7 @@ add_task(function() {
   yield checkButtonFunctionality(addonButtonInPanel[0]);
 });
 
-add_task(function asyncCleanup() {
+add_task(function* asyncCleanup() {
   resetTabs();
 
   // reset the UI to the default state
@@ -55,17 +54,17 @@ add_task(function asyncCleanup() {
 });
 
 function resetTabs() {
-  //close all opened tabs
-  while(gBrowser.tabs.length > 1) {
+  // close all opened tabs
+  while (gBrowser.tabs.length > 1) {
     gBrowser.removeTab(gBrowser.selectedTab);
   }
 
-  //restore the initial tab
+  // restore the initial tab
   gBrowser.addTab(initialLocation);
   gBrowser.removeTab(gBrowser.selectedTab);
 }
 
-function checkButtonFunctionality(aButton) {
+function* checkButtonFunctionality(aButton) {
   aButton.click();
   yield waitForCondition(() => gBrowser.currentURI &&
                                gBrowser.currentURI.spec == "about:addons");

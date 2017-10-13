@@ -11,12 +11,13 @@
 #include "nsAutoPtr.h"
 #include "mozilla/Logging.h"
 
-using namespace mozilla;
+namespace mozilla {
+namespace net {
 
 static LazyLogModule gRequestObserverProxyLog("nsRequestObserverProxy");
 
 #undef LOG
-#define LOG(args) MOZ_LOG(gRequestObserverProxyLog, mozilla::LogLevel::Debug, args)
+#define LOG(args) MOZ_LOG(gRequestObserverProxyLog, LogLevel::Debug, args)
 
 //-----------------------------------------------------------------------------
 // nsARequestObserverEvent internal class...
@@ -46,7 +47,7 @@ public:
 
     virtual ~nsOnStartRequestEvent() {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         LOG(("nsOnStartRequestEvent::HandleEvent [req=%x]\n", mRequest.get()));
 
@@ -85,7 +86,7 @@ public:
 
     virtual ~nsOnStopRequestEvent() {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         LOG(("nsOnStopRequestEvent::HandleEvent [req=%x]\n", mRequest.get()));
 
@@ -189,3 +190,6 @@ nsRequestObserverProxy::FireEvent(nsARequestObserverEvent *event)
     nsCOMPtr<nsIEventTarget> mainThread(do_GetMainThread());
     return mainThread->Dispatch(event, NS_DISPATCH_NORMAL);
 }
+
+} // namespace net
+} // namespace mozilla

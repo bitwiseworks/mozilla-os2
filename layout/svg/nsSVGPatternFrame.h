@@ -10,6 +10,7 @@
 #include "gfxMatrix.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/RefPtr.h"
+#include "nsAutoPtr.h"
 #include "nsSVGPaintServerFrame.h"
 
 class nsIFrame;
@@ -22,13 +23,11 @@ class SVGAnimatedPreserveAspectRatio;
 class nsSVGAnimatedTransformList;
 } // namespace mozilla
 
-typedef nsSVGPaintServerFrame  nsSVGPatternFrameBase;
-
 /**
  * Patterns can refer to other patterns. We create an nsSVGPaintingProperty
  * with property type nsGkAtoms::href to track the referenced pattern.
  */
-class nsSVGPatternFrame : public nsSVGPatternFrameBase
+class nsSVGPatternFrame : public nsSVGPaintServerFrame
 {
   typedef mozilla::gfx::SourceSurface SourceSurface;
 

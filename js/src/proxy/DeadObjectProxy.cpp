@@ -9,6 +9,7 @@
 #include "jsapi.h"
 #include "jsfun.h" // XXXefaust Bug 1064662
 
+#include "proxy/ScriptedProxyHandler.h"
 #include "vm/ProxyObject.h"
 
 using namespace js;
@@ -17,7 +18,7 @@ using namespace js::gc;
 static void
 ReportDead(JSContext *cx)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
 }
 
 bool
@@ -54,16 +55,17 @@ DeadObjectProxy::delete_(JSContext* cx, HandleObject wrapper, HandleId id,
 }
 
 bool
-DeadObjectProxy::enumerate(JSContext* cx, HandleObject wrapper, MutableHandleObject objp) const
-{
-    ReportDead(cx);
-    return false;
-}
-
-bool
 DeadObjectProxy::getPrototype(JSContext* cx, HandleObject proxy, MutableHandleObject protop) const
 {
     protop.set(nullptr);
+    return true;
+}
+
+bool
+DeadObjectProxy::getPrototypeIfOrdinary(JSContext* cx, HandleObject proxy, bool* isOrdinary,
+                                        MutableHandleObject protop) const
+{
+    *isOrdinary = false;
     return true;
 }
 
@@ -114,8 +116,7 @@ DeadObjectProxy::hasInstance(JSContext* cx, HandleObject proxy, MutableHandleVal
 }
 
 bool
-DeadObjectProxy::getBuiltinClass(JSContext* cx, HandleObject proxy,
-                                 ESClassValue* classValue) const
+DeadObjectProxy::getBuiltinClass(JSContext* cx, HandleObject proxy, ESClass* cls) const
 {
     ReportDead(cx);
     return false;
@@ -146,6 +147,22 @@ DeadObjectProxy::regexp_toShared(JSContext* cx, HandleObject proxy, RegExpGuard*
 {
     ReportDead(cx);
     return false;
+}
+
+bool
+DeadObjectProxy::isCallable(JSObject* obj) const
+{
+    static const uint32_t slot = ScriptedProxyHandler::IS_CALLCONSTRUCT_EXTRA;
+    uint32_t callConstruct = obj->as<ProxyObject>().extra(slot).toPrivateUint32();
+    return !!(callConstruct & ScriptedProxyHandler::IS_CALLABLE);
+}
+
+bool
+DeadObjectProxy::isConstructor(JSObject* obj) const
+{
+    static const uint32_t slot = ScriptedProxyHandler::IS_CALLCONSTRUCT_EXTRA;
+    uint32_t callConstruct = obj->as<ProxyObject>().extra(slot).toPrivateUint32();
+    return !!(callConstruct & ScriptedProxyHandler::IS_CONSTRUCTOR);
 }
 
 const char DeadObjectProxy::family = 0;

@@ -13,20 +13,10 @@ const Cu = Components.utils;
 const COMPLETE_LENGTH = 32;
 const PARTIAL_LENGTH = 4;
 
-// These backoff related constants are taken from v2 of the Google Safe Browsing
-// API. All times are in milliseconds.
-// BACKOFF_ERRORS: the number of errors incurred until we start to back off.
-// BACKOFF_INTERVAL: the initial time to wait once we start backing
-//                   off.
-// BACKOFF_MAX: as the backoff time doubles after each failure, this is a
-//              ceiling on the time to wait.
-
-const BACKOFF_ERRORS = 2;
-const BACKOFF_INTERVAL = 30 * 60 * 1000;
-const BACKOFF_MAX = 8 * 60 * 60 * 1000;
-
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
+
 
 // Log only if browser.safebrowsing.debug is true
 function log(...stuff) {
@@ -42,7 +32,116 @@ function log(...stuff) {
 
   var d = new Date();
   let msg = "hashcompleter: " + d.toTimeString() + ": " + stuff.join(" ");
-  dump(msg + "\n");
+  dump(Services.urlFormatter.trimSensitiveURLs(msg) + "\n");
+}
+
+// Map the HTTP response code to a Telemetry bucket
+// https://developers.google.com/safe-browsing/developers_guide_v2?hl=en
+function httpStatusToBucket(httpStatus) {
+  var statusBucket;
+  switch (httpStatus) {
+  case 100:
+  case 101:
+    // Unexpected 1xx return code
+    statusBucket = 0;
+    break;
+  case 200:
+    // OK - Data is available in the HTTP response body.
+    statusBucket = 1;
+    break;
+  case 201:
+  case 202:
+  case 203:
+  case 205:
+  case 206:
+    // Unexpected 2xx return code
+    statusBucket = 2;
+    break;
+  case 204:
+    // No Content - There are no full-length hashes with the requested prefix.
+    statusBucket = 3;
+    break;
+  case 300:
+  case 301:
+  case 302:
+  case 303:
+  case 304:
+  case 305:
+  case 307:
+  case 308:
+    // Unexpected 3xx return code
+    statusBucket = 4;
+    break;
+  case 400:
+    // Bad Request - The HTTP request was not correctly formed.
+    // The client did not provide all required CGI parameters.
+    statusBucket = 5;
+    break;
+  case 401:
+  case 402:
+  case 405:
+  case 406:
+  case 407:
+  case 409:
+  case 410:
+  case 411:
+  case 412:
+  case 414:
+  case 415:
+  case 416:
+  case 417:
+  case 421:
+  case 426:
+  case 428:
+  case 429:
+  case 431:
+  case 451:
+    // Unexpected 4xx return code
+    statusBucket = 6;
+    break;
+  case 403:
+    // Forbidden - The client id is invalid.
+    statusBucket = 7;
+    break;
+  case 404:
+    // Not Found
+    statusBucket = 8;
+    break;
+  case 408:
+    // Request Timeout
+    statusBucket = 9;
+    break;
+  case 413:
+    // Request Entity Too Large - Bug 1150334
+    statusBucket = 10;
+    break;
+  case 500:
+  case 501:
+  case 510:
+    // Unexpected 5xx return code
+    statusBucket = 11;
+    break;
+  case 502:
+  case 504:
+  case 511:
+    // Local network errors, we'll ignore these.
+    statusBucket = 12;
+    break;
+  case 503:
+    // Service Unavailable - The server cannot handle the request.
+    // Clients MUST follow the backoff behavior specified in the
+    // Request Frequency section.
+    statusBucket = 13;
+    break;
+  case 505:
+    // HTTP Version Not Supported - The server CANNOT handle the requested
+    // protocol major version.
+    statusBucket = 14;
+    break;
+  default:
+    statusBucket = 15;
+  };
+  return statusBucket;
 }
 
 function HashCompleter() {
@@ -97,13 +196,11 @@ HashCompleter.prototype = {
       // after they are dispatched.
       var jslib = Cc["@mozilla.org/url-classifier/jslib;1"]
                   .getService().wrappedJSObject;
-      this._backoffs[aGethashUrl] = new jslib.RequestBackoff(
-        BACKOFF_ERRORS /* max errors */,
-        60*1000 /* retry interval, 1 min */,
+
+      // Using the V4 backoff algorithm for both V2 and V4. See bug 1273398.
+      this._backoffs[aGethashUrl] = new jslib.RequestBackoffV4(
         10 /* keep track of max requests */,
-        0 /* don't throttle on successful requests per time period */,
-        BACKOFF_INTERVAL /* backoff interval, 60 min */,
-        BACKOFF_MAX /* max backoff, 8hr */);
+        0  /* don't throttle on successful requests per time period */);
     }
     // Start off this request. Without dispatching to a thread, every call to
     // complete makes an individual HTTP request.
@@ -202,7 +299,7 @@ HashCompleterRequest.prototype = {
   // begin.
   begin: function HCR_begin() {
     if (!this._completer.canMakeRequest(this.gethashUrl)) {
-      dump("hashcompleter: Can't make request to " + this.gethashUrl + "\n");
+      log("Can't make request to " + this.gethashUrl + "\n");
       this.notifyFailure(Cr.NS_ERROR_ABORT);
       return;
     }
@@ -226,7 +323,8 @@ HashCompleterRequest.prototype = {
     // with onStopRequest since we implement nsIStreamListener on the
     // channel.
     if (this._channel && this._channel.isPending()) {
-      dump("hashcompleter: cancelling request to " + this.gethashUrl + "\n");
+      log("cancelling request to " + this.gethashUrl + "\n");
+      Services.telemetry.getHistogramById("URLCLASSIFIER_COMPLETE_TIMEOUT").add(1);
       this._channel.cancel(Cr.NS_BINDING_ABORTED);
     }
   },
@@ -236,13 +334,10 @@ HashCompleterRequest.prototype = {
     let loadFlags = Ci.nsIChannel.INHIBIT_CACHING |
                     Ci.nsIChannel.LOAD_BYPASS_CACHE;
 
-    let uri = Services.io.newURI(this.gethashUrl, null, null);
-    let channel = Services.io.newChannelFromURI2(uri,
-                                                 null,      // aLoadingNode
-                                                 Services.scriptSecurityManager.getSystemPrincipal(),
-                                                 null,      // aTriggeringPrincipal
-                                                 Ci.nsILoadInfo.SEC_NORMAL,
-                                                 Ci.nsIContentPolicy.TYPE_OTHER);
+    let channel = NetUtil.newChannel({
+      uri: this.gethashUrl,
+      loadUsingSystemPrincipal: true
+    });
     channel.loadFlags = loadFlags;
 
     // Disable keepalive.
@@ -261,7 +356,7 @@ HashCompleterRequest.prototype = {
     let timeout = Services.prefs.getIntPref(
       "urlclassifier.gethash.timeout_ms");
     this.timer_.initWithCallback(this, timeout, this.timer_.TYPE_ONE_SHOT);
-    channel.asyncOpen(this, null);
+    channel.asyncOpen2(this);
   },
 
   // Returns a string for the request body based on the contents of
@@ -396,7 +491,7 @@ HashCompleterRequest.prototype = {
   },
 
   notifyFailure: function HCR_notifyFailure(aStatus) {
-    dump("hashcompleter: notifying failure\n");
+    log("notifying failure\n");
     for (let i = 0; i < this._requests.length; i++) {
       let request = this._requests[i];
       request.callback.completionFinished(aStatus);
@@ -434,9 +529,14 @@ HashCompleterRequest.prototype = {
         aStatusCode = Cr.NS_ERROR_ABORT;
       }
     }
-    log('Received a ' + httpStatus + ' status code from the gethash server.');
-
     let success = Components.isSuccessCode(aStatusCode);
+    log('Received a ' + httpStatus + ' status code from the gethash server (success=' + success + ').');
+
+    let histogram =
+      Services.telemetry.getHistogramById("URLCLASSIFIER_COMPLETE_REMOTE_STATUS");
+    histogram.add(httpStatusToBucket(httpStatus));
+    Services.telemetry.getHistogramById("URLCLASSIFIER_COMPLETE_TIMEOUT").add(0);
+
     // Notify the RequestBackoff once a response is received.
     this._completer.finishRequest(this.gethashUrl, httpStatus);
 
@@ -445,7 +545,7 @@ HashCompleterRequest.prototype = {
         this.handleResponse();
       }
       catch (err) {
-        dump(err.stack);
+        log(err.stack);
         aStatusCode = err.value;
         success = false;
       }

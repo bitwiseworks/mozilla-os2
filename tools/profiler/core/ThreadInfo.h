@@ -30,16 +30,16 @@ class ThreadInfo {
   virtual void SetPendingDelete();
   bool IsPendingDelete() const { return mPendingDelete; }
 
-#ifdef MOZ_NUWA_PROCESS
-  void SetThreadId(int aThreadId) { mThreadId = aThreadId; }
-#endif
-
 #ifndef SPS_STANDALONE
   /**
    * May be null for the main thread if the profiler was started during startup
    */
   nsIThread* GetThread() const { return mThread.get(); }
+
 #endif
+
+  bool CanInvokeJS() const;
+
  private:
   char* mName;
   int mThreadId;

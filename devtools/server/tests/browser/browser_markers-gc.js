@@ -5,11 +5,12 @@
  * Test that we get "GarbageCollection" markers.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
 const MARKER_NAME = "GarbageCollection";
 
-add_task(function*() {
-  let doc = yield addTab(MAIN_DOMAIN + "doc_force_gc.html");
+add_task(function* () {
+  let browser = yield addTab(MAIN_DOMAIN + "doc_force_gc.html");
+  let doc = browser.contentDocument;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -44,6 +45,6 @@ add_task(function*() {
 
   is(ordered, true, "All GC and non-GC markers are in order by start time.");
 
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });

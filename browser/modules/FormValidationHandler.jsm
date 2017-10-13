@@ -48,7 +48,7 @@ var FormValidationHandler =
    */
 
   receiveMessage: function (aMessage) {
-    let window = aMessage.target.ownerDocument.defaultView;
+    let window = aMessage.target.ownerGlobal;
     let json = aMessage.json;
     let tabBrowser = window.gBrowser;
     switch (aMessage.name) {
@@ -122,7 +122,7 @@ var FormValidationHandler =
     this._panel.hidden = false;
 
     let tabBrowser = aWindow.gBrowser;
-    this._anchor = tabBrowser.formValidationAnchor;
+    this._anchor = tabBrowser.popupAnchor;
     this._anchor.left = aPanelData.contentRect.left;
     this._anchor.top = aPanelData.contentRect.top;
     this._anchor.width = aPanelData.contentRect.width;

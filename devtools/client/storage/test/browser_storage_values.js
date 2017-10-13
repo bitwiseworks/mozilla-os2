@@ -14,24 +14,26 @@
 
 "use strict";
 
+const LONG_WORD = "a".repeat(1000);
+
 const testCases = [
   ["cs2", [
     {name: "cs2", value: "sessionCookie"},
-    {name: "cs2.path", value: "/"},
-    {name: "cs2.isDomain", value: "true"},
-    {name: "cs2.isHttpOnly", value: "false"},
-    {name: "cs2.host", value: ".example.org"},
-    {name: "cs2.expires", value: "Session"},
-    {name: "cs2.isSecure", value: "false"},
+    {name: "cs2.Path", value: "/"},
+    {name: "cs2.HostOnly", value: "false"},
+    {name: "cs2.HttpOnly", value: "false"},
+    {name: "cs2.Domain", value: ".example.org"},
+    {name: "cs2.Expires", value: "Session"},
+    {name: "cs2.Secure", value: "false"},
   ]],
   ["c1", [
     {name: "c1", value: JSON.stringify(["foo", "Bar", {foo: "Bar"}])},
-    {name: "c1.path", value: "/browser"},
-    {name: "c1.isDomain", value: "false"},
-    {name: "c1.isHttpOnly", value: "false"},
-    {name: "c1.host", value: "test1.example.org"},
-    {name: "c1.expires", value: new Date(2000000000000).toLocaleString()},
-    {name: "c1.isSecure", value: "false"},
+    {name: "c1.Path", value: "/browser"},
+    {name: "c1.HostOnly", value: "true"},
+    {name: "c1.HttpOnly", value: "false"},
+    {name: "c1.Domain", value: "test1.example.org"},
+    {name: "c1.Expires", value: new Date(2000000000000).toUTCString()},
+    {name: "c1.Secure", value: "false"},
   ]],
   [null, [
     {name: "c1", value: "Array"},
@@ -39,6 +41,14 @@ const testCases = [
     {name: "c1.1", value: "Bar"},
     {name: "c1.2", value: "Object"},
     {name: "c1.2.foo", value: "Bar"},
+  ], true],
+  ["c_encoded", [
+    {name: "c_encoded", value: encodeURIComponent(JSON.stringify({foo: {foo1: "bar"}}))}
+  ]],
+  [null, [
+    {name: "c_encoded", value: "Object"},
+    {name: "c_encoded.foo", value: "Object"},
+    {name: "c_encoded.foo.foo1", value: "bar"}
   ], true],
   [["localStorage", "http://test1.example.org"]],
   ["ls2", [
@@ -93,6 +103,23 @@ const testCases = [
     {name: "ss3.an", value: "object"},
     {name: "ss3.foo", value: "bar"},
   ], true],
+  ["ss4", [
+    {name: "ss4", value: "Array"},
+    {name: "ss4.0", value: ""},
+    {name: "ss4.1", value: "array"},
+    {name: "ss4.2", value: ""},
+    {name: "ss4.3", value: "with"},
+    {name: "ss4.4", value: "empty"},
+    {name: "ss4.5", value: "items"},
+  ], true],
+  ["ss5", [
+    {name: "ss5", value: "Array"},
+    {name: "ss5.0", value: LONG_WORD},
+    {name: "ss5.1", value: LONG_WORD},
+    {name: "ss5.2", value: LONG_WORD},
+    {name: "ss5.3", value: `${LONG_WORD}&${LONG_WORD}`},
+    {name: "ss5.4", value: `${LONG_WORD}&${LONG_WORD}`},
+  ], true],
   [["indexedDB", "http://test1.example.org", "idb1", "obj1"]],
   [1, [
     {name: 1, value: JSON.stringify({id: 1, name: "foo", email: "foo@bar.com"})}
@@ -116,7 +143,7 @@ const testCases = [
   ], true]
 ];
 
-add_task(function*() {
+add_task(function* () {
   yield openTabAndSetupStorage(MAIN_DOMAIN + "storage-complex-values.html");
 
   gUI.tree.expandAll();

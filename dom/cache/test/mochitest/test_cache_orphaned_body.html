@@ -43,6 +43,32 @@ function storageUsage() {
   });
 }
 
+function groupUsage() {
+  return new Promise(function(resolve, reject) {
+   navigator.storage.estimate().then(storageEstimation => {
+     resolve(storageEstimation.usage, 0);
+   });
+  });
+}
+
+function workerGroupUsage() {
+  return new Promise(function(resolve, reject) {
+    function workerScript() {
+      navigator.storage.estimate().then(storageEstimation => {
+        postMessage(storageEstimation.usage);
+      });
+    }
+
+    let url =
+      URL.createObjectURL(new Blob(["(", workerScript.toSource(), ")()"]));
+
+    let worker = new Worker(url);
+    worker.onmessage = function (e) {
+      resolve(e.data, 0);
+    };
+  });
+}
+
 function resetStorage() {
   return new Promise(function(resolve, reject) {
     var qms = SpecialPowers.Services.qms;
@@ -54,7 +80,7 @@ function resetStorage() {
 
 function gc() {
   return new Promise(function(resolve, reject) {
-    SpecialPowers.exactGC(window, resolve);
+    SpecialPowers.exactGC(resolve);
   });
 }
 
@@ -62,7 +88,8 @@ SimpleTest.waitForExplicitFinish();
 SpecialPowers.pushPrefEnv({
   "set": [["dom.caches.enabled", true],
           ["dom.caches.testing.enabled", true],
-          ["dom.quotaManager.testing", true]],
+          ["dom.quotaManager.testing", true],
+          ["dom.storageManager.enabled", true]],
 }, function() {
   var name = 'orphanedBodyOwner';
   var cache = null;
@@ -71,7 +98,7 @@ SpecialPowers.pushPrefEnv({
   var fullUsage = 0;
   var resetUsage = 0;
   var endUsage = 0;
-  var url = 'cache_add.js';
+  var url = 'test_cache_add.js';
 
   // start from a fresh origin directory so other tests do not influence our
   // results
@@ -142,6 +169,26 @@ SpecialPowers.pushPrefEnv({
     ok(fullUsage > initialUsage, 'disk usage should have grown');
   })
 
+  // Test groupUsage()
+  .then(function() {
+    return resetStorage();
+  }).then(function() {
+    return groupUsage();
+  }).then(function(usage) {
+    fullUsage = usage;
+    ok(fullUsage > initialUsage, 'disk group usage should have grown');
+  })
+
+  // Test workerGroupUsage()
+  .then(function() {
+    return resetStorage();
+  }).then(function() {
+    return workerGroupUsage();
+  }).then(function(usage) {
+    fullUsage = usage;
+    ok(fullUsage > initialUsage, 'disk group usage on worker should have grown');
+  })
+
   // Now perform a new Cache operation that will reopen the origin.  This
   // should clean up the orphaned body.
   .then(function() {
@@ -163,6 +210,22 @@ SpecialPowers.pushPrefEnv({
          ", end:" + endUsage + "\n");
     ok(endUsage < fullUsage, 'disk usage should have shrank');
     is(endUsage, initialUsage, 'disk usage should return to original');
+  })
+
+  // Verify that the stale, orphaned response cannot be put back into
+  // the cache.
+  .then(function() {
+    ok(!response.bodyUsed, 'response body should not be considered used');
+    return cache.put(url, response).then(function() {
+        ok(false, 'Should not be able to store stale orphaned body.');
+      }).catch(function(e) {
+        is(e.name, 'TypeError', 'storing a stale orphaned body should throw TypeError');
+      });
+  }).then(function() {
+    ok(response.bodyUsed, 'attempting to store response should mark body used');
+  })
+
+  .then(function() {
     SimpleTest.finish();
   });
 });

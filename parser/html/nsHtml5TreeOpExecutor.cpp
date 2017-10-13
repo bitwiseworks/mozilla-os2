@@ -17,7 +17,6 @@
 #include "nsIDocShell.h"
 #include "nsIDOMDocument.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIWebShellServices.h"
 #include "nsContentUtils.h"
 #include "mozAutoDocUpdate.h"
@@ -33,7 +32,7 @@
 #include "mozilla/Preferences.h"
 #include "nsIHTMLDocument.h"
 #include "nsIViewSourceChannel.h"
-#include "mozilla/unused.h"
+#include "xpcpublic.h"
 
 using namespace mozilla;
 
@@ -46,7 +45,7 @@ NS_IMPL_ADDREF_INHERITED(nsHtml5TreeOpExecutor, nsContentSink)
 
 NS_IMPL_RELEASE_INHERITED(nsHtml5TreeOpExecutor, nsContentSink)
 
-class nsHtml5ExecutorReflusher : public nsRunnable
+class nsHtml5ExecutorReflusher : public Runnable
 {
   private:
     RefPtr<nsHtml5TreeOpExecutor> mExecutor;
@@ -54,7 +53,7 @@ class nsHtml5ExecutorReflusher : public nsRunnable
     explicit nsHtml5ExecutorReflusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
     {}
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mExecutor->RunFlushLoop();
       return NS_OK;
@@ -234,11 +233,8 @@ nsHtml5TreeOpExecutor::MarkAsBroken(nsresult aReason)
   // works out so that we get to terminate and clean up the parser from
   // a safer point.
   if (mParser) { // can mParser ever be null here?
-    nsCOMPtr<nsIRunnable> terminator =
-      NS_NewRunnableMethod(GetParser(), &nsHtml5Parser::Terminate);
-    if (NS_FAILED(NS_DispatchToMainThread(terminator))) {
-      NS_WARNING("failed to dispatch executor flush event");
-    }
+    MOZ_ALWAYS_SUCCEEDS(
+      NS_DispatchToMainThread(NewRunnableMethod(GetParser(), &nsHtml5Parser::Terminate)));
   }
   return aReason;
 }
@@ -354,8 +350,7 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
   
   nsHtml5FlushLoopGuard guard(this); // this is also the self-kungfu!
   
-  nsCOMPtr<nsISupports> parserKungFuDeathGrip(mParser);
-  mozilla::Unused << parserKungFuDeathGrip;
+  RefPtr<nsParserBase> parserKungFuDeathGrip(mParser);
 
   // Remember the entry time
   (void) nsContentSink::WillParseImpl();
@@ -371,7 +366,7 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
       return;
     }
 
-    if (!mParser->IsParserEnabled()) {
+    if (!parserKungFuDeathGrip->IsParserEnabled()) {
       // The parser is blocked.
       return;
     }
@@ -418,7 +413,7 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
       // gripped before calling ParseUntilBlocked();
       RefPtr<nsHtml5StreamParser> streamKungFuDeathGrip = 
         GetParser()->GetStreamParser();
-      mozilla::Unused << streamKungFuDeathGrip;
+      mozilla::Unused << streamKungFuDeathGrip; // Not used within function
       // Now parse content left in the document.write() buffer queue if any.
       // This may generate tree ops on its own or dequeue a speculation.
       nsresult rv = GetParser()->ParseUntilBlocked();
@@ -533,7 +528,7 @@ nsHtml5TreeOpExecutor::FlushDocumentWrite()
   // avoid crashing near EOF
   RefPtr<nsHtml5TreeOpExecutor> kungFuDeathGrip(this);
   RefPtr<nsParserBase> parserKungFuDeathGrip(mParser);
-  mozilla::Unused << parserKungFuDeathGrip;
+  mozilla::Unused << parserKungFuDeathGrip; // Intentionally not used within function
 
   NS_ASSERTION(!mReadingFromStage,
     "Got doc write flush when reading from stage");
@@ -588,6 +583,9 @@ nsHtml5TreeOpExecutor::FlushDocumentWrite()
 bool
 nsHtml5TreeOpExecutor::IsScriptEnabled()
 {
+  // Note that if we have no document or no docshell or no global or whatnot we
+  // want to claim script _is_ enabled, so we don't parse the contents of
+  // <noscript> tags!
   if (!mDocument || !mDocShell)
     return true;
   nsCOMPtr<nsIScriptGlobalObject> globalObject = do_QueryInterface(mDocument->GetInnerWindow());
@@ -595,11 +593,9 @@ nsHtml5TreeOpExecutor::IsScriptEnabled()
   // GlobalObject set yet
   if (!globalObject) {
     globalObject = mDocShell->GetScriptGlobalObject();
-    NS_ENSURE_TRUE(globalObject, true);
   }
   NS_ENSURE_TRUE(globalObject && globalObject->GetGlobalJSObject(), true);
-  return nsContentUtils::GetSecurityManager()->
-           ScriptAllowed(globalObject->GetGlobalJSObject());
+  return xpc::Scriptability::Get(globalObject->GetGlobalJSObject()).Allowed();
 }
 
 void
@@ -903,7 +899,8 @@ bool
 nsHtml5TreeOpExecutor::ShouldPreloadURI(nsIURI *aURI)
 {
   nsAutoCString spec;
-  aURI->GetSpec(spec);
+  nsresult rv = aURI->GetSpec(spec);
+  NS_ENSURE_SUCCESS(rv, false);
   if (mPreloadedURLs.Contains(spec)) {
     return false;
   }
@@ -956,9 +953,10 @@ nsHtml5TreeOpExecutor::PreloadImage(const nsAString& aURL,
     // use document wide referrer policy
     mozilla::net::ReferrerPolicy referrerPolicy = mSpeculationReferrerPolicy;
     // if enabled in preferences, use the referrer attribute from the image, if provided
-    bool referrerAttributeEnabled = Preferences::GetBool("network.http.enablePerElementReferrer", false);
+    bool referrerAttributeEnabled = Preferences::GetBool("network.http.enablePerElementReferrer", true);
     if (referrerAttributeEnabled) {
-      mozilla::net::ReferrerPolicy imageReferrerPolicy = mozilla::net::ReferrerPolicyFromString(aImageReferrerPolicy);
+      mozilla::net::ReferrerPolicy imageReferrerPolicy =
+        mozilla::net::AttributeReferrerPolicyFromString(aImageReferrerPolicy);
       if (imageReferrerPolicy != mozilla::net::RP_Unset) {
         referrerPolicy = imageReferrerPolicy;
       }
@@ -1011,14 +1009,27 @@ nsHtml5TreeOpExecutor::SetSpeculationBase(const nsAString& aURL)
   const nsCString& charset = mDocument->GetDocumentCharacterSet();
   DebugOnly<nsresult> rv = NS_NewURI(getter_AddRefs(mSpeculationBaseURI), aURL,
                                      charset.get(), mDocument->GetDocumentURI());
-  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to create a URI");
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to create a URI");
 }
 
 void
 nsHtml5TreeOpExecutor::SetSpeculationReferrerPolicy(const nsAString& aReferrerPolicy)
 {
+  // Specs says:
+  // - Let value be the result of stripping leading and trailing whitespace from
+  // the value of element's content attribute.
+  // - If value is not the empty string, then:
+  if (aReferrerPolicy.IsEmpty()) {
+    return;
+  }
+
   ReferrerPolicy policy = mozilla::net::ReferrerPolicyFromString(aReferrerPolicy);
-  return SetSpeculationReferrerPolicy(policy);
+  // Specs says:
+  // - If policy is not the empty string, then set element's node document's
+  // referrer policy to policy
+  if (policy != mozilla::net::RP_Unset) {
+    SetSpeculationReferrerPolicy(policy);
+  }
 }
 
 void
@@ -1032,21 +1043,9 @@ nsHtml5TreeOpExecutor::AddSpeculationCSP(const nsAString& aCSP)
 
   nsIPrincipal* principal = mDocument->NodePrincipal();
   nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
-  nsresult rv = principal->GetPreloadCsp(getter_AddRefs(preloadCsp));
+  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(mDocument);
+  nsresult rv = principal->EnsurePreloadCSP(domDoc, getter_AddRefs(preloadCsp));
   NS_ENSURE_SUCCESS_VOID(rv);
-  if (!preloadCsp) {
-    preloadCsp = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
-    NS_ENSURE_SUCCESS_VOID(rv);
-
-    // Store the request context for violation reports
-    nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(mDocument);
-    rv = preloadCsp->SetRequestContext(domDoc, nullptr);
-    NS_ENSURE_SUCCESS_VOID(rv);
-
-    // set the new csp
-    rv = principal->SetPreloadCsp(preloadCsp);
-    NS_ENSURE_SUCCESS_VOID(rv);
-  }
 
   // please note that meta CSPs and CSPs delivered through a header need
   // to be joined together.

@@ -15,9 +15,6 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
-  disableServiceWorkerEvents(
-    'https://example.com/incomplete'
-  );
   run_next_test();
 }
 
@@ -29,7 +26,6 @@ add_task(function* test_register_no_id() {
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
         onHello(request) {
@@ -53,12 +49,14 @@ add_task(function* test_register_no_id() {
   });
 
   yield rejects(
-    PushNotificationService.register('https://example.com/incomplete',
-      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    PushService.register({
+      scope: 'https://example.com/incomplete',
+      originAttributes: ChromeUtils.originAttributesToSuffix(
+        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+    }),
     'Expected error for incomplete register response'
   );
 
-  yield waitForPromise(helloPromise, DEFAULT_TIMEOUT,
-    'Reconnect after incomplete register response timed out');
+  yield helloPromise;
   equal(registers, 1, 'Wrong register count');
 });

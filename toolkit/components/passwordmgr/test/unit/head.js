@@ -1,23 +1,18 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
-
 /**
  * Provides infrastructure for automated login components tests.
  */
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+let { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LoginRecipes.jsm");
 Cu.import("resource://gre/modules/LoginHelper.jsm");
+Cu.import("resource://testing-common/MockDocument.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadPaths",
                                   "resource://gre/modules/DownloadPaths.jsm");
@@ -37,6 +32,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "LoginTestUtils",
                                   "resource://testing-common/LoginTestUtils.jsm");
 LoginTestUtils.Assert = Assert;
 const TestData = LoginTestUtils.testData;
+const newPropertyBag = LoginHelper.newPropertyBag;
 
 /**
  * All the tests are implemented with add_task, this starts them automatically.
@@ -47,8 +43,7 @@ function run_test()
   run_next_test();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Global helpers
+// Global helpers
 
 // Some of these functions are already implemented in other parts of the source
 // tree, see bug 946708 about sharing more code.
@@ -57,7 +52,7 @@ function run_test()
 // used, on Windows these might still be pending deletion on the physical file
 // system.  Thus, start from a new base number every time, to make a collision
 // with a file that is still pending deletion highly unlikely.
-var gFileCounter = Math.floor(Math.random() * 1000000);
+let gFileCounter = Math.floor(Math.random() * 1000000);
 
 /**
  * Returns a reference to a temporary file, that is guaranteed not to exist, and
@@ -93,79 +88,15 @@ function getTempFile(aLeafName)
   return file;
 }
 
-/**
- * Returns a new XPCOM property bag with the provided properties.
- *
- * @param aProperties
- *        Each property of this object is copied to the property bag.  This
- *        parameter can be omitted to return an empty property bag.
- *
- * @return A new property bag, that is an instance of nsIWritablePropertyBag,
- *         nsIWritablePropertyBag2, nsIPropertyBag, and nsIPropertyBag2.
- */
-function newPropertyBag(aProperties)
-{
-  let propertyBag = Cc["@mozilla.org/hash-property-bag;1"]
-                      .createInstance(Ci.nsIWritablePropertyBag);
-  if (aProperties) {
-    for (let [name, value] of Iterator(aProperties)) {
-      propertyBag.setProperty(name, value);
-    }
-  }
-  return propertyBag.QueryInterface(Ci.nsIPropertyBag)
-                    .QueryInterface(Ci.nsIPropertyBag2)
-                    .QueryInterface(Ci.nsIWritablePropertyBag2);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 const RecipeHelpers = {
   initNewParent() {
     return (new LoginRecipesParent({ defaults: null })).initializationPromise;
   },
 };
 
-const MockDocument = {
-  /**
-   * Create a document for the given URL containing the given HTML with the ownerDocument of all <form>s having a mocked location.
-   */
-  createTestDocument(aDocumentURL, aContent = "<form>", aType = "text/html") {
-    let parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                 createInstance(Ci.nsIDOMParser);
-    parser.init();
-    let parsedDoc = parser.parseFromString(aContent, aType);
+// Initialization functions common to all tests
 
-    for (let element of parsedDoc.forms) {
-      this.mockOwnerDocumentProperty(element, parsedDoc, aDocumentURL);
-    }
-    return parsedDoc;
-  },
-
-  mockOwnerDocumentProperty(aElement, aDoc, aURL) {
-    // Mock the document.location object so we can unit test without a frame. We use a proxy
-    // instead of just assigning to the property since it's not configurable or writable.
-    let document = new Proxy(aDoc, {
-      get(target, property, receiver) {
-        // document.location is normally null when a document is outside of a "browsing context".
-        // See https://html.spec.whatwg.org/#the-location-interface
-        if (property == "location") {
-          return new URL(aURL);
-        }
-        return target[property];
-      },
-    });
-
-    // Assign element.ownerDocument to the proxy so document.location works.
-    Object.defineProperty(aElement, "ownerDocument", {
-      value: document,
-    });
-  },
-
-};
-
-//// Initialization functions common to all tests
-
-add_task(function test_common_initialize()
+add_task(function* test_common_initialize()
 {
   // Before initializing the service for the first time, we should copy the key
   // file required to decrypt the logins contained in the SQLite databases used

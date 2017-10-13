@@ -1,70 +1,70 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests the task creator `takeSnapshotAndCensus()` for the whole flow of
- * taking a snapshot, and its sub-actions.
+ * taking a snapshot, and its sub-actions. Tests the formatNumber and
+ * formatPercent methods.
  */
 
 let utils = require("devtools/client/memory/utils");
-let { snapshotState: states, breakdowns } = require("devtools/client/memory/constants");
+let { snapshotState: states, viewState } = require("devtools/client/memory/constants");
 let { Preferences } = require("resource://gre/modules/Preferences.jsm");
 
 function run_test() {
   run_next_test();
 }
 
-add_task(function *() {
-  ok(utils.breakdownEquals(breakdowns.allocationStack.breakdown, {
-    by: "allocationStack",
-    then: { by: "count", count: true, bytes: true },
-    noStack: { by: "count", count: true, bytes: true },
-  }), "utils.breakdownEquals() passes with preset"),
-
-  ok(!utils.breakdownEquals(breakdowns.allocationStack.breakdown, {
-    by: "allocationStack",
-    then: { by: "count", count: false, bytes: true },
-    noStack: { by: "count", count: true, bytes: true },
-  }), "utils.breakdownEquals() fails when deep properties do not match");
-
-  ok(!utils.breakdownEquals(breakdowns.allocationStack.breakdown, {
-    by: "allocationStack",
-    then: { by: "count", bytes: true },
-    noStack: { by: "count", count: true, bytes: true },
-  }), "utils.breakdownEquals() fails when deep properties are missing.");
-
-  let s1 = utils.createSnapshot();
-  let s2 = utils.createSnapshot();
+add_task(function* () {
+  let s1 = utils.createSnapshot({ view: { state: viewState.CENSUS } });
+  let s2 = utils.createSnapshot({ view: { state: viewState.CENSUS } });
   equal(s1.state, states.SAVING, "utils.createSnapshot() creates snapshot in saving state");
   ok(s1.id !== s2.id, "utils.createSnapshot() creates snapshot with unique ids");
 
-  ok(utils.breakdownEquals(utils.breakdownNameToSpec("coarseType"), breakdowns.coarseType.breakdown),
-    "utils.breakdownNameToSpec() works for presets");
-  ok(utils.breakdownEquals(utils.breakdownNameToSpec("coarseType"), breakdowns.coarseType.breakdown),
-    "utils.breakdownNameToSpec() works for presets");
-
   let custom = { by: "internalType", then: { by: "count", bytes: true }};
-  Preferences.set("devtools.memory.custom-breakdowns", JSON.stringify({ "My Breakdown": custom }));
+  Preferences.set("devtools.memory.custom-census-displays", JSON.stringify({ "My Display": custom }));
 
-  ok(utils.breakdownEquals(utils.getCustomBreakdowns()["My Breakdown"], custom),
-    "utils.getCustomBreakdowns() returns custom breakdowns");
-});
+  equal(utils.getCustomCensusDisplays()["My Display"].by, custom.by,
+        "utils.getCustomCensusDisplays() returns custom displays");
 
-// Test `utils.parseSource`.
-add_task(function* () {
-  const url = "http://example.com/foo/bar/baz.js";
-  let results = utils.parseSource(url);
-  equal(results.short, "baz.js");
-  equal(results.long, url);
-  equal(results.host, "example.com");
+  ok(true, "test formatNumber util functions");
+  equal(utils.formatNumber(12), "12", "formatNumber returns 12 for 12");
 
-  results = utils.parseSource("self-hosted");
-  equal(results.short, "self-hosted");
-  equal(results.long, "self-hosted");
-  equal(results.host, undefined);
+  equal(utils.formatNumber(0), "0", "formatNumber returns 0 for 0");
+  equal(utils.formatNumber(-0), "0", "formatNumber returns 0 for -0");
+  equal(utils.formatNumber(+0), "0", "formatNumber returns 0 for +0");
 
-  results = utils.parseSource("");
-  equal(typeof results.short, "string");
-  equal(typeof results.long, "string");
-  equal(results.host, undefined);
+  equal(utils.formatNumber(1234567), "1 234 567",
+    "formatNumber adds a space every 3rd digit");
+  equal(utils.formatNumber(12345678), "12 345 678",
+    "formatNumber adds a space every 3rd digit");
+  equal(utils.formatNumber(123456789), "123 456 789",
+    "formatNumber adds a space every 3rd digit");
+
+  equal(utils.formatNumber(12, true), "+12",
+    "formatNumber can display number sign");
+  equal(utils.formatNumber(-12, true), "-12",
+    "formatNumber can display number sign (negative)");
+
+  ok(true, "test formatPercent util functions");
+  equal(utils.formatPercent(12), "12%", "formatPercent returns 12% for 12");
+  equal(utils.formatPercent(12345), "12 345%",
+    "formatPercent returns 12 345% for 12345");
+
+  equal(utils.formatAbbreviatedBytes(12), "12B", "Formats bytes");
+  equal(utils.formatAbbreviatedBytes(12345), "12KiB", "Formats kilobytes");
+  equal(utils.formatAbbreviatedBytes(12345678), "11MiB", "Formats megabytes");
+  equal(utils.formatAbbreviatedBytes(12345678912), "11GiB", "Formats gigabytes");
+
+  equal(utils.hslToStyle(0.5, 0.6, 0.7),
+    "hsl(180,60%,70%)", "hslToStyle converts an array to a style string");
+  equal(utils.hslToStyle(0, 0, 0),
+    "hsl(0,0%,0%)", "hslToStyle converts an array to a style string");
+  equal(utils.hslToStyle(1, 1, 1),
+    "hsl(360,100%,100%)", "hslToStyle converts an array to a style string");
+
+  equal(utils.lerp(5, 7, 0), 5, "lerp return first number for 0");
+  equal(utils.lerp(5, 7, 1), 7, "lerp return second number for 1");
+  equal(utils.lerp(5, 7, 0.5), 6, "lerp interpolates the numbers for 0.5");
 });

@@ -20,19 +20,18 @@ namespace jsipc {
 class WrapperOwner : public virtual JavaScriptShared
 {
   public:
-    typedef mozilla::ipc::IProtocolManager<
-                       mozilla::ipc::IProtocol>::ActorDestroyReason
+    typedef mozilla::ipc::IProtocol::ActorDestroyReason
            ActorDestroyReason;
 
-    explicit WrapperOwner(JSRuntime* rt);
+    WrapperOwner();
     bool init();
 
     // Standard internal methods.
     // (The traps should be in the same order like js/Proxy.h)
     bool getOwnPropertyDescriptor(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                                  JS::MutableHandle<JSPropertyDescriptor> desc);
+                                  JS::MutableHandle<JS::PropertyDescriptor> desc);
     bool defineProperty(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                        JS::Handle<JSPropertyDescriptor> desc,
+                        JS::Handle<JS::PropertyDescriptor> desc,
                         JS::ObjectOpResult& result);
     bool ownPropertyKeys(JSContext* cx, JS::HandleObject proxy, JS::AutoIdVector& props);
     bool delete_(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
@@ -49,15 +48,17 @@ class WrapperOwner : public virtual JavaScriptShared
 
     // SpiderMonkey extensions.
     bool getPropertyDescriptor(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                               JS::MutableHandle<JSPropertyDescriptor> desc);
+                               JS::MutableHandle<JS::PropertyDescriptor> desc);
     bool hasOwn(JSContext* cx, JS::HandleObject proxy, JS::HandleId id, bool* bp);
     bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::HandleObject proxy,
                                       JS::AutoIdVector& props);
     bool hasInstance(JSContext* cx, JS::HandleObject proxy, JS::MutableHandleValue v, bool* bp);
-    bool getBuiltinClass(JSContext* cx, JS::HandleObject proxy, js::ESClassValue* classValue);
+    bool getBuiltinClass(JSContext* cx, JS::HandleObject proxy, js::ESClass* cls);
     bool isArray(JSContext* cx, JS::HandleObject proxy, JS::IsArrayAnswer* answer);
     const char* className(JSContext* cx, JS::HandleObject proxy);
     bool getPrototype(JSContext* cx, JS::HandleObject proxy, JS::MutableHandleObject protop);
+    bool getPrototypeIfOrdinary(JSContext* cx, JS::HandleObject proxy, bool* isOrdinary,
+                                JS::MutableHandleObject protop);
 
     bool regexp_toShared(JSContext* cx, JS::HandleObject proxy, js::RegExpGuard* g);
 
@@ -82,9 +83,9 @@ class WrapperOwner : public virtual JavaScriptShared
     virtual void ActorDestroy(ActorDestroyReason why);
 
     virtual bool toObjectVariant(JSContext* cx, JSObject* obj, ObjectVariant* objVarp);
-    virtual JSObject* fromObjectVariant(JSContext* cx, ObjectVariant objVar);
-    JSObject* fromRemoteObjectVariant(JSContext* cx, RemoteObject objVar);
-    JSObject* fromLocalObjectVariant(JSContext* cx, LocalObject objVar);
+    virtual JSObject* fromObjectVariant(JSContext* cx, const ObjectVariant& objVar);
+    JSObject* fromRemoteObjectVariant(JSContext* cx, const RemoteObject& objVar);
+    JSObject* fromLocalObjectVariant(JSContext* cx, const LocalObject& objVar);
 
   protected:
     ObjectId idOf(JSObject* obj);
@@ -147,6 +148,8 @@ class WrapperOwner : public virtual JavaScriptShared
                              uint32_t* answer) = 0;
     virtual bool SendClassName(const ObjectId& objId, nsCString* result) = 0;
     virtual bool SendGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result) = 0;
+    virtual bool SendGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
+                                            ObjectOrNullVariant* result) = 0;
     virtual bool SendRegExpToShared(const ObjectId& objId, ReturnStatus* rs, nsString* source,
                                     uint32_t* flags) = 0;
 

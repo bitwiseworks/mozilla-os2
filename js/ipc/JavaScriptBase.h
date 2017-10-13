@@ -22,11 +22,6 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     typedef WrapperAnswer Answer;
 
   public:
-    explicit JavaScriptBase(JSRuntime* rt)
-      : JavaScriptShared(rt),
-        WrapperOwner(rt),
-        WrapperAnswer(rt)
-    {}
     virtual ~JavaScriptBase() {}
 
     virtual void ActorDestroy(WrapperOwner::ActorDestroyReason why) {
@@ -98,6 +93,11 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     }
     bool RecvGetPrototype(const uint64_t& objId, ReturnStatus* rs, ObjectOrNullVariant* result) {
         return Answer::RecvGetPrototype(ObjectId::deserialize(objId), rs, result);
+    }
+    bool RecvGetPrototypeIfOrdinary(const uint64_t& objId, ReturnStatus* rs, bool* isOrdinary,
+                                    ObjectOrNullVariant* result)
+    {
+        return Answer::RecvGetPrototypeIfOrdinary(ObjectId::deserialize(objId), rs, isOrdinary, result);
     }
     bool RecvRegExpToShared(const uint64_t& objId, ReturnStatus* rs, nsString* source, uint32_t* flags) {
         return Answer::RecvRegExpToShared(ObjectId::deserialize(objId), rs, source, flags);
@@ -190,6 +190,11 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     bool SendGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result) {
         return Base::SendGetPrototype(objId.serialize(), rs, result);
     }
+    bool SendGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
+                                    ObjectOrNullVariant* result)
+    {
+        return Base::SendGetPrototypeIfOrdinary(objId.serialize(), rs, isOrdinary, result);
+    }
 
     bool SendRegExpToShared(const ObjectId& objId, ReturnStatus* rs,
                             nsString* source, uint32_t* flags) {
@@ -214,7 +219,7 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     virtual bool toObjectVariant(JSContext* cx, JSObject* obj, ObjectVariant* objVarp) {
         return WrapperOwner::toObjectVariant(cx, obj, objVarp);
     }
-    virtual JSObject* fromObjectVariant(JSContext* cx, ObjectVariant objVar) {
+    virtual JSObject* fromObjectVariant(JSContext* cx, const ObjectVariant& objVar) {
         return WrapperOwner::fromObjectVariant(cx, objVar);
     }
 };

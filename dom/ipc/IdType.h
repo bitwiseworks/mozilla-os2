@@ -22,7 +22,6 @@ class TabParent;
 template<typename T>
 class IdType
 {
-
   friend struct IPC::ParamTraits<IdType<T>>;
 
 public:
@@ -63,7 +62,7 @@ struct ParamTraits<mozilla::dom::IdType<T>>
     WriteParam(aMsg, aParam.mId);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->mId);
   }
@@ -71,4 +70,4 @@ struct ParamTraits<mozilla::dom::IdType<T>>
 
 } // namespace IPC
 
-#endif
+#endif // mozilla_dom_IdType_h

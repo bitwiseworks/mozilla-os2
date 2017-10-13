@@ -10,9 +10,11 @@
 #ifndef mozilla_image_src_ImageCacheKey_h
 #define mozilla_image_src_ImageCacheKey_h
 
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/RefPtr.h"
 
-class nsIDOMDocument;
+class nsIDocument;
 class nsIURI;
 
 namespace mozilla {
@@ -31,8 +33,10 @@ class ImageURL;
 class ImageCacheKey final
 {
 public:
-  ImageCacheKey(nsIURI* aURI, nsIDOMDocument* aDocument);
-  ImageCacheKey(ImageURL* aURI, nsIDOMDocument* aDocument);
+  ImageCacheKey(nsIURI* aURI, const PrincipalOriginAttributes& aAttrs,
+                nsIDocument* aDocument, nsresult& aRv);
+  ImageCacheKey(ImageURL* aURI, const PrincipalOriginAttributes& aAttrs,
+                nsIDocument* aDocument);
 
   ImageCacheKey(const ImageCacheKey& aOther);
   ImageCacheKey(ImageCacheKey&& aOther);
@@ -53,11 +57,13 @@ public:
 private:
   static uint32_t ComputeHash(ImageURL* aURI,
                               const Maybe<uint64_t>& aBlobSerial,
+                              const PrincipalOriginAttributes& aAttrs,
                               void* aControlledDocument);
-  static void* GetControlledDocumentToken(nsIDOMDocument* aDocument);
+  static void* GetControlledDocumentToken(nsIDocument* aDocument);
 
   RefPtr<ImageURL> mURI;
   Maybe<uint64_t> mBlobSerial;
+  PrincipalOriginAttributes mOriginAttributes;
   void* mControlledDocument;
   uint32_t mHash;
   bool mIsChrome;

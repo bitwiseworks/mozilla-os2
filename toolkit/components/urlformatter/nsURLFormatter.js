@@ -104,6 +104,7 @@ nsURLFormatterService.prototype = {
     NAME:             function() { return this.appInfo.name; },
     ID:               function() { return this.appInfo.ID; },
     VERSION:          function() { return this.appInfo.version; },
+    MAJOR_VERSION:    function() { return this.appInfo.version.replace(/^([^\.]+\.[0-9]+[a-z]*).*/gi, "$1"); },
     APPBUILDID:       function() { return this.appInfo.appBuildID; },
     PLATFORMVERSION:  function() { return this.appInfo.platformVersion; },
     PLATFORMBUILDID:  function() { return this.appInfo.platformBuildID; },
@@ -115,8 +116,6 @@ nsURLFormatterService.prototype = {
     CHANNEL:          () => UpdateUtils.UpdateChannel,
     MOZILLA_API_KEY:  () => "@MOZ_MOZILLA_API_KEY@",
     GOOGLE_API_KEY:   () => "@MOZ_GOOGLE_API_KEY@",
-    GOOGLE_OAUTH_API_CLIENTID:() => "@MOZ_GOOGLE_OAUTH_API_CLIENTID@",
-    GOOGLE_OAUTH_API_KEY:     () => "@MOZ_GOOGLE_OAUTH_API_KEY@",
     BING_API_CLIENTID:() => "@MOZ_BING_API_CLIENTID@",
     BING_API_KEY:     () => "@MOZ_BING_API_KEY@",
     DISTRIBUTION:     function() { return this.distribution.id; },
@@ -156,6 +155,13 @@ nsURLFormatterService.prototype = {
     }
 
     return this.formatURL(format);
+  },
+
+  trimSensitiveURLs: function uf_trimSensitiveURLs(aMsg) {
+    // Only the google API key is sensitive for now.
+    return "@MOZ_GOOGLE_API_KEY@" ? aMsg.replace(/@MOZ_GOOGLE_API_KEY@/g,
+                                                 "[trimmed-google-api-key]")
+                                  : aMsg;
   }
 };
 

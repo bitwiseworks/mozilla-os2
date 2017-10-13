@@ -8,21 +8,19 @@ import tempfile
 
 import mozfile
 import mozinfo
-from marionette import BaseMarionetteTestRunner
 
-import firefox_ui_tests
-from firefox_puppeteer.testcases import FirefoxTestCase
+from marionette_harness import BaseMarionetteTestRunner, MarionetteTestCase
 
 
 class FirefoxUITestRunner(BaseMarionetteTestRunner):
+
     def __init__(self, **kwargs):
-        BaseMarionetteTestRunner.__init__(self, **kwargs)
+        super(FirefoxUITestRunner, self).__init__(**kwargs)
+
         # select the appropriate GeckoInstance
         self.app = 'fxdesktop'
-        if not self.server_root:
-            self.server_root = firefox_ui_tests.resources
 
-        self.test_handlers = [FirefoxTestCase]
+        self.test_handlers = [MarionetteTestCase]
 
     def duplicate_application(self, application_folder):
         """Creates a copy of the specified binary."""

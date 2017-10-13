@@ -29,7 +29,7 @@
 using mozilla::dom::EncodingUtils;
 using namespace mozilla;
 
-static const char* kUnixCharsets[][3] = {
+static const nsUConvProp kUnixCharsets[] = {
 #include "unixcharset.properties.h"
 };
 
@@ -44,11 +44,8 @@ ConvertLocaleToCharsetUsingDeprecatedConfig(const nsACString& locale,
                                             nsACString& oResult)
 {
   if (!(locale.IsEmpty())) {
-    nsAutoCString localeKey;
-    localeKey.AssignLiteral("locale.all.");
-    localeKey.Append(locale);
     if (NS_SUCCEEDED(nsUConvPropertySearch::SearchPropertyValue(kUnixCharsets,
-        ArrayLength(kUnixCharsets), localeKey, oResult))) {
+        ArrayLength(kUnixCharsets), locale, oResult))) {
       return NS_OK;
     }
   }
@@ -119,11 +116,11 @@ nsPlatformCharset::GetDefaultCharsetForLocale(const nsAString& localeName, nsACS
 nsresult
 nsPlatformCharset::InitGetCharset(nsACString &oString)
 {
+#if HAVE_LANGINFO_CODESET
   char* nl_langinfo_codeset = nullptr;
   nsCString aCharset;
   nsresult res;
 
-#if HAVE_LANGINFO_CODESET
   nl_langinfo_codeset = nl_langinfo(CODESET);
   NS_ASSERTION(nl_langinfo_codeset, "cannot get nl_langinfo(CODESET)");
 

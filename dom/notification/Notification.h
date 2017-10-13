@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- *//* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,13 +9,14 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/NotificationBinding.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/workers/bindings/WorkerHolder.h"
 
 #include "nsIObserver.h"
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
+#include "nsWeakReference.h"
 
 #define NOTIFICATIONTELEMETRYSERVICE_CONTRACTID \
   "@mozilla.org/notificationTelemetryService;1"
@@ -36,17 +36,17 @@ namespace workers {
 } // namespace workers
 
 class Notification;
-class NotificationFeature final : public workers::WorkerFeature
+class NotificationWorkerHolder final : public workers::WorkerHolder
 {
   // Since the feature is strongly held by a Notification, it is ok to hold
   // a raw pointer here.
   Notification* mNotification;
 
 public:
-  explicit NotificationFeature(Notification* aNotification);
+  explicit NotificationWorkerHolder(Notification* aNotification);
 
   bool
-  Notify(JSContext* aCx, workers::Status aStatus) override;
+  Notify(workers::Status aStatus) override;
 };
 
 // Records telemetry probes at application startup, when a notification is
@@ -132,6 +132,8 @@ private:
  *
  */
 class Notification : public DOMEventTargetHelper
+                   , public nsIObserver
+                   , public nsSupportsWeakReference
 {
   friend class CloseNotificationRunnable;
   friend class NotificationTask;
@@ -151,7 +153,9 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(Notification, DOMEventTargetHelper)
+  NS_DECL_NSIOBSERVER
 
+  static bool RequireInteractionEnabled(JSContext* aCx, JSObject* aObj);
   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
   // Returns if Notification.get() is allowed for the current global.
   static bool IsGetEnabled(JSContext* aCx, JSObject* aObj);
@@ -182,7 +186,7 @@ public:
     const nsAString& aTag,
     const nsAString& aIcon,
     const nsAString& aData,
-    const nsAString& aServiceWorkerRegistrationID,
+    const nsAString& aServiceWorkerRegistrationScope,
     ErrorResult& aRv);
 
   void GetID(nsAString& aRetval) {
@@ -231,15 +235,16 @@ public:
 
   static bool RequestPermissionEnabledForScope(JSContext* aCx, JSObject* /* unused */);
 
-  static void RequestPermission(const GlobalObject& aGlobal,
-                                const Optional<OwningNonNull<NotificationPermissionCallback> >& aCallback,
-                                ErrorResult& aRv);
+  static already_AddRefed<Promise>
+  RequestPermission(const GlobalObject& aGlobal,
+                    const Optional<OwningNonNull<NotificationPermissionCallback> >& aCallback,
+                    ErrorResult& aRv);
 
   static NotificationPermission GetPermission(const GlobalObject& aGlobal,
                                               ErrorResult& aRv);
 
   static already_AddRefed<Promise>
-  Get(nsPIDOMWindow* aWindow,
+  Get(nsPIDOMWindowInner* aWindow,
       const GetNotificationOptions& aFilter,
       const nsAString& aScope,
       ErrorResult& aRv);
@@ -255,8 +260,13 @@ public:
 
   // Notification implementation of
   // ServiceWorkerRegistration.showNotification.
+  //
+  //
+  // Note that aCx may not be in the compartment of aGlobal, but aOptions will
+  // have its JS things in the compartment of aCx.
   static already_AddRefed<Promise>
-  ShowPersistentNotification(nsIGlobalObject* aGlobal,
+  ShowPersistentNotification(JSContext* aCx,
+                             nsIGlobalObject* aGlobal,
                              const nsAString& aScope,
                              const nsAString& aTitle,
                              const NotificationOptions& aOptions,
@@ -264,18 +274,20 @@ public:
 
   void Close();
 
-  nsPIDOMWindow* GetParentObject()
+  nsPIDOMWindowInner* GetParentObject()
   {
     return GetOwner();
   }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
+  bool RequireInteraction() const;
+
   void GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval);
 
   void InitFromJSVal(JSContext* aCx, JS::Handle<JS::Value> aData, ErrorResult& aRv);
 
-  void InitFromBase64(JSContext* aCx, const nsAString& aData, ErrorResult& aRv);
+  void InitFromBase64(const nsAString& aData, ErrorResult& aRv);
 
   void AssertIsOnTargetThread() const
   {
@@ -308,6 +320,8 @@ public:
   static NotificationPermission GetPermissionInternal(nsIPrincipal* aPrincipal,
                                                       ErrorResult& rv);
 
+  static NotificationPermission TestPermission(nsIPrincipal* aPrincipal);
+
   bool DispatchClickEvent();
   bool DispatchNotificationClickEvent();
 
@@ -318,6 +332,7 @@ protected:
                const nsAString& aTitle, const nsAString& aBody,
                NotificationDirection aDir, const nsAString& aLang,
                const nsAString& aTag, const nsAString& aIconUrl,
+               bool aRequireNotification,
                const NotificationBehavior& aBehavior);
 
   static already_AddRefed<Notification> CreateInternal(nsIGlobalObject* aGlobal,
@@ -325,6 +340,7 @@ protected:
                                                        const nsAString& aTitle,
                                                        const NotificationOptions& aOptions);
 
+  nsresult Init();
   bool IsInPrivateBrowsing();
   void ShowInternal();
   void CloseInternal();
@@ -344,7 +360,7 @@ protected:
     }
   }
 
-  static const NotificationDirection StringToDirection(const nsAString& aDirection)
+  static NotificationDirection StringToDirection(const nsAString& aDirection)
   {
     if (aDirection.EqualsLiteral("ltr")) {
       return NotificationDirection::Ltr;
@@ -385,6 +401,7 @@ protected:
   const nsString mLang;
   const nsString mTag;
   const nsString mIconUrl;
+  const bool mRequireInteraction;
   nsString mDataAsBase64;
   const NotificationBehavior mBehavior;
 
@@ -412,8 +429,12 @@ private:
   // Notification if result is NS_OK. The lifetime of this Notification is tied
   // to an underlying NotificationRef. Do not hold a non-stack raw pointer to
   // it. Be careful about thread safety if acquiring a strong reference.
+  //
+  // Note that aCx may not be in the compartment of aGlobal, but aOptions will
+  // have its JS things in the compartment of aCx.
   static already_AddRefed<Notification>
-  CreateAndShow(nsIGlobalObject* aGlobal,
+  CreateAndShow(JSContext* aCx,
+                nsIGlobalObject* aGlobal,
                 const nsAString& aTitle,
                 const NotificationOptions& aOptions,
                 const nsAString& aScope,
@@ -432,13 +453,13 @@ private:
     return NS_IsMainThread() == !mWorkerPrivate;
   }
 
-  bool RegisterFeature();
-  void UnregisterFeature();
+  bool RegisterWorkerHolder();
+  void UnregisterWorkerHolder();
 
   nsresult ResolveIconAndSoundURL(nsString&, nsString&);
 
   // Only used for Notifications on Workers, worker thread only.
-  UniquePtr<NotificationFeature> mFeature;
+  UniquePtr<NotificationWorkerHolder> mWorkerHolder;
   // Target thread only.
   uint32_t mTaskCount;
 };

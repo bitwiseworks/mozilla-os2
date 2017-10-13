@@ -6,6 +6,7 @@
 package org.mozilla.gecko.restrictions;
 
 import org.mozilla.gecko.AboutPages;
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.annotation.TargetApi;
@@ -15,6 +16,7 @@ import android.os.Bundle;
 import android.os.StrictMode;
 import android.os.UserManager;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +35,7 @@ public class RestrictedProfileConfiguration implements RestrictionConfiguration 
         configuration.put(Restrictable.ADVANCED_SETTINGS, false);
         configuration.put(Restrictable.CAMERA_MICROPHONE, false);
         configuration.put(Restrictable.DATA_CHOICES, false);
+        configuration.put(Restrictable.BLOCK_LIST, false);
         configuration.put(Restrictable.TELEMETRY, false);
         configuration.put(Restrictable.HEALTH_REPORT, true);
         configuration.put(Restrictable.DEFAULT_THEME, true);
@@ -41,12 +44,18 @@ public class RestrictedProfileConfiguration implements RestrictionConfiguration 
     /**
      * These restrictions are hidden from the admin configuration UI.
      */
-    private static List<Restrictable> hiddenRestrictions = Arrays.asList(
-            Restrictable.MASTER_PASSWORD,
-            Restrictable.GUEST_BROWSING,
-            Restrictable.DATA_CHOICES,
-            Restrictable.DEFAULT_THEME
-    );
+    private static List<Restrictable> hiddenRestrictions = new ArrayList<>();
+    static {
+        hiddenRestrictions.add(Restrictable.MASTER_PASSWORD);
+        hiddenRestrictions.add(Restrictable.GUEST_BROWSING);
+        hiddenRestrictions.add(Restrictable.DATA_CHOICES);
+        hiddenRestrictions.add(Restrictable.DEFAULT_THEME);
+
+        // Hold behind Nightly flag until we have an actual block list deployed.
+        if (!AppConstants.NIGHTLY_BUILD) {
+            hiddenRestrictions.add(Restrictable.BLOCK_LIST);
+        }
+    }
 
     /* package-private */ static boolean shouldHide(Restrictable restrictable) {
         return hiddenRestrictions.contains(restrictable);
@@ -57,9 +66,6 @@ public class RestrictedProfileConfiguration implements RestrictionConfiguration 
     }
 
     private Context context;
-    private Bundle cachedAppRestrictions;
-    private Bundle cachedUserRestrictions;
-    private boolean isCacheInvalid = true;
 
     public RestrictedProfileConfiguration(Context context) {
         this.context = context.getApplicationContext();
@@ -67,38 +73,17 @@ public class RestrictedProfileConfiguration implements RestrictionConfiguration 
 
     @Override
     public synchronized boolean isAllowed(Restrictable restrictable) {
-        if (isCacheInvalid || !ThreadUtils.isOnUiThread()) {
-            readRestrictions();
-            isCacheInvalid = false;
-        }
-
         // Special casing system/user restrictions
         if (restrictable == Restrictable.INSTALL_APPS || restrictable == Restrictable.MODIFY_ACCOUNTS) {
-            return !cachedUserRestrictions.getBoolean(restrictable.name);
+            return RestrictionCache.getUserRestriction(context, restrictable.name);
         }
 
-        if (!cachedAppRestrictions.containsKey(restrictable.name) && !configuration.containsKey(restrictable)) {
+        if (!RestrictionCache.hasApplicationRestriction(context, restrictable.name) && !configuration.containsKey(restrictable)) {
             // Always allow features that are not in the configuration
             return true;
         }
 
-        return cachedAppRestrictions.getBoolean(restrictable.name, configuration.get(restrictable));
-    }
-
-    private void readRestrictions() {
-        final UserManager mgr = (UserManager) context.getSystemService(Context.USER_SERVICE);
-
-        StrictMode.ThreadPolicy policy = StrictMode.allowThreadDiskReads();
-
-        try {
-            Bundle appRestrictions = mgr.getApplicationRestrictions(context.getPackageName());
-            migrateRestrictionsIfNeeded(appRestrictions);
-
-            cachedAppRestrictions = appRestrictions;
-            cachedUserRestrictions = mgr.getUserRestrictions();
-        } finally {
-            StrictMode.setThreadPolicy(policy);
-        }
+        return RestrictionCache.getApplicationRestriction(context, restrictable.name, configuration.get(restrictable));
     }
 
     @Override
@@ -126,27 +111,19 @@ public class RestrictedProfileConfiguration implements RestrictionConfiguration 
 
     @Override
     public synchronized void update() {
-        isCacheInvalid = true;
+        RestrictionCache.invalidate();
     }
 
-    /**
-     * This method migrates the old set of DISALLOW_ restrictions to the new restrictable feature ones (Bug 1189336).
-     */
-    public static void migrateRestrictionsIfNeeded(Bundle bundle) {
-        if (!bundle.containsKey(Restrictable.INSTALL_EXTENSION.name) && bundle.containsKey("no_install_extensions")) {
-            bundle.putBoolean(Restrictable.INSTALL_EXTENSION.name, !bundle.getBoolean("no_install_extensions"));
+    public static List<Restrictable> getVisibleRestrictions() {
+        final List<Restrictable> visibleList = new ArrayList<>();
+
+        for (Restrictable restrictable : configuration.keySet()) {
+            if (hiddenRestrictions.contains(restrictable)) {
+                continue;
+            }
+            visibleList.add(restrictable);
         }
 
-        if (!bundle.containsKey(Restrictable.PRIVATE_BROWSING.name) && bundle.containsKey("no_private_browsing")) {
-            bundle.putBoolean(Restrictable.PRIVATE_BROWSING.name, !bundle.getBoolean("no_private_browsing"));
-        }
-
-        if (!bundle.containsKey(Restrictable.CLEAR_HISTORY.name) && bundle.containsKey("no_clear_history")) {
-            bundle.putBoolean(Restrictable.CLEAR_HISTORY.name, !bundle.getBoolean("no_clear_history"));
-        }
-
-        if (!bundle.containsKey(Restrictable.ADVANCED_SETTINGS.name) && bundle.containsKey("no_advanced_settings")) {
-            bundle.putBoolean(Restrictable.ADVANCED_SETTINGS.name, !bundle.getBoolean("no_advanced_settings"));
-        }
+        return visibleList;
     }
 }

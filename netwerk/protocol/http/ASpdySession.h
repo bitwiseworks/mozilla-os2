@@ -68,7 +68,7 @@ public:
 
     // this could go either way, but because there are network instances of
     // it being a hard error we should consider it hard.
-    if (code == NS_ERROR_FAILURE) {
+    if (code == NS_ERROR_FAILURE || code == NS_ERROR_OUT_OF_MEMORY) {
       return false;
     }
 
@@ -95,7 +95,7 @@ public:
   SpdyInformation();
   ~SpdyInformation() {}
 
-  static const uint32_t kCount = 2;
+  static const uint32_t kCount = 1;
 
   // determine the index (0..kCount-1) of the spdy information that
   // correlates to the npn string. NS_FAILED() if no match is found.
@@ -111,7 +111,6 @@ public:
   // not to offer a particular protocol based on the known TLS information
   // that we will offer in the client hello (such as version). There has
   // not been a Server Hello received yet, so not much else can be considered.
-  // Stacks without restrictions can just use SpdySessionTrue()
   ALPNCallback ALPNCallbacks[kCount];
 };
 

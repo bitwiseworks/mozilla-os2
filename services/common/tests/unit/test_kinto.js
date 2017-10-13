@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-common/moz-kinto-client.js")
+Cu.import("resource://services-common/kinto-offline-client.js");
 Cu.import("resource://testing-common/httpd.js");
 
 const BinaryInputStream = Components.Constructor("@mozilla.org/binaryinputstream;1",
@@ -118,8 +118,9 @@ add_task(function* test_kinto_update() {
     let updateResult = yield collection.update(copiedRecord);
     // check the field was updated
     do_check_eq(updateResult.data.foo, copiedRecord.foo);
-    // check the status has changed
-    do_check_eq(updateResult.data._status, "updated");
+    // check the status is still "created", since we haven't synced
+    // the record
+    do_check_eq(updateResult.data._status, "created");
   } finally {
     yield collection.db.close();
   }
@@ -210,6 +211,69 @@ add_task(function* test_kinto_list(){
 
 add_task(clear_collection);
 
+add_task(function* test_loadDump_ignores_already_imported_records(){
+  const collection = do_get_kinto_collection();
+  try {
+    yield collection.db.open();
+    const record = {id: "41b71c13-17e9-4ee3-9268-6a41abf9730f", title: "foo", last_modified: 1457896541};
+    yield collection.loadDump([record]);
+    let impactedRecords = yield collection.loadDump([record]);
+    do_check_eq(impactedRecords.length, 0);
+  } finally {
+    yield collection.db.close();
+  }
+});
+
+add_task(clear_collection);
+
+add_task(function* test_loadDump_should_overwrite_old_records(){
+  const collection = do_get_kinto_collection();
+  try {
+    yield collection.db.open();
+    const record = {id: "41b71c13-17e9-4ee3-9268-6a41abf9730f", title: "foo", last_modified: 1457896541};
+    yield collection.loadDump([record]);
+    const updated = Object.assign({}, record, {last_modified: 1457896543});
+    let impactedRecords = yield collection.loadDump([updated]);
+    do_check_eq(impactedRecords.length, 1);
+  } finally {
+    yield collection.db.close();
+  }
+});
+
+add_task(clear_collection);
+
+add_task(function* test_loadDump_should_not_overwrite_unsynced_records(){
+  const collection = do_get_kinto_collection();
+  try {
+    yield collection.db.open();
+    const recordId = "41b71c13-17e9-4ee3-9268-6a41abf9730f";
+    yield collection.create({id: recordId, title: "foo"}, {useRecordId: true});
+    const record = {id: recordId, title: "bar", last_modified: 1457896541};
+    let impactedRecords = yield collection.loadDump([record]);
+    do_check_eq(impactedRecords.length, 0);
+  } finally {
+    yield collection.db.close();
+  }
+});
+
+add_task(clear_collection);
+
+add_task(function* test_loadDump_should_not_overwrite_records_without_last_modified(){
+  const collection = do_get_kinto_collection();
+  try {
+    yield collection.db.open();
+    const recordId = "41b71c13-17e9-4ee3-9268-6a41abf9730f";
+    yield collection.create({id: recordId, title: "foo"}, {synced: true});
+    const record = {id: recordId, title: "bar", last_modified: 1457896541};
+    let impactedRecords = yield collection.loadDump([record]);
+    do_check_eq(impactedRecords.length, 0);
+  } finally {
+    yield collection.db.close();
+  }
+});
+
+add_task(clear_collection);
+
 // Now do some sanity checks against a server - we're not looking to test
 // core kinto.js functionality here (there is excellent test coverage in
 // kinto.js), more making sure things are basically working as expected.
@@ -244,17 +308,29 @@ add_task(function* test_kinto_sync(){
   // create an empty collection, sync to populate
   const collection = do_get_kinto_collection();
   try {
+    let result;
+
     yield collection.db.open();
-    yield collection.sync();
+    result = yield collection.sync();
+    do_check_true(result.ok);
 
     // our test data has a single record; it should be in the local collection
     let list = yield collection.list();
     do_check_eq(list.data.length, 1);
 
     // now sync again; we should now have 2 records
-    yield collection.sync();
+    result = yield collection.sync();
+    do_check_true(result.ok);
     list = yield collection.list();
     do_check_eq(list.data.length, 2);
+
+    // sync again; the second records should have been modified
+    const before = list.data[0].title;
+    result = yield collection.sync();
+    do_check_true(result.ok);
+    list = yield collection.list();
+    const after = list.data[0].title;
+    do_check_neq(before, after);
   } finally {
     yield collection.db.close();
   }
@@ -294,9 +370,9 @@ function getSampleResponse(req, port) {
         "Server: waitress"
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": JSON.stringify({"settings":{"cliquet.batch_max_requests":25}, "url":`http://localhost:${port}/v1/`, "documentation":"https://kinto.readthedocs.org/", "version":"1.5.1", "commit":"cbc6f58", "hello":"kinto"})
+      "responseBody": JSON.stringify({"settings":{"batch_max_requests":25}, "url":`http://localhost:${port}/v1/`, "documentation":"https://kinto.readthedocs.org/", "version":"1.5.1", "commit":"cbc6f58", "hello":"kinto"})
     },
-    "GET:/v1/buckets/default/collections/test_collection/records?": {
+    "GET:/v1/buckets/default/collections/test_collection/records?_sort=-last_modified": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
@@ -307,7 +383,7 @@ function getSampleResponse(req, port) {
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data":[{"last_modified":1445606341071, "done":false, "id":"68db8313-686e-4fff-835e-07d78ad6f2af", "title":"New test"}]})
     },
-    "GET:/v1/buckets/default/collections/test_collection/records?_since=1445606341071": {
+    "GET:/v1/buckets/default/collections/test_collection/records?_sort=-last_modified&_since=1445606341071": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
@@ -317,6 +393,17 @@ function getSampleResponse(req, port) {
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data":[{"last_modified":1445607941223, "done":false, "id":"901967b0-f729-4b30-8d8d-499cba7f4b1d", "title":"Another new test"}]})
+    },
+    "GET:/v1/buckets/default/collections/test_collection/records?_sort=-last_modified&_since=1445607941223": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"1445607541265\""
+      ],
+      "status": {status: 200, statusText: "OK"},
+      "responseBody": JSON.stringify({"data":[{"last_modified":1445607541265, "done":false, "id":"901967b0-f729-4b30-8d8d-499cba7f4b1d", "title":"Modified title"}]})
     }
   };
   return responses[`${req.method}:${req.path}?${req.queryString}`] ||

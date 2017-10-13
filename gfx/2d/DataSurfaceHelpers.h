@@ -13,6 +13,28 @@
 namespace mozilla {
 namespace gfx {
 
+/**
+ * Create a DataSourceSurface and init the surface with the |aData|. The stride
+ * of this source surface might be different from the input data's |aDataStride|.
+ * System will try to use the optimal one.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceFromData(const IntSize& aSize,
+                                SurfaceFormat aFormat,
+                                const uint8_t* aData,
+                                int32_t aDataStride);
+
+/**
+ * Similar to CreateDataSourceSurfaceFromData(), but could setup the stride for
+ * this surface.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceWithStrideFromData(const IntSize &aSize,
+                                          SurfaceFormat aFormat,
+                                          int32_t aStride,
+                                          const uint8_t* aData,
+                                          int32_t aDataStride);
+
 void
 ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, const int32_t aStride);
 
@@ -71,9 +93,26 @@ BufferSizeFromStrideAndHeight(int32_t aStride,
                               int32_t aExtraBytes = 0);
 
 /**
- * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ * Multiplies aWidth, aHeight, aDepth and makes sure the result is limited to
+ * something sane. To keep things consistent, this should always be used
+ * wherever we allocate a buffer based on surface dimensions.
+ *
+ * @param aExtra Optional argument to specify an additional number of trailing
+ *   bytes (useful for creating intermediate surfaces for filters, for
+ *   example).
+ *
+ * @return The result of the multiplication if it is acceptable, or else zero.
  */
-void
+size_t
+BufferSizeFromDimensions(int32_t aWidth,
+                         int32_t aHeight,
+                         int32_t aDepth,
+                         int32_t aExtraBytes = 0);
+/**
+ * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ * @returns false if the copy is not successful or the aSrc's size is empty.
+ */
+bool
 CopyRect(DataSourceSurface* aSrc, DataSourceSurface* aDest,
          IntRect aSrcRect, IntPoint aDestPoint);
 
@@ -91,7 +130,7 @@ CreateDataSourceSurfaceByCloning(DataSourceSurface* aSource);
  */
 uint8_t*
 DataAtOffset(DataSourceSurface* aSurface,
-             DataSourceSurface::MappedSurface* aMap,
+             const DataSourceSurface::MappedSurface* aMap,
              IntPoint aPoint);
 
 /**

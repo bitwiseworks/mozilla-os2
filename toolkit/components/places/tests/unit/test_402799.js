@@ -9,7 +9,7 @@ try {
   var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].
                 getService(Ci.nsINavHistoryService);
   var bhist = histsvc.QueryInterface(Ci.nsIBrowserHistory);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get history services\n");
 }
 
@@ -18,7 +18,7 @@ try {
   var bmsvc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].
               getService(Ci.nsINavBookmarksService);
 }
-catch(ex) {
+catch (ex) {
   do_throw("Could not get the nav-bookmarks-service\n");
 }
 
@@ -26,7 +26,7 @@ catch(ex) {
 try {
   var tagssvc = Cc["@mozilla.org/browser/tagging-service;1"].
                 getService(Ci.nsITaggingService);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get tagging service\n");
 }
 
@@ -36,10 +36,10 @@ function run_test() {
   var uri1 = uri("http://foo.bar/");
 
   // create 2 bookmarks on the same uri
-  var bookmark1id = bmsvc.insertBookmark(bmsvc.bookmarksMenuFolder, uri1,
-                                         bmsvc.DEFAULT_INDEX, "title 1");
-  var bookmark2id = bmsvc.insertBookmark(bmsvc.toolbarFolder, uri1,
-                                         bmsvc.DEFAULT_INDEX, "title 2");
+  bmsvc.insertBookmark(bmsvc.bookmarksMenuFolder, uri1,
+                       bmsvc.DEFAULT_INDEX, "title 1");
+  bmsvc.insertBookmark(bmsvc.toolbarFolder, uri1,
+                       bmsvc.DEFAULT_INDEX, "title 2");
   // add some tags
   tagssvc.tagURI(uri1, ["foo", "bar", "foobar", "foo bar"]);
 

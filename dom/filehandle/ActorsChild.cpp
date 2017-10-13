@@ -16,6 +16,7 @@
 #include "nsContentUtils.h"
 #include "nsString.h"
 #include "xpcpublic.h"
+#include "mozilla/dom/BindingUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -318,8 +319,7 @@ ConvertActorToFile(FileHandleBase* aFileHandle,
   actor->SetMysteryBlobInfo(mutableFile->Name(),
                             mutableFile->Type(),
                             size.get_uint64_t(),
-                            lastModified.get_int64_t(),
-                            BlobDirState::eUnknownIfDir);
+                            lastModified.get_int64_t());
 
   RefPtr<BlobImpl> blobImpl = actor->GetBlobImpl();
   MOZ_ASSERT(blobImpl);

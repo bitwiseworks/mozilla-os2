@@ -20,13 +20,16 @@ dictionary CSP {
   sequence<DOMString> connect-src;
   sequence<DOMString> report-uri;
   sequence<DOMString> frame-ancestors;
-  // sequence<DOMString> reflected-xss; // not suppored in Firefox
+  // sequence<DOMString> reflected-xss; // not supported in Firefox
   sequence<DOMString> base-uri;
   sequence<DOMString> form-action;
   sequence<DOMString> referrer;
   sequence<DOMString> manifest-src;
   sequence<DOMString> upgrade-insecure-requests;
   sequence<DOMString> child-src;
+  sequence<DOMString> block-all-mixed-content;
+  sequence<DOMString> require-sri-for;
+  sequence<DOMString> sandbox;
 };
 
 dictionary CSPPolicies {

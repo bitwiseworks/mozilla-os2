@@ -20,22 +20,18 @@ function openTabInUserContext(uri, userContextId) {
 
   // select tab and make sure its browser is focused
   gBrowser.selectedTab = tab;
-  tab.ownerDocument.defaultView.focus();
+  tab.ownerGlobal.focus();
 
   return tab;
 }
 
 add_task(function* setup() {
   // make sure userContext is enabled.
-  SpecialPowers.pushPrefEnv({"set": [
-    ["privacy.userContext.enabled", true]
-  ]});
-});
-
-add_task(function* cleanup() {
-  // make sure we don't leave any prefs set for the next tests
-  registerCleanupFunction(function() {
-    SpecialPowers.popPrefEnv();
+  yield new Promise(resolve => {
+    SpecialPowers.pushPrefEnv({"set": [
+      ["privacy.userContext.enabled", true],
+      ["dom.ipc.processCount", 1]
+    ]}, resolve);
   });
 });
 
@@ -80,8 +76,7 @@ add_task(function* test() {
     // check each item in the title and validate it meets expectatations
     for (let part of title) {
       let [storageMethodName, value] = part.split("=");
-      let is_f = storageMethodName == "cookie" ? is : todo_is;
-      is_f(value, expectedContext,
+      is(value, expectedContext,
             "the title reflects the expected contextual identity of " +
             expectedContext + " for method " + storageMethodName + ": " + value);
     }

@@ -15,64 +15,79 @@ class nsIURI;
 
 typedef unsigned long long DOMTimeMilliSec;
 typedef double DOMHighResTimeStamp;
-typedef unsigned short nsDOMPerformanceNavigationType;
-
-namespace mozilla {
-namespace dom {
-namespace PerformanceNavigation {
-static const nsDOMPerformanceNavigationType TYPE_NAVIGATE = 0;
-static const nsDOMPerformanceNavigationType TYPE_RELOAD = 1;
-static const nsDOMPerformanceNavigationType TYPE_BACK_FORWARD = 2;
-static const nsDOMPerformanceNavigationType TYPE_RESERVED = 255;
-} // namespace PerformanceNavigation
-} // namespace dom
-} // namespace mozilla
 
 class nsDOMNavigationTiming final
 {
 public:
+  enum Type {
+    TYPE_NAVIGATE = 0,
+    TYPE_RELOAD = 1,
+    TYPE_BACK_FORWARD = 2,
+    TYPE_RESERVED = 255,
+  };
+
   nsDOMNavigationTiming();
 
   NS_INLINE_DECL_REFCOUNTING(nsDOMNavigationTiming)
 
-  nsDOMPerformanceNavigationType GetType() const {
+  Type GetType() const
+  {
     return mNavigationType;
   }
-  inline DOMHighResTimeStamp GetNavigationStartHighRes() const {
+
+  inline DOMHighResTimeStamp GetNavigationStartHighRes() const
+  {
     return mNavigationStartHighRes;
   }
-  DOMTimeMilliSec GetNavigationStart() const {
+
+  DOMTimeMilliSec GetNavigationStart() const
+  {
     return static_cast<int64_t>(GetNavigationStartHighRes());
   }
-  mozilla::TimeStamp GetNavigationStartTimeStamp() const {
+
+  mozilla::TimeStamp GetNavigationStartTimeStamp() const
+  {
     return mNavigationStartTimeStamp;
   }
+
   DOMTimeMilliSec GetUnloadEventStart();
   DOMTimeMilliSec GetUnloadEventEnd();
-  DOMTimeMilliSec GetDomLoading() const {
+  DOMTimeMilliSec GetDomLoading() const
+  {
     return mDOMLoading;
   }
-  DOMTimeMilliSec GetDomInteractive() const {
+  DOMTimeMilliSec GetDomInteractive() const
+  {
     return mDOMInteractive;
   }
-  DOMTimeMilliSec GetDomContentLoadedEventStart() const {
+  DOMTimeMilliSec GetDomContentLoadedEventStart() const
+  {
     return mDOMContentLoadedEventStart;
   }
-  DOMTimeMilliSec GetDomContentLoadedEventEnd() const {
+  DOMTimeMilliSec GetDomContentLoadedEventEnd() const
+  {
     return mDOMContentLoadedEventEnd;
   }
-  DOMTimeMilliSec GetDomComplete() const {
+  DOMTimeMilliSec GetDomComplete() const
+  {
     return mDOMComplete;
   }
-  DOMTimeMilliSec GetLoadEventStart() const {
+  DOMTimeMilliSec GetLoadEventStart() const
+  {
     return mLoadEventStart;
   }
-  DOMTimeMilliSec GetLoadEventEnd() const {
+  DOMTimeMilliSec GetLoadEventEnd() const
+  {
     return mLoadEventEnd;
   }
 
-  void NotifyNavigationStart();
-  void NotifyFetchStart(nsIURI* aURI, nsDOMPerformanceNavigationType aNavigationType);
+  enum class DocShellState : uint8_t {
+    eActive,
+    eInactive
+  };
+
+  void NotifyNavigationStart(DocShellState aDocShellState);
+  void NotifyFetchStart(nsIURI* aURI, Type aNavigationType);
   void NotifyBeforeUnload();
   void NotifyUnloadAccepted(nsIURI* aOldURI);
   void NotifyUnloadEventStart();
@@ -87,6 +102,10 @@ public:
   void NotifyDOMComplete(nsIURI* aURI);
   void NotifyDOMContentLoadedStart(nsIURI* aURI);
   void NotifyDOMContentLoadedEnd(nsIURI* aURI);
+
+  void NotifyNonBlankPaintForRootContentDocument();
+  void NotifyDocShellStateChanged(DocShellState aDocShellState);
+
   DOMTimeMilliSec TimeStampToDOM(mozilla::TimeStamp aStamp) const;
 
   inline DOMHighResTimeStamp TimeStampToDOMHighRes(mozilla::TimeStamp aStamp)
@@ -104,9 +123,10 @@ private:
   nsCOMPtr<nsIURI> mUnloadedURI;
   nsCOMPtr<nsIURI> mLoadedURI;
 
-  nsDOMPerformanceNavigationType mNavigationType;
+  Type mNavigationType;
   DOMHighResTimeStamp mNavigationStartHighRes;
   mozilla::TimeStamp mNavigationStartTimeStamp;
+  mozilla::TimeStamp mNonBlankPaintTimeStamp;
   DOMTimeMilliSec DurationFromStart();
 
   DOMTimeMilliSec mBeforeUnloadStart;
@@ -131,6 +151,7 @@ private:
   bool mDOMContentLoadedEventStartSet : 1;
   bool mDOMContentLoadedEventEndSet : 1;
   bool mDOMCompleteSet : 1;
+  bool mDocShellHasBeenActiveSinceNavigationStart : 1;
 };
 
 #endif /* nsDOMNavigationTiming_h___ */

@@ -10,8 +10,11 @@
 #include "nsApplicationChooser.h"
 #include "WidgetUtils.h"
 #include "nsIMIMEInfo.h"
+#include "nsIWidget.h"
 #include "nsCExternalHandlerService.h"
+#include "nsComponentManagerUtils.h"
 #include "nsGtkUtils.h"
+#include "nsPIDOMWindow.h"
 
 using namespace mozilla;
 
@@ -26,10 +29,12 @@ nsApplicationChooser::~nsApplicationChooser()
 }
 
 NS_IMETHODIMP
-nsApplicationChooser::Init(nsIDOMWindow* aParent, const nsACString& aTitle)
+nsApplicationChooser::Init(mozIDOMWindowProxy* aParent,
+                           const nsACString& aTitle)
 {
   NS_ENSURE_TRUE(aParent, NS_ERROR_FAILURE);
-  mParentWidget = widget::WidgetUtils::DOMWindowToWidget(aParent);
+  auto* parent = nsPIDOMWindowOuter::From(aParent);
+  mParentWidget = widget::WidgetUtils::DOMWindowToWidget(parent);
   mWindowTitle.Assign(aTitle);
   return NS_OK;
 }

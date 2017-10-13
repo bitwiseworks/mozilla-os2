@@ -17,8 +17,7 @@ const EVENT_TEST4 = "_test_event_4.1";
 const METHOD_TEST1 = "_test_method_1";
 const METHOD_TEST2 = "_test_method_2";
 
-// Method.NONE is converted to an empty string after a few JSON stringifications
-const METHOD_NONE = "";
+const METHOD_NONE = null;
 
 const REASON_TEST1 = "_test_reason_1";
 const REASON_TEST2 = "_test_reason_2";
@@ -89,8 +88,9 @@ add_test(function test_telemetry_events() {
     ["event",   EVENT_TEST1, METHOD_NONE, [],                                              undefined],
   ]);
 
+  let clearMeasurements = false;
   let obs = getObserver();
-  let measurements = removeNonTestMeasurements(obs.getUIMeasurements());
+  let measurements = removeNonTestMeasurements(obs.getUIMeasurements(clearMeasurements));
 
   measurements.forEach(function (m, i) {
     if (m.type === "event") {

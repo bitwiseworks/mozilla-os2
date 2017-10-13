@@ -1,11 +1,11 @@
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
  "use strict";
 
-function test() {
+ function test() {
   info("Test that the split console state is persisted");
 
   let toolbox;
@@ -26,9 +26,7 @@ function test() {
     let inspector = toolbox.getPanel("inspector");
     inspector.searchBox.focus();
 
-    // Use the binding element since inspector.searchBox is a XUL element.
     let activeElement = getActiveElement(inspector.panelDoc);
-    activeElement = activeElement.ownerDocument.getBindingParent(activeElement);
     is(activeElement, inspector.searchBox, "Search box is focused");
 
     yield toolbox.openSplitConsole();
@@ -45,9 +43,7 @@ function test() {
 
     info("Making sure that the search box is refocused after closing the " +
          "split console");
-    // Use the binding element since inspector.searchBox is a XUL element.
     activeElement = getActiveElement(inspector.panelDoc);
-    activeElement = activeElement.ownerDocument.getBindingParent(activeElement);
     is(activeElement, inspector.searchBox, "Search box is focused");
 
     yield toolbox.destroy();

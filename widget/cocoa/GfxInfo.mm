@@ -41,19 +41,23 @@ OSXVersionToOperatingSystem(uint32_t aOSXVersion)
   if (nsCocoaFeatures::ExtractMajorVersion(aOSXVersion) == 10) {
     switch (nsCocoaFeatures::ExtractMinorVersion(aOSXVersion)) {
       case 6:
-        return DRIVER_OS_OS_X_10_6;
+        return OperatingSystem::OSX10_6;
       case 7:
-        return DRIVER_OS_OS_X_10_7;
+        return OperatingSystem::OSX10_7;
       case 8:
-        return DRIVER_OS_OS_X_10_8;
+        return OperatingSystem::OSX10_8;
       case 9:
-        return DRIVER_OS_OS_X_10_9;
+        return OperatingSystem::OSX10_9;
       case 10:
-        return DRIVER_OS_OS_X_10_10;
+        return OperatingSystem::OSX10_10;
+      case 11:
+        return OperatingSystem::OSX10_11;
+      case 12:
+        return OperatingSystem::OSX10_12;
     }
   }
 
-  return DRIVER_OS_UNKNOWN;
+  return OperatingSystem::Unknown;
 }
 // The following three functions are derived from Chromium code
 static CFTypeRef SearchPortForProperty(io_registry_entry_t dspPort,
@@ -299,33 +303,34 @@ GfxInfo::AddCrashReportAnnotations()
 }
 
 // We don't support checking driver versions on Mac.
-#define IMPLEMENT_MAC_DRIVER_BLOCKLIST(os, vendor, device, features, blockOn) \
+#define IMPLEMENT_MAC_DRIVER_BLOCKLIST(os, vendor, device, features, blockOn, ruleId) \
   APPEND_TO_DRIVER_BLOCKLIST(os, vendor, device, features, blockOn,           \
-                             DRIVER_COMPARISON_IGNORED, V(0,0,0,0), "")
+                             DRIVER_COMPARISON_IGNORED, V(0,0,0,0), ruleId, "")
 
 
 const nsTArray<GfxDriverInfo>&
 GfxInfo::GetGfxDriverInfo()
 {
   if (!mDriverInfo->Length()) {
-    IMPLEMENT_MAC_DRIVER_BLOCKLIST(DRIVER_OS_ALL,
+    IMPLEMENT_MAC_DRIVER_BLOCKLIST(OperatingSystem::OSX,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_WEBGL_MSAA, nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION);
-    IMPLEMENT_MAC_DRIVER_BLOCKLIST(DRIVER_OS_ALL,
+      nsIGfxInfo::FEATURE_WEBGL_MSAA, nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION, "FEATURE_FAILURE_MAC_ATI_NO_MSAA");
+    IMPLEMENT_MAC_DRIVER_BLOCKLIST(OperatingSystem::OSX,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(RadeonX1000),
-      nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_BLOCKED_DEVICE);
-    IMPLEMENT_MAC_DRIVER_BLOCKLIST(DRIVER_OS_ALL,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(Geforce7300GT), 
-      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_BLOCKED_DEVICE);
+      nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_BLOCKED_DEVICE, "FEATURE_FAILURE_MAC_RADEONX1000_NO_TEXTURE2D");
+    IMPLEMENT_MAC_DRIVER_BLOCKLIST(OperatingSystem::OSX,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(Geforce7300GT),
+      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_BLOCKED_DEVICE, "FEATURE_FAILURE_MAC_7300_NO_WEBGL");
   }
   return *mDriverInfo;
 }
 
 nsresult
-GfxInfo::GetFeatureStatusImpl(int32_t aFeature, 
+GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
                               int32_t* aStatus,
                               nsAString& aSuggestedDriverVersion,
                               const nsTArray<GfxDriverInfo>& aDriverInfo,
+                              nsACString& aFailureId,
                               OperatingSystem* aOS /* = nullptr */)
 {
   NS_ENSURE_ARG_POINTER(aStatus);
@@ -340,16 +345,30 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
     if (aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA) {
       // Blacklist all ATI cards on OSX, except for
       // 0x6760 and 0x9488
-      if (mAdapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorATI), nsCaseInsensitiveStringComparator()) && 
+      if (mAdapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorATI), nsCaseInsensitiveStringComparator()) &&
           (mAdapterDeviceID.LowerCaseEqualsLiteral("0x6760") ||
            mAdapterDeviceID.LowerCaseEqualsLiteral("0x9488"))) {
         *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
         return NS_OK;
       }
+    } else if (aFeature == nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION) {
+      // See bug 1249659
+      switch(os) {
+        case OperatingSystem::OSX10_5:
+        case OperatingSystem::OSX10_6:
+        case OperatingSystem::OSX10_7:
+          *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
+          aFailureId = "FEATURE_FAILURE_CANVAS_OSX_VERSION";
+          break;
+        default:
+          *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
+          break;
+      }
+      return NS_OK;
     }
   }
 
-  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, &os);
+  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId, &os);
 }
 
 nsresult

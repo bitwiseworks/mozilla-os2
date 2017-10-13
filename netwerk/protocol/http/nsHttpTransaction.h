@@ -17,6 +17,7 @@
 #include "Http2Push.h"
 #include "mozilla/net/DNS.h"
 #include "ARefBase.h"
+#include "AlternateServices.h"
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsINetworkInterface.h"
@@ -29,7 +30,7 @@ class nsIHttpActivityObserver;
 class nsIEventTarget;
 class nsIInputStream;
 class nsIOutputStream;
-class nsISchedulingContext;
+class nsIRequestContext;
 
 namespace mozilla { namespace net {
 
@@ -105,8 +106,9 @@ public:
     // nsHttpTransaction::Connection should only be used on the socket thread
     already_AddRefed<nsAHttpConnection> GetConnectionReference();
 
-    // Called to find out if the transaction generated a complete response.
+    // Called to set/find out if the transaction generated a complete response.
     bool ResponseIsComplete() { return mResponseIsComplete; }
+    void SetResponseIsComplete() { mResponseIsComplete = true; }
 
     bool      ProxyConnectFailed() { return mProxyConnectFailed; }
 
@@ -126,9 +128,9 @@ public:
     const TimeStamp GetPendingTime() { return mPendingTime; }
     bool UsesPipelining() const { return mCaps & NS_HTTP_ALLOW_PIPELINING; }
 
-    // overload of nsAHttpTransaction::SchedulingContext()
-    nsISchedulingContext *SchedulingContext() override { return mSchedulingContext.get(); }
-    void SetSchedulingContext(nsISchedulingContext *aSchedulingContext);
+    // overload of nsAHttpTransaction::RequestContext()
+    nsIRequestContext *RequestContext() override { return mRequestContext.get(); }
+    void SetRequestContext(nsIRequestContext *aRequestContext);
     void DispatchedAsBlocking();
     void RemoveDispatchedAsBlocking();
 
@@ -143,6 +145,7 @@ public:
     }
     void SetPushedStream(Http2PushedStream *push) { mPushedStream = push; }
     uint32_t InitialRwin() const { return mInitialRwin; };
+    bool ChannelPipeFull() { return mWaitingOnPipeOut; }
 
     // Locked methods to get and set timing info
     const TimingStruct Timings();
@@ -164,6 +167,8 @@ public:
 
     int64_t GetTransferSize() { return mTransferSize; }
 
+    bool Do0RTT() override;
+    nsresult Finish0RTT(bool aRestart) override;
 private:
     friend class DeleteHttpTransaction;
     virtual ~nsHttpTransaction();
@@ -172,7 +177,7 @@ private:
     nsresult RestartInProgress();
     char    *LocateHttpStart(char *buf, uint32_t len,
                              bool aAllowPartialMatch);
-    nsresult ParseLine(char *line);
+    nsresult ParseLine(nsACString &line);
     nsresult ParseLineSegment(char *seg, uint32_t len);
     nsresult ParseHead(char *, uint32_t count, uint32_t *countRead);
     nsresult HandleContentStart();
@@ -184,10 +189,10 @@ private:
     Classifier Classify();
     void       CancelPipeline(uint32_t reason);
 
-    static NS_METHOD ReadRequestSegment(nsIInputStream *, void *, const char *,
-                                        uint32_t, uint32_t, uint32_t *);
-    static NS_METHOD WritePipeSegment(nsIOutputStream *, void *, char *,
-                                      uint32_t, uint32_t, uint32_t *);
+    static nsresult ReadRequestSegment(nsIInputStream *, void *, const char *,
+                                       uint32_t, uint32_t, uint32_t *);
+    static nsresult WritePipeSegment(nsIOutputStream *, void *, char *,
+                                     uint32_t, uint32_t, uint32_t *);
 
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
@@ -196,15 +201,23 @@ private:
     void DisableSpdy() override;
     void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
 
+    // Called right after we parsed the response head.  Checks for connection based
+    // authentication schemes in reponse headers for WWW and Proxy authentication.
+    // If such is found in any of them, NS_HTTP_STICKY_CONNECTION is set in mCaps.
+    // We need the sticky flag be set early to keep the connection from very start
+    // of the authentication process.
+    void CheckForStickyAuthScheme();
+    void CheckForStickyAuthSchemeAt(nsHttpAtom const& header);
+
 private:
-    class UpdateSecurityCallbacks : public nsRunnable
+    class UpdateSecurityCallbacks : public Runnable
     {
       public:
         UpdateSecurityCallbacks(nsHttpTransaction* aTrans,
                                 nsIInterfaceRequestor* aCallbacks)
         : mTrans(aTrans), mCallbacks(aCallbacks) {}
 
-        NS_IMETHOD Run()
+        NS_IMETHOD Run() override
         {
             if (mTrans->mConnection)
                 mTrans->mConnection->SetSecurityCallbacks(mCallbacks);
@@ -223,7 +236,7 @@ private:
     nsCOMPtr<nsISupports>           mSecurityInfo;
     nsCOMPtr<nsIAsyncInputStream>   mPipeIn;
     nsCOMPtr<nsIAsyncOutputStream>  mPipeOut;
-    nsCOMPtr<nsISchedulingContext>  mSchedulingContext;
+    nsCOMPtr<nsIRequestContext>     mRequestContext;
 
     nsCOMPtr<nsISupports>             mChannel;
     nsCOMPtr<nsIHttpActivityObserver> mActivityDistributor;
@@ -244,7 +257,7 @@ private:
 
     int64_t                         mContentLength;   // equals -1 if unknown
     int64_t                         mContentRead;     // count of consumed content bytes
-    int64_t                         mTransferSize; // count of received bytes
+    Atomic<int64_t, ReleaseAcquire> mTransferSize; // count of received bytes
 
     // After a 304/204 or other "no-content" style response we will skip over
     // up to MAX_INVALID_RESPONSE_BODY_SZ bytes when looking for the next
@@ -270,6 +283,11 @@ private:
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
 
+    nsHttpVersion                   mHttpVersion;
+    uint16_t                        mHttpResponseCode;
+
+    uint32_t                        mCurrentHttpResponseHeaderSize;
+
     // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
     // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
     // redundant requests on the network. The member itself is atomic, but
@@ -278,9 +296,7 @@ private:
     // bitfields should be allowed: 'lost races' will thus err on the
     // conservative side, e.g. by going ahead with a 2nd DNS refresh.
     Atomic<uint32_t>                mCapsToClear;
-
-    nsHttpVersion                   mHttpVersion;
-    uint16_t                        mHttpResponseCode;
+    Atomic<bool, ReleaseAcquire>    mResponseIsComplete;
 
     // state flags, all logically boolean, but not packed together into a
     // bitfield so as to avoid bitfield-induced races.  See bug 560579.
@@ -289,7 +305,6 @@ private:
     bool                            mHaveStatusLine;
     bool                            mHaveAllHeaders;
     bool                            mTransactionDone;
-    bool                            mResponseIsComplete;
     bool                            mDidContentStart;
     bool                            mNoContent; // expecting an empty entity body
     bool                            mSentData;
@@ -306,6 +321,7 @@ private:
     bool                            mContentDecoding;
     bool                            mContentDecodingCheck;
     bool                            mDeferredSendProgress;
+    bool                            mWaitingOnPipeOut;
 
     // mClosed           := transaction has been explicitly closed
     // mTransactionDone  := transaction ran to completion or was interrupted
@@ -415,7 +431,7 @@ private:
     uint64_t                           mCountRecv;
     uint64_t                           mCountSent;
     uint32_t                           mAppId;
-    bool                               mIsInBrowser;
+    bool                               mIsInIsolatedMozBrowser;
 #ifdef MOZ_WIDGET_GONK
     nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
 #endif
@@ -452,11 +468,17 @@ private:
     RefPtr<ASpdySession> mTunnelProvider;
 
 public:
+    void SetTransactionObserver(TransactionObserver *arg) { mTransactionObserver = arg; }
+private:
+    RefPtr<TransactionObserver> mTransactionObserver;
+public:
     void GetNetworkAddresses(NetAddr &self, NetAddr &peer);
 
 private:
     NetAddr                         mSelfAddr;
     NetAddr                         mPeerAddr;
+
+    bool                            m0RTTInProgress;
 };
 
 } // namespace net

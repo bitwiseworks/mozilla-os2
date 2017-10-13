@@ -23,7 +23,7 @@
  * nsAsyncDoomEvent
  *****************************************************************************/
 
-class nsAsyncDoomEvent : public nsRunnable {
+class nsAsyncDoomEvent : public mozilla::Runnable {
 public:
     nsAsyncDoomEvent(nsCacheEntryDescriptor *descriptor,
                      nsICacheListener *listener)
@@ -38,7 +38,7 @@ public:
         NS_IF_ADDREF(mListener);
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         nsresult status = NS_OK;
 

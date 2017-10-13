@@ -11,7 +11,7 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -25,13 +25,7 @@ namespace {
 
 uint64_t sServiceWorkerManagerParentID = 0;
 
-void
-AssertIsInMainProcess()
-{
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-}
-
-class RegisterServiceWorkerCallback final : public nsRunnable
+class RegisterServiceWorkerCallback final : public Runnable
 {
 public:
   RegisterServiceWorkerCallback(const ServiceWorkerRegistrationData& aData,
@@ -43,15 +37,20 @@ public:
     AssertIsOnBackgroundThread();
   }
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     AssertIsInMainProcess();
     AssertIsOnBackgroundThread();
 
     RefPtr<dom::ServiceWorkerRegistrar> service =
       dom::ServiceWorkerRegistrar::Get();
-    MOZ_ASSERT(service);
+
+    // Shutdown during the process of trying to update the registrar.  Give
+    // up on this modification.
+    if (!service) {
+      return NS_OK;
+    }
 
     service->RegisterServiceWorker(mData);
 
@@ -69,44 +68,60 @@ private:
   const uint64_t mParentID;
 };
 
-class UnregisterServiceWorkerCallback final : public nsRunnable
+class UnregisterServiceWorkerCallback final : public Runnable
 {
 public:
   UnregisterServiceWorkerCallback(const PrincipalInfo& aPrincipalInfo,
-                                  const nsString& aScope)
+                                  const nsString& aScope,
+                                  uint64_t aParentID)
     : mPrincipalInfo(aPrincipalInfo)
     , mScope(aScope)
+    , mParentID(aParentID)
   {
     AssertIsInMainProcess();
     AssertIsOnBackgroundThread();
   }
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     AssertIsInMainProcess();
     AssertIsOnBackgroundThread();
 
     RefPtr<dom::ServiceWorkerRegistrar> service =
       dom::ServiceWorkerRegistrar::Get();
-    MOZ_ASSERT(service);
+
+    // Shutdown during the process of trying to update the registrar.  Give
+    // up on this modification.
+    if (!service) {
+      return NS_OK;
+    }
 
     service->UnregisterServiceWorker(mPrincipalInfo,
                                      NS_ConvertUTF16toUTF8(mScope));
+
+    RefPtr<ServiceWorkerManagerService> managerService =
+      ServiceWorkerManagerService::Get();
+    if (managerService) {
+      managerService->PropagateUnregister(mParentID, mPrincipalInfo,
+                                          mScope);
+    }
+
     return NS_OK;
   }
 
 private:
   const PrincipalInfo mPrincipalInfo;
   nsString mScope;
+  uint64_t mParentID;
 };
 
-class CheckPrincipalWithCallbackRunnable final : public nsRunnable
+class CheckPrincipalWithCallbackRunnable final : public Runnable
 {
 public:
   CheckPrincipalWithCallbackRunnable(already_AddRefed<ContentParent> aParent,
                                      const PrincipalInfo& aPrincipalInfo,
-                                     nsRunnable* aCallback)
+                                     Runnable* aCallback)
     : mContentParent(aParent)
     , mPrincipalInfo(aPrincipalInfo)
     , mCallback(aCallback)
@@ -120,7 +135,7 @@ public:
     MOZ_ASSERT(mBackgroundThread);
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     if (NS_IsMainThread()) {
       nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
@@ -141,7 +156,7 @@ public:
 private:
   RefPtr<ContentParent> mContentParent;
   PrincipalInfo mPrincipalInfo;
-  RefPtr<nsRunnable> mCallback;
+  RefPtr<Runnable> mCallback;
   nsCOMPtr<nsIThread> mBackgroundThread;
 };
 
@@ -169,7 +184,6 @@ ServiceWorkerManagerParent::RecvRegister(
 
   // Basic validation.
   if (aData.scope().IsEmpty() ||
-      aData.scriptSpec().IsEmpty() ||
       aData.principal().type() == PrincipalInfo::TNullPrincipalInfo ||
       aData.principal().type() == PrincipalInfo::TSystemPrincipalInfo) {
     return false;
@@ -190,8 +204,7 @@ ServiceWorkerManagerParent::RecvRegister(
   RefPtr<CheckPrincipalWithCallbackRunnable> runnable =
     new CheckPrincipalWithCallbackRunnable(parent.forget(), aData.principal(),
                                            callback);
-  nsresult rv = NS_DispatchToMainThread(runnable);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 
   return true;
 }
@@ -211,7 +224,7 @@ ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
   }
 
   RefPtr<UnregisterServiceWorkerCallback> callback =
-    new UnregisterServiceWorkerCallback(aPrincipalInfo, aScope);
+    new UnregisterServiceWorkerCallback(aPrincipalInfo, aScope, mID);
 
   RefPtr<ContentParent> parent =
     BackgroundParent::GetContentParent(Manager());
@@ -225,8 +238,7 @@ ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
   RefPtr<CheckPrincipalWithCallbackRunnable> runnable =
     new CheckPrincipalWithCallbackRunnable(parent.forget(), aPrincipalInfo,
                                            callback);
-  nsresult rv = NS_DispatchToMainThread(runnable);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 
   return true;
 }

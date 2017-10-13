@@ -16,7 +16,6 @@
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/gfx/Point.h"          // for Intsize
-#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -63,7 +62,7 @@ FindBackgroundLayer(ReadbackLayer* aLayer, nsIntPoint* aOffset)
 
     nsIntPoint backgroundOffset(int32_t(backgroundTransform._31), int32_t(backgroundTransform._32));
     IntRect rectInBackground(transformOffset - backgroundOffset, aLayer->GetSize());
-    const nsIntRegion visibleRegion = l->GetEffectiveVisibleRegion().ToUnknownRegion();
+    const nsIntRegion visibleRegion = l->GetLocalVisibleRegion().ToUnknownRegion();
     if (!visibleRegion.Intersects(rectInBackground))
       continue;
     // Since l is present in the background, from here on we either choose l
@@ -79,7 +78,7 @@ FindBackgroundLayer(ReadbackLayer* aLayer, nsIntPoint* aOffset)
     }
 
     // cliprects are post-transform
-    const Maybe<ParentLayerIntRect>& clipRect = l->GetEffectiveClipRect();
+    const Maybe<ParentLayerIntRect>& clipRect = l->GetLocalClipRect();
     if (clipRect && !clipRect->Contains(ViewAs<ParentLayerPixel>(IntRect(transformOffset, aLayer->GetSize()))))
       return nullptr;
 
@@ -114,15 +113,14 @@ ReadbackProcessor::BuildUpdatesForLayer(ReadbackLayer* aLayer)
       aLayer->mBackgroundColor = colorLayer->GetColor();
       NS_ASSERTION(aLayer->mBackgroundColor.a == 1.f,
                    "Color layer said it was opaque!");
-      RefPtr<gfxContext> ctx =
+      RefPtr<DrawTarget> dt =
           aLayer->mSink->BeginUpdate(aLayer->GetRect(),
                                      aLayer->AllocateSequenceNumber());
-      if (ctx) {
+      if (dt) {
         ColorPattern color(ToDeviceColor(aLayer->mBackgroundColor));
         IntSize size = aLayer->GetSize();
-        ctx->GetDrawTarget()->FillRect(Rect(0, 0, size.width, size.height),
-                                       color);
-        aLayer->mSink->EndUpdate(ctx, aLayer->GetRect());
+        dt->FillRect(Rect(0, 0, size.width, size.height), color);
+        aLayer->mSink->EndUpdate(aLayer->GetRect());
       }
     }
   } else {

@@ -11,27 +11,12 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/File.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
-
-// Resolve the name collision of Microsoft's API name with macros defined in
-// Windows header files. Undefine the macro of CreateDirectory to avoid
-// Directory#CreateDirectory being replaced by Directory#CreateDirectoryW.
-#ifdef CreateDirectory
-#undef CreateDirectory
-#endif
-// Undefine the macro of CreateFile to avoid Directory#CreateFile being replaced
-// by Directory#CreateFileW.
-#ifdef CreateFile
-#undef CreateFile
-#endif
 
 namespace mozilla {
 namespace dom {
 
-struct CreateFileOptions;
 class FileSystemBase;
 class Promise;
 class StringOrFileOrDirectory;
@@ -44,46 +29,42 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Directory)
 
-public:
-  static already_AddRefed<Promise>
-  GetRoot(FileSystemBase* aFileSystem, ErrorResult& aRv);
+  static bool
+  WebkitBlinkDirectoryPickerEnabled(JSContext* aCx, JSObject* aObj);
 
-  Directory(FileSystemBase* aFileSystem, const nsAString& aPath);
+  static already_AddRefed<Directory>
+  Constructor(const GlobalObject& aGlobal,
+              const nsAString& aRealPath,
+              ErrorResult& aRv);
+
+  static already_AddRefed<Directory>
+  Create(nsISupports* aParent, nsIFile* aDirectory,
+         FileSystemBase* aFileSystem = 0);
 
   // ========= Begin WebIDL bindings. ===========
 
-  nsPIDOMWindow*
+  nsISupports*
   GetParentObject() const;
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void
-  GetName(nsAString& aRetval) const;
-
-  already_AddRefed<Promise>
-  CreateFile(const nsAString& aPath, const CreateFileOptions& aOptions,
-             ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  CreateDirectory(const nsAString& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  Get(const nsAString& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  Remove(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  RemoveDeep(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
+  GetName(nsAString& aRetval, ErrorResult& aRv);
 
   // From https://microsoftedge.github.io/directory-upload/proposal.html#directory-interface :
 
   void
-  GetPath(nsAString& aRetval) const;
+  GetPath(nsAString& aRetval, ErrorResult& aRv);
+
+  nsresult
+  GetFullRealPath(nsAString& aPath);
 
   already_AddRefed<Promise>
-  GetFilesAndDirectories();
+  GetFilesAndDirectories(ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  GetFiles(bool aRecursiveFlag, ErrorResult& aRv);
 
   // =========== End WebIDL bindings.============
 
@@ -113,27 +94,35 @@ public:
   SetContentFilters(const nsAString& aFilters);
 
   FileSystemBase*
-  GetFileSystem() const;
-private:
-  ~Directory();
+  GetFileSystem(ErrorResult& aRv);
 
-  static bool
-  IsValidRelativePath(const nsString& aPath);
+  bool
+  ClonableToDifferentThreadOrProcess() const;
+
+  nsIFile*
+  GetInternalNsIFile() const
+  {
+    return mFile;
+  }
+
+private:
+  Directory(nsISupports* aParent,
+            nsIFile* aFile,
+            FileSystemBase* aFileSystem = nullptr);
+  ~Directory();
 
   /*
    * Convert relative DOM path to the absolute real path.
-   * @return true if succeed. false if the DOM path is invalid.
    */
-  bool
-  DOMPathToRealPath(const nsAString& aPath, nsAString& aRealPath) const;
+  nsresult
+  DOMPathToRealPath(const nsAString& aPath, nsIFile** aFile) const;
 
-  already_AddRefed<Promise>
-  RemoveInternal(const StringOrFileOrDirectory& aPath, bool aRecursive,
-                 ErrorResult& aRv);
-
+  nsCOMPtr<nsISupports> mParent;
   RefPtr<FileSystemBase> mFileSystem;
-  nsString mPath;
+  nsCOMPtr<nsIFile> mFile;
+
   nsString mFilters;
+  nsString mPath;
 };
 
 } // namespace dom

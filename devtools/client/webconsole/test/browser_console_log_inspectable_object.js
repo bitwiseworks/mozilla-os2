@@ -1,4 +1,5 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -6,14 +7,14 @@
 
 "use strict";
 
-var test = asyncTest(function*() {
+add_task(function* () {
   yield loadTab("data:text/html;charset=utf8,test for bug 676722 - " +
                 "inspectable objects for window.console");
 
   let hud = yield openConsole();
   hud.jsterm.clearOutput(true);
 
-  hud.jsterm.execute("myObj = {abba: 'omgBug676722'}");
+  yield hud.jsterm.execute("myObj = {abba: 'omgBug676722'}");
   hud.jsterm.execute("console.log('fooBug676722', myObj)");
 
   let [result] = yield waitForMessages({

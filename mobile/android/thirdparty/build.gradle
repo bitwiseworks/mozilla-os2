@@ -4,11 +4,11 @@ apply plugin: 'com.android.library'
 
 android {
     compileSdkVersion 23
-    buildToolsVersion "23.0.1"
+    buildToolsVersion mozconfig.substs.ANDROID_BUILD_TOOLS_VERSION
 
     defaultConfig {
-        targetSdkVersion 22
-        minSdkVersion 9
+        targetSdkVersion 23
+        minSdkVersion 15
     }
 
     compileOptions {
@@ -25,16 +25,21 @@ android {
             manifest.srcFile 'AndroidManifest.xml'
             java {
                 srcDir '.'
+
                 if (!mozconfig.substs.MOZ_INSTALL_TRACKING) {
                     exclude 'com/adjust/**'
                 }
+
+                // Exclude LeakCanary: It will be added again via a gradle dependency. This version
+                // here is only the no-op library for mach-based builds.
+                exclude 'com/squareup/leakcanary/**'
             }
         }
     }
 }
 
 dependencies {
-    compile 'com.android.support:support-v4:23.0.1'
+    compile "com.android.support:support-v4:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
 }
 
 apply plugin: 'idea'

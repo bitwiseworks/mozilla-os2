@@ -26,7 +26,7 @@ class GeneratorObject : public NativeObject
 
     enum {
         CALLEE_SLOT = 0,
-        SCOPE_CHAIN_SLOT,
+        ENV_CHAIN_SLOT,
         ARGS_OBJ_SLOT,
         EXPRESSION_STACK_SLOT,
         YIELD_INDEX_SLOT,
@@ -80,11 +80,11 @@ class GeneratorObject : public NativeObject
         setFixedSlot(CALLEE_SLOT, ObjectValue(callee));
     }
 
-    JSObject& scopeChain() const {
-        return getFixedSlot(SCOPE_CHAIN_SLOT).toObject();
+    JSObject& environmentChain() const {
+        return getFixedSlot(ENV_CHAIN_SLOT).toObject();
     }
-    void setScopeChain(JSObject& scopeChain) {
-        setFixedSlot(SCOPE_CHAIN_SLOT, ObjectValue(scopeChain));
+    void setEnvironmentChain(JSObject& envChain) {
+        setFixedSlot(ENV_CHAIN_SLOT, ObjectValue(envChain));
     }
 
     bool hasArgsObj() const {
@@ -116,7 +116,7 @@ class GeneratorObject : public NativeObject
     const Value& newTarget() const {
         return getFixedSlot(NEWTARGET_SLOT);
     }
-    void setNewTarget(Value newTarget) {
+    void setNewTarget(const Value& newTarget) {
         setFixedSlot(NEWTARGET_SLOT, newTarget);
     }
 
@@ -171,7 +171,7 @@ class GeneratorObject : public NativeObject
     }
     void setClosed() {
         setFixedSlot(CALLEE_SLOT, NullValue());
-        setFixedSlot(SCOPE_CHAIN_SLOT, NullValue());
+        setFixedSlot(ENV_CHAIN_SLOT, NullValue());
         setFixedSlot(ARGS_OBJ_SLOT, NullValue());
         setFixedSlot(EXPRESSION_STACK_SLOT, NullValue());
         setFixedSlot(YIELD_INDEX_SLOT, NullValue());
@@ -181,8 +181,8 @@ class GeneratorObject : public NativeObject
     static size_t offsetOfCalleeSlot() {
         return getFixedSlotOffset(CALLEE_SLOT);
     }
-    static size_t offsetOfScopeChainSlot() {
-        return getFixedSlotOffset(SCOPE_CHAIN_SLOT);
+    static size_t offsetOfEnvironmentChainSlot() {
+        return getFixedSlotOffset(ENV_CHAIN_SLOT);
     }
     static size_t offsetOfArgsObjSlot() {
         return getFixedSlotOffset(ARGS_OBJ_SLOT);
@@ -215,6 +215,9 @@ class StarGeneratorObject : public GeneratorObject
 bool GeneratorThrowOrClose(JSContext* cx, AbstractFramePtr frame, Handle<GeneratorObject*> obj,
                            HandleValue val, uint32_t resumeKind);
 void SetReturnValueForClosingGenerator(JSContext* cx, AbstractFramePtr frame);
+
+MOZ_MUST_USE bool
+CheckStarGeneratorResumptionValue(JSContext* cx, HandleValue v);
 
 } // namespace js
 

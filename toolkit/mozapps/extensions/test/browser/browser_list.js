@@ -7,6 +7,7 @@
 var tempScope = {};
 Components.utils.import("resource://gre/modules/LightweightThemeManager.jsm", tempScope);
 var LightweightThemeManager = tempScope.LightweightThemeManager;
+const { REQUIRE_SIGNING } = Components.utils.import("resource://gre/modules/addons/AddonConstants.jsm", {});
 
 var gProvider;
 var gManagerWindow;
@@ -15,7 +16,6 @@ var gCategoryUtilities;
 var gApp = document.getElementById("bundle_brand").getString("brandShortName");
 var gVersion = Services.appinfo.version;
 var gBlocklistURL = Services.urlFormatter.formatURLPref("extensions.blocklist.detailsURL");
-var gPluginURL = Services.urlFormatter.formatURLPref("plugins.update.url");
 var gDate = new Date(2010, 7, 16);
 var infoURL = Services.urlFormatter.formatURLPref("app.support.baseURL") + "unsigned-addons";
 
@@ -357,7 +357,7 @@ add_task(function*() {
   is(get_node(addon, "warning").textContent, "An important update is available for Test add-on 7.", "Warning message should be correct");
   is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
   is(get_node(addon, "warning-link").value, "Update Now", "Warning link text should be correct");
-  is(get_node(addon, "warning-link").href, gPluginURL, "Warning link should be correct");
+  is(get_node(addon, "warning-link").href, "http://example.com/addon7@tests.mozilla.org", "Warning link should be correct");
   is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
   is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
   is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
@@ -418,53 +418,56 @@ add_task(function*() {
   is(get_node(addon, "error-link").href, "http://example.com/addon9@tests.mozilla.org", "Error link should be correct");
   is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
 
-  info("Addon 10");
-  addon = items["Test add-on 10"];
-  addon.parentNode.ensureElementIsVisible(addon);
-  ({ name, version } = yield get_tooltip_info(addon));
-  is(get_node(addon, "name").value, "Test add-on 10", "Name should be correct");
-  is(name, "Test add-on 10", "Tooltip name should be correct");
+  // These tests are only appropriate when signing can be turned off
+  if (!REQUIRE_SIGNING) {
+    info("Addon 10");
+    addon = items["Test add-on 10"];
+    addon.parentNode.ensureElementIsVisible(addon);
+    ({ name, version } = yield get_tooltip_info(addon));
+    is(get_node(addon, "name").value, "Test add-on 10", "Name should be correct");
+    is(name, "Test add-on 10", "Tooltip name should be correct");
 
-  is_element_hidden(get_node(addon, "preferences-btn"), "Preferences button should be hidden");
-  is_element_hidden(get_node(addon, "enable-btn"), "Enable button should be hidden");
-  is_element_visible(get_node(addon, "disable-btn"), "Disable button should be visible");
-  is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
+    is_element_hidden(get_node(addon, "preferences-btn"), "Preferences button should be hidden");
+    is_element_hidden(get_node(addon, "enable-btn"), "Enable button should be hidden");
+    is_element_visible(get_node(addon, "disable-btn"), "Disable button should be visible");
+    is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
 
-  is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
-  is(get_node(addon, "warning").textContent, "Test add-on 10 could not be verified for use in " + gApp + ". Proceed with caution.", "Warning message should be correct");
-  is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
-  is(get_node(addon, "warning-link").value, "More Information", "Warning link text should be correct");
-  is(get_node(addon, "warning-link").href, infoURL, "Warning link should be correct");
-  is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
-  is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
-  is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
+    is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
+    is(get_node(addon, "warning").textContent, "Test add-on 10 could not be verified for use in " + gApp + ". Proceed with caution.", "Warning message should be correct");
+    is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
+    is(get_node(addon, "warning-link").value, "More Information", "Warning link text should be correct");
+    is(get_node(addon, "warning-link").href, infoURL, "Warning link should be correct");
+    is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
+    is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
+    is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
 
-  info("Addon 11");
-  addon = items["Test add-on 11"];
-  addon.parentNode.ensureElementIsVisible(addon);
-  ({ name, version } = yield get_tooltip_info(addon));
-  is(get_node(addon, "name").value, "Test add-on 11", "Name should be correct");
-  is(name, "Test add-on 11", "Tooltip name should be correct");
+    info("Addon 11");
+    addon = items["Test add-on 11"];
+    addon.parentNode.ensureElementIsVisible(addon);
+    ({ name, version } = yield get_tooltip_info(addon));
+    is(get_node(addon, "name").value, "Test add-on 11", "Name should be correct");
+    is(name, "Test add-on 11", "Tooltip name should be correct");
 
-  is_element_hidden(get_node(addon, "preferences-btn"), "Preferences button should be hidden");
-  is_element_hidden(get_node(addon, "enable-btn"), "Enable button should be hidden");
-  is_element_hidden(get_node(addon, "disable-btn"), "Disable button should be hidden");
-  is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
+    is_element_hidden(get_node(addon, "preferences-btn"), "Preferences button should be hidden");
+    is_element_hidden(get_node(addon, "enable-btn"), "Enable button should be hidden");
+    is_element_hidden(get_node(addon, "disable-btn"), "Disable button should be hidden");
+    is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
 
-  is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
-  is(get_node(addon, "warning").textContent, "Test add-on 11 is incompatible with " + gApp + " " + gVersion + ".", "Warning message should be correct");
-  is_element_hidden(get_node(addon, "warning-link"), "Warning link should be hidden");
-  is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
-  is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
-  is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
+    is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
+    is(get_node(addon, "warning").textContent, "Test add-on 11 is incompatible with " + gApp + " " + gVersion + ".", "Warning message should be correct");
+    is_element_hidden(get_node(addon, "warning-link"), "Warning link should be hidden");
+    is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
+    is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
+    is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
 
-  info("Filter for disabled unsigned extensions shouldn't appear because signing checks are off");
-  let filterButton = gManagerWindow.document.getElementById("show-disabled-unsigned-extensions");
-  let showAllButton = gManagerWindow.document.getElementById("show-all-extensions");
-  let signingInfoUI = gManagerWindow.document.getElementById("disabled-unsigned-addons-info");
-  is_element_hidden(filterButton, "Button for showing disabled unsigned extensions should be hidden");
-  is_element_hidden(showAllButton, "Button for showing all extensions should be hidden");
-  is_element_hidden(signingInfoUI, "Signing info UI should be hidden");
+    info("Filter for disabled unsigned extensions shouldn't appear because signing checks are off");
+    let filterButton = gManagerWindow.document.getElementById("show-disabled-unsigned-extensions");
+    let showAllButton = gManagerWindow.document.getElementById("show-all-extensions");
+    let signingInfoUI = gManagerWindow.document.getElementById("disabled-unsigned-addons-info");
+    is_element_hidden(filterButton, "Button for showing disabled unsigned extensions should be hidden");
+    is_element_hidden(showAllButton, "Button for showing all extensions should be hidden");
+    is_element_hidden(signingInfoUI, "Signing info UI should be hidden");
+  }
 });
 
 // Check the add-ons are now in the right state
@@ -662,7 +665,7 @@ add_task(function*() {
   is(get_node(addon, "warning").textContent, "An important update is available for Test add-on 7.", "Warning message should be correct");
   is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
   is(get_node(addon, "warning-link").value, "Update Now", "Warning link text should be correct");
-  is(get_node(addon, "warning-link").href, gPluginURL, "Warning link should be correct");
+  is(get_node(addon, "warning-link").href, "http://example.com/addon7@tests.mozilla.org", "Warning link should be correct");
   is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
   is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
   is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
@@ -782,7 +785,7 @@ add_task(function*() {
 add_task(function*() {
   info("Enabling lightweight theme");
   LightweightThemeManager.currentTheme = gLWTheme;
-  
+
   gManagerWindow.loadView("addons://list/theme");
   yield new Promise(resolve => wait_for_view_load(gManagerWindow, resolve));
 

@@ -238,7 +238,7 @@ const DownloadsIndicatorView = {
     this.counter = "";
     this.percentComplete = 0;
     this.paused = false;
-    this.attention = false;
+    this.attention = DownloadsCommon.ATTENTION_NONE;
   },
 
   /**
@@ -466,15 +466,28 @@ const DownloadsIndicatorView = {
 
     if (this._attention != aValue) {
       this._attention = aValue;
-      if (aValue) {
-        this.indicator.setAttribute("attention", "true");
-      } else {
+
+      // Check if the downloads button is in the menu panel, to determine which
+      // button needs to get a badge.
+      let widgetGroup = CustomizableUI.getWidget("downloads-button");
+      let inMenu = widgetGroup.areaType == CustomizableUI.TYPE_MENU_PANEL;
+
+      if (aValue == DownloadsCommon.ATTENTION_NONE) {
         this.indicator.removeAttribute("attention");
+        if (inMenu) {
+          gMenuButtonBadgeManager.removeBadge(gMenuButtonBadgeManager.BADGEID_DOWNLOAD);
+        }
+      } else {
+        this.indicator.setAttribute("attention", aValue);
+        if (inMenu) {
+          let badgeClass = "download-" + aValue;
+          gMenuButtonBadgeManager.addBadge(gMenuButtonBadgeManager.BADGEID_DOWNLOAD, badgeClass);
+        }
       }
     }
     return aValue;
   },
-  _attention: false,
+  _attention: DownloadsCommon.ATTENTION_NONE,
 
   //////////////////////////////////////////////////////////////////////////////
   //// User interface event functions
@@ -507,15 +520,18 @@ const DownloadsIndicatorView = {
     if (dt.mozGetDataAt("application/x-moz-file", 0))
       return;
 
-    let name = {};
-    let url = browserDragAndDrop.drop(aEvent, name);
-    if (url) {
-      if (url.startsWith("about:")) {
-        return;
-      }
-
-      let sourceDoc = dt.mozSourceNode ? dt.mozSourceNode.ownerDocument : document;
-      saveURL(url, name.value, null, true, true, null, sourceDoc);
+    let links = browserDragAndDrop.dropLinks(aEvent);
+    if (!links.length)
+      return;
+    let sourceDoc = dt.mozSourceNode ? dt.mozSourceNode.ownerDocument : document;
+    let handled = false;
+    for (let link of links) {
+      if (link.url.startsWith("about:"))
+        continue;
+      saveURL(link.url, link.name, null, true, true, null, sourceDoc);
+      handled = true;
+    }
+    if (handled) {
       aEvent.preventDefault();
     }
   },

@@ -12,13 +12,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=835896
   <script type="application/javascript;version=1.8">
 window.onload = function() {
   const Cu = Components.utils;
-  Cu.import("resource://gre/modules/devtools/Loader.jsm");
-  const {Promise: promise} =
-    Cu.import("resource://gre/modules/Promise.jsm", {});
-  const {InspectorFront} =
-    devtools.require("devtools/server/actors/inspector");
-  const {console} =
-    Cu.import("resource://gre/modules/devtools/shared/Console.jsm", {});
+  const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+  const promise = require("promise");
+  const {InspectorFront} = require("devtools/shared/fronts/inspector");
+  const {console} = Cu.import("resource://gre/modules/Console.jsm", {});
 
   SimpleTest.waitForExplicitFinish();
 
@@ -36,7 +33,7 @@ window.onload = function() {
 
     let url = document.getElementById("inspectorContent").href;
 
-    yield new Promise(resolve => {
+    yield new promise(resolve => {
       attachURL(url, function(err, client, tab, doc) {
         inspectee = doc;
         inspector = InspectorFront(client, tab);

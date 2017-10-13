@@ -7,6 +7,7 @@
 #include "mozilla/DebugOnly.h"
 #include <stdint.h> // for intptr_t
 
+#include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "PluginInstanceParent.h"
@@ -44,6 +45,7 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #if defined(XP_WIN)
 # include "mozilla/layers/D3D11ShareHandleImage.h"
+# include "mozilla/gfx/DeviceManagerDx.h"
 # include "mozilla/layers/TextureD3D11.h"
 #endif
 
@@ -70,10 +72,6 @@ extern const wchar_t* kFlashFullscreenClass;
 #elif defined(XP_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
 #endif // defined(XP_MACOSX)
-
-// This is the pref used to determine whether to use Shumway on a Flash object
-// (when Shumway is enabled).
-static const char kShumwayWhitelistPref[] = "shumway.swf.whitelist";
 
 using namespace mozilla::plugins;
 using namespace mozilla::layers;
@@ -127,7 +125,6 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mUseSurrogate(true)
     , mNPP(npp)
     , mNPNIface(npniface)
-    , mIsWhitelistedForShumway(false)
     , mWindowType(NPWindowTypeWindow)
     , mDrawingModel(kDefaultDrawingModel)
     , mLastRecordedDrawingModel(-1)
@@ -285,9 +282,6 @@ PluginInstanceParent::AnswerNPN_GetValue_NPNVnetscapeWindow(NativeWindowHandle* 
 #elif defined(ANDROID)
     // TODO: Need Android impl
     int id;
-#elif defined(MOZ_WIDGET_QT)
-    // TODO: Need Qt non X impl
-    int id;
 #else
 #warning Implement me
 #endif
@@ -416,7 +410,7 @@ PluginInstanceParent::AnswerNPN_GetValue_PreferredDXGIAdapter(DxgiAdapterDesc* a
         return false;
     }
 
-    ID3D11Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
+    RefPtr<ID3D11Device> device = DeviceManagerDx::Get()->GetContentDevice();
     if (!device) {
         return false;
     }
@@ -694,12 +688,12 @@ PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
         return true;
     }
 
-    ImageBridgeChild* forwarder = ImageBridgeChild::GetSingleton();
+    RefPtr<ImageBridgeChild> forwarder = ImageBridgeChild::GetSingleton();
     if (!forwarder) {
         return true;
     }
 
-    RefPtr<ID3D11Device> d3d11 = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
+    RefPtr<ID3D11Device> d3d11 = DeviceManagerDx::Get()->GetContentDevice();
     if (!d3d11) {
         return true;
     }
@@ -782,11 +776,11 @@ PluginInstanceParent::RecvShowDirectBitmap(Shmem&& buffer,
     }
 
     // Allocate a texture for the compositor.
-    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocator();
+    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocatorForDirectBitmap();
     RefPtr<TextureClient> texture = allocator->CreateOrRecycle(
         format, size, BackendSelector::Content,
         TextureFlags::NO_FLAGS,
-        ALLOC_FOR_OUT_OF_BAND_CONTENT);
+        TextureAllocationFlags(ALLOC_FOR_OUT_OF_BAND_CONTENT | ALLOC_UPDATE_FROM_SURFACE));
     if (!texture) {
         NS_WARNING("Could not allocate a TextureClient for plugin!");
         return false;
@@ -818,9 +812,14 @@ PluginInstanceParent::SetCurrentImage(Image* aImage)
     ImageContainer::NonOwningImage holder(aImage);
     holder.mFrameID = ++mFrameID;
 
-    nsAutoTArray<ImageContainer::NonOwningImage,1> imageList;
+    AutoTArray<ImageContainer::NonOwningImage,1> imageList;
     imageList.AppendElement(holder);
     mImageContainer->SetCurrentImages(imageList);
+
+    // Invalidate our area in the page so the image gets flushed.
+    gfx::IntRect rect = aImage->GetPictureRect();
+    NPRect nprect = {uint16_t(rect.x), uint16_t(rect.y), uint16_t(rect.width), uint16_t(rect.height)};
+    RecvNPN_InvalidateRect(nprect);
 
     RecordDrawingModel();
 }
@@ -843,7 +842,7 @@ PluginInstanceParent::RecvShowDirectDXGISurface(const WindowsHandle& handle,
         return false;
     }
 
-    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocator();
+    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocatorForDXGISurface();
     RefPtr<TextureClient> texture = allocator->CreateOrRecycle(
         surface->GetFormat(), surface->GetSize(),
         BackendSelector::Content,
@@ -966,11 +965,12 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                    updatedRect.bottom - updatedRect.top);
         surface->MarkDirty(ur);
 
+        bool isPlugin = true;
         RefPtr<gfx::SourceSurface> sourceSurface =
-            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface);
-        RefPtr<CairoImage> image = new CairoImage(surface->GetSize(), sourceSurface);
+            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface, isPlugin);
+        RefPtr<SourceSurfaceImage> image = new SourceSurfaceImage(surface->GetSize(), sourceSurface);
 
-        nsAutoTArray<ImageContainer::NonOwningImage,1> imageList;
+        AutoTArray<ImageContainer::NonOwningImage,1> imageList;
         imageList.AppendElement(
             ImageContainer::NonOwningImage(image));
 
@@ -1007,7 +1007,7 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
     window.height = aWindow->height;
     window.clipRect = aWindow->clipRect;
     window.type = aWindow->type;
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double scaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
     window.contentsScaleFactor = scaleFactor;
@@ -1121,7 +1121,8 @@ PluginInstanceParent::IsRemoteDrawingCoreAnimation(bool *aDrawing)
                  NPDrawingModelInvalidatingCoreAnimation == (NPDrawingModel)mDrawingModel);
     return NS_OK;
 }
-
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
 nsresult
 PluginInstanceParent::ContentsScaleFactorChanged(double aContentsScaleFactor)
 {
@@ -1145,7 +1146,7 @@ PluginInstanceParent::SetBackgroundUnknown()
 
 nsresult
 PluginInstanceParent::BeginUpdateBackground(const nsIntRect& aRect,
-                                            gfxContext** aCtx)
+                                            DrawTarget** aDrawTarget)
 {
     PLUGIN_LOG_DEBUG(
         ("[InstanceParent][%p] BeginUpdateBackground for <x=%d,y=%d, w=%d,h=%d>",
@@ -1159,7 +1160,7 @@ PluginInstanceParent::BeginUpdateBackground(const nsIntRect& aRect,
         MOZ_ASSERT(aRect.TopLeft() == nsIntPoint(0, 0),
                    "Expecting rect for whole frame");
         if (!CreateBackground(aRect.Size())) {
-            *aCtx = nullptr;
+            *aDrawTarget = nullptr;
             return NS_OK;
         }
     }
@@ -1172,15 +1173,13 @@ PluginInstanceParent::BeginUpdateBackground(const nsIntRect& aRect,
 
     RefPtr<gfx::DrawTarget> dt = gfxPlatform::GetPlatform()->
       CreateDrawTargetForSurface(mBackground, gfx::IntSize(sz.width, sz.height));
-    RefPtr<gfxContext> ctx = new gfxContext(dt);
-    ctx.forget(aCtx);
+    dt.forget(aDrawTarget);
 
     return NS_OK;
 }
 
 nsresult
-PluginInstanceParent::EndUpdateBackground(gfxContext* aCtx,
-                                          const nsIntRect& aRect)
+PluginInstanceParent::EndUpdateBackground(const nsIntRect& aRect)
 {
     PLUGIN_LOG_DEBUG(
         ("[InstanceParent][%p] EndUpdateBackground for <x=%d,y=%d, w=%d,h=%d>",
@@ -1203,6 +1202,32 @@ PluginInstanceParent::EndUpdateBackground(gfxContext* aCtx,
 
     return NS_OK;
 }
+
+#if defined(XP_WIN)
+nsresult
+PluginInstanceParent::SetScrollCaptureId(uint64_t aScrollCaptureId)
+{
+  if (aScrollCaptureId == ImageContainer::sInvalidAsyncContainerId) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mImageContainer = new ImageContainer(aScrollCaptureId);
+  return NS_OK;
+}
+
+nsresult
+PluginInstanceParent::GetScrollCaptureContainer(ImageContainer** aContainer)
+{
+  if (!aContainer || !mImageContainer) {
+    return NS_ERROR_FAILURE;
+  }
+
+  RefPtr<ImageContainer> container = GetImageContainer();
+  container.forget(aContainer);
+
+  return NS_OK;
+}
+#endif // XP_WIN
 
 PluginAsyncSurrogate*
 PluginInstanceParent::GetAsyncSurrogate()
@@ -1231,7 +1256,7 @@ PluginInstanceParent::CreateBackground(const nsIntSize& aSize)
         gfxSharedImageSurface::CreateUnsafe(
             this,
             mozilla::gfx::IntSize(aSize.width, aSize.height),
-            gfxImageFormat::RGB24);
+            mozilla::gfx::SurfaceFormat::X8R8G8B8_UINT32);
     return !!mBackground;
 #else
     return false;
@@ -1360,12 +1385,13 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     window.type = aWindow->type;
 #endif
 
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double floatScaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &floatScaleFactor);
     int scaleFactor = ceil(floatScaleFactor);
     window.contentsScaleFactor = floatScaleFactor;
-
+#endif
+#if defined(XP_MACOSX)
     if (mShWidth != window.width * scaleFactor || mShHeight != window.height * scaleFactor) {
         if (mDrawingModel == NPDrawingModelCoreAnimation ||
             mDrawingModel == NPDrawingModelInvalidatingCoreAnimation) {
@@ -1521,6 +1547,13 @@ PluginInstanceParent::NPP_SetValue(NPNVariable variable, void* value)
 
         return result;
 
+    case NPNVCSSZoomFactor:
+        if (!CallNPP_SetValue_NPNVCSSZoomFactor(*static_cast<double*>(value),
+                                                &result))
+            return NPERR_GENERIC_ERROR;
+
+        return result;
+
     default:
         NS_ERROR("Unhandled NPNVariable in NPP_SetValue");
         MOZ_LOG(GetPluginLog(), LogLevel::Warning,
@@ -1553,7 +1586,7 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
 #endif
     NPRemoteEvent npremoteevent;
     npremoteevent.event = *npevent;
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double scaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
     npremoteevent.contentsScaleFactor = scaleFactor;
@@ -1587,6 +1620,16 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
                 // We send this in nsPluginFrame just before painting
                 return SendWindowPosChanged(npremoteevent);
             }
+
+            case WM_IME_STARTCOMPOSITION:
+            case WM_IME_COMPOSITION:
+            case WM_IME_ENDCOMPOSITION:
+                if (!(mParent->GetQuirks() & QUIRK_WINLESS_HOOK_IME)) {
+                  // IME message will be posted on allowed plugins only such as
+                  // Flash.  Because if we cannot know that plugin can handle
+                  // IME correctly.
+                  return 0;
+                }
             break;
         }
     }
@@ -2502,21 +2545,75 @@ PluginInstanceParent::Cast(NPP aInstance, PluginAsyncSurrogate** aSurrogate)
 }
 
 bool
-PluginInstanceParent::RecvPluginDidSetCursor()
+PluginInstanceParent::RecvGetCompositionString(const uint32_t& aIndex,
+                                               nsTArray<uint8_t>* aDist,
+                                               int32_t* aLength)
 {
 #if defined(OS_WIN)
     nsPluginInstanceOwner* owner = GetOwner();
     if (!owner) {
+        *aLength = IMM_ERROR_GENERAL;
         return true;
     }
-    owner->ResetWidgetCursorCaching();
-    return true;
-#else
-    NS_NOTREACHED("PluginInstanceParent::RecvPluginDidSetCursor not implemented!");
-    return false;
+
+    if (!owner->GetCompositionString(aIndex, aDist, aLength)) {
+        *aLength = IMM_ERROR_NODATA;
+    }
 #endif
+    return true;
 }
 
+bool
+PluginInstanceParent::RecvSetCandidateWindow(
+    const mozilla::widget::CandidateWindowPosition& aPosition)
+{
+#if defined(OS_WIN)
+    nsPluginInstanceOwner* owner = GetOwner();
+    if (owner) {
+        owner->SetCandidateWindow(aPosition);
+    }
+#endif
+    return true;
+}
+
+bool
+PluginInstanceParent::RecvRequestCommitOrCancel(const bool& aCommitted)
+{
+#if defined(OS_WIN)
+    nsPluginInstanceOwner* owner = GetOwner();
+    if (owner) {
+        owner->RequestCommitOrCancel(aCommitted);
+    }
+#endif
+    return true;
+}
+
+nsresult
+PluginInstanceParent::HandledWindowedPluginKeyEvent(
+                        const NativeEventData& aKeyEventData,
+                        bool aIsConsumed)
+{
+    if (NS_WARN_IF(!SendHandledWindowedPluginKeyEvent(aKeyEventData,
+                                                      aIsConsumed))) {
+        return NS_ERROR_FAILURE;
+    }
+    return NS_OK;
+}
+
+bool
+PluginInstanceParent::RecvOnWindowedPluginKeyEvent(
+                        const NativeEventData& aKeyEventData)
+{
+    nsPluginInstanceOwner* owner = GetOwner();
+    if (NS_WARN_IF(!owner)) {
+        // Notifies the plugin process of the key event being not consumed
+        // by us.
+        HandledWindowedPluginKeyEvent(aKeyEventData, false);
+        return true;
+    }
+    owner->OnWindowedPluginKeyEvent(aKeyEventData);
+    return true;
+}
 
 void
 PluginInstanceParent::RecordDrawingModel()

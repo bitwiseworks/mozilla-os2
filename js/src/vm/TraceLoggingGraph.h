@@ -7,11 +7,8 @@
 #ifndef TraceLoggingGraph_h
 #define TraceLoggingGraph_h
 
-#include "mozilla/DebugOnly.h"
-
-#include "jslock.h"
-
 #include "js/TypeDecls.h"
+#include "vm/MutexIDs.h"
 #include "vm/TraceLoggingTypes.h"
 
 /*
@@ -69,6 +66,7 @@ void DestroyTraceLoggerGraphState();
 class TraceLoggerGraphState
 {
     uint32_t numLoggers;
+    uint32_t pid_;
 
     // File pointer to the "tl-data.json" file. (Explained above).
     FILE* out;
@@ -78,22 +76,24 @@ class TraceLoggerGraphState
 #endif
 
   public:
-    PRLock* lock;
+    js::Mutex lock;
 
   public:
     TraceLoggerGraphState()
-      : numLoggers(0),
-        out(nullptr),
+      : numLoggers(0)
+      , pid_(0)
+      , out(nullptr)
 #ifdef DEBUG
-        initialized(false),
+      , initialized(false)
 #endif
-        lock(nullptr)
+      , lock(js::mutexid::TraceLoggerGraphState)
     {}
 
     bool init();
     ~TraceLoggerGraphState();
 
     uint32_t nextLoggerId();
+    uint32_t pid() { return pid_; }
 };
 
 class TraceLoggerGraph
@@ -200,12 +200,7 @@ class TraceLoggerGraph
     };
 
   public:
-    TraceLoggerGraph()
-      : failed(false),
-        enabled(false),
-        nextTextId(0),
-        treeOffset(0)
-    { }
+    TraceLoggerGraph() {}
     ~TraceLoggerGraph();
 
     bool init(uint64_t timestamp);
@@ -222,17 +217,19 @@ class TraceLoggerGraph
     }
 
   private:
-    bool failed;
-    bool enabled;
-    mozilla::DebugOnly<uint32_t> nextTextId;
+    bool failed = false;
+    bool enabled = false;
+#ifdef DEBUG
+    uint32_t nextTextId = 0;
+#endif
 
-    FILE* dictFile;
-    FILE* treeFile;
-    FILE* eventFile;
+    FILE* dictFile = nullptr;
+    FILE* treeFile = nullptr;
+    FILE* eventFile = nullptr;
 
     ContinuousSpace<TreeEntry> tree;
     ContinuousSpace<StackEntry> stack;
-    uint32_t treeOffset;
+    uint32_t treeOffset = 0;
 
     // Helper functions that convert a TreeEntry in different endianness
     // in place.

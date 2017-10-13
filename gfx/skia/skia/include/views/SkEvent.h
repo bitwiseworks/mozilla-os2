@@ -12,6 +12,8 @@
 #include "SkMetaData.h"
 #include "SkString.h"
 
+#include "../private/SkLeanWindows.h"
+
 /** Unique 32bit id used to identify an instance of SkEventSink. When events are
     posted, they are posted to a specific sinkID. When it is time to dispatch the
     event, the sinkID is used to find the specific SkEventSink object. If it is found,
@@ -206,12 +208,19 @@ public:
     /**
      *  Post to the event queue using the event's targetID or target-proc.
      *  The event will be delivered no sooner than the specified millisecond
-     *  time, as measured by SkTime::GetMSecs().
+     *  time, as measured by GetMSecsSinceStartup().
      *
      *  The event must be dynamically allocated, as ownership is transferred to
      *  the event queue. It cannot be allocated on the stack or in a global.
      */
     void postTime(SkMSec time);
+
+    /**
+     *  Returns ~zero the first time it's called, then returns the number of
+     *  milliseconds since the first call. Behavior is undefined if the program
+     *  runs more than ~25 days.
+     */
+    static SkMSec GetMSecsSinceStartup();
 
     ///////////////////////////////////////////////
     /** Porting layer must call these functions **/
@@ -223,7 +232,7 @@ public:
     */
     static void Init();
     /** Global cleanup function for the SkEvent system. Should be called exactly once after
-        all event methods have been called, and should be called before calling SkGraphics::Term().
+        all event methods have been called.
     */
     static void Term();
 

@@ -406,12 +406,28 @@ nsTString_CharT::StripChars( const char* aSet )
   mLength = nsBufferRoutines<CharT>::strip_chars(mData, mLength, aSet);
 }
 
+bool
+nsTString_CharT::StripChars( const char* aSet, const fallible_t& )
+{
+  if (!EnsureMutable()) {
+    return false;
+  }
+
+  mLength = nsBufferRoutines<CharT>::strip_chars(mData, mLength, aSet);
+  return true;
+}
+
 void
 nsTString_CharT::StripWhitespace()
 {
   StripChars(kWhitespace);
 }
 
+bool
+nsTString_CharT::StripWhitespace(const fallible_t& aFallible)
+{
+  return StripChars(kWhitespace, aFallible);
+}
 
 /**
  * nsTString::ReplaceChar,ReplaceSubstring
@@ -491,7 +507,7 @@ nsTString_CharT::ReplaceSubstring(const self_type& aTarget,
     return true;
 
   // Remember all of the non-matching parts.
-  nsAutoTArray<Segment, 16> nonMatching;
+  AutoTArray<Segment, 16> nonMatching;
   uint32_t i = 0;
   uint32_t newLength = 0;
   while (true)

@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ipc/IdType.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 
 #include "nsFrameMessageManager.h"
 #include "nsISupports.h"
@@ -17,8 +18,6 @@
 #define NS_ICONTENTPARENT_IID                                   \
   { 0xeeec9ebf, 0x8ecf, 0x4e38,                                 \
     { 0x81, 0xda, 0xb7, 0x34, 0x13, 0x7e, 0xac, 0xf3 } }
-
-class nsFrameMessageManager;
 
 namespace IPC {
 class Principal;
@@ -30,6 +29,11 @@ namespace jsipc {
 class PJavaScriptParent;
 class CpowEntry;
 } // namespace jsipc
+
+namespace ipc {
+class PFileDescriptorSetParent;
+class PSendStreamParent;
+}
 
 namespace dom {
 
@@ -46,6 +50,7 @@ class PBrowserParent;
 class nsIContentParent : public nsISupports
                        , public mozilla::dom::ipc::MessageManagerCallback
                        , public CPOWManagerGetter
+                       , public mozilla::ipc::IShmemAllocator
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENTPARENT_IID)
@@ -55,29 +60,34 @@ public:
   BlobParent* GetOrCreateActorForBlob(Blob* aBlob);
   BlobParent* GetOrCreateActorForBlobImpl(BlobImpl* aImpl);
 
-  virtual ContentParentId ChildID() = 0;
-  virtual bool IsForApp() = 0;
-  virtual bool IsForBrowser() = 0;
+  virtual ContentParentId ChildID() const = 0;
+  virtual bool IsForApp() const = 0;
+  virtual bool IsForBrowser() const = 0;
 
-  MOZ_WARN_UNUSED_RESULT
-  virtual PBlobParent* SendPBlobConstructor(
-    PBlobParent* aActor,
-    const BlobConstructorParams& aParams) = 0;
+  MOZ_MUST_USE virtual PBlobParent*
+  SendPBlobConstructor(PBlobParent* aActor,
+                       const BlobConstructorParams& aParams) = 0;
 
-  MOZ_WARN_UNUSED_RESULT
-  virtual PBrowserParent* SendPBrowserConstructor(
-    PBrowserParent* actor,
-    const TabId& aTabId,
-    const IPCTabContext& context,
-    const uint32_t& chromeFlags,
-    const ContentParentId& aCpId,
-    const bool& aIsForApp,
-    const bool& aIsForBrowser) = 0;
+  MOZ_MUST_USE virtual PBrowserParent*
+  SendPBrowserConstructor(PBrowserParent* actor,
+                          const TabId& aTabId,
+                          const IPCTabContext& context,
+                          const uint32_t& chromeFlags,
+                          const ContentParentId& aCpId,
+                          const bool& aIsForApp,
+                          const bool& aIsForBrowser) = 0;
 
-  virtual bool IsContentParent() { return false; }
+  virtual bool IsContentParent() const { return false; }
+
   ContentParent* AsContentParent();
-  virtual bool IsContentBridgeParent() { return false; }
+
+  virtual bool IsContentBridgeParent() const { return false; }
+
   ContentBridgeParent* AsContentBridgeParent();
+
+  nsFrameMessageManager* GetMessageManager() const { return mMessageManager; }
+
+  virtual int32_t Pid() const = 0;
 
 protected: // methods
   bool CanOpenBrowser(const IPCTabContext& aContext);
@@ -98,6 +108,16 @@ protected: // IPDL methods
 
   virtual bool DeallocPBlobParent(PBlobParent* aActor);
 
+  virtual mozilla::ipc::PFileDescriptorSetParent*
+  AllocPFileDescriptorSetParent(const mozilla::ipc::FileDescriptor& aFD);
+
+  virtual bool
+  DeallocPFileDescriptorSetParent(mozilla::ipc::PFileDescriptorSetParent* aActor);
+
+  virtual mozilla::ipc::PSendStreamParent* AllocPSendStreamParent();
+
+  virtual bool DeallocPSendStreamParent(mozilla::ipc::PSendStreamParent* aActor);
+
   virtual bool RecvSyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
                                InfallibleTArray<jsipc::CpowEntry>&& aCpows,
@@ -109,9 +129,9 @@ protected: // IPDL methods
                               const IPC::Principal& aPrincipal,
                               nsTArray<ipc::StructuredCloneData>* aRetvals);
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal);
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData);
 
 protected: // members
   RefPtr<nsFrameMessageManager> mMessageManager;

@@ -215,6 +215,7 @@ RESULT_OMNIJAR.update({
             'components/foo.js',
         )
     },
+    'app/chrome.manifest': [],
 })
 
 RESULT_OMNIJAR['omni.foo'].update({
@@ -306,14 +307,11 @@ class TestFormatters(unittest.TestCase):
         formatter = FlatFormatter(FileRegistry())
         formatter.add_base('')
         formatter.add_base('browser')
-        formatter.add_base('webapprt')
         formatter.add_base('addon0', addon=True)
         self.assertEqual(formatter._get_base('platform.ini'),
                          ('', 'platform.ini'))
         self.assertEqual(formatter._get_base('browser/application.ini'),
                          ('browser', 'application.ini'))
-        self.assertEqual(formatter._get_base('webapprt/webapprt.ini'),
-                         ('webapprt', 'webapprt.ini'))
         self.assertEqual(formatter._get_base('addon0/install.rdf'),
                          ('addon0', 'install.rdf'))
 

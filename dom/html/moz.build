@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -18,6 +18,7 @@ MOCHITEST_CHROME_MANIFESTS += [
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
 XPIDL_SOURCES += [
+    'nsIDateTimeInputArea.idl',
     'nsIFormSubmitObserver.idl',
     'nsIHTMLMenu.idl',
     'nsIImageDocument.idl',
@@ -28,8 +29,6 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'content_html'
 
 EXPORTS += [
-    'HTMLPropertiesCollection.h',
-    'nsFormSubmission.h',
     'nsGenericHTMLElement.h',
     'nsHTMLDNSPrefetch.h',
     'nsIConstraintValidation.h',
@@ -56,12 +55,13 @@ EXPORTS.mozilla.dom += [
     'HTMLContentElement.h',
     'HTMLDataElement.h',
     'HTMLDataListElement.h',
+    'HTMLDetailsElement.h',
     'HTMLDivElement.h',
-    'HTMLExtAppElement.h',
     'HTMLFieldSetElement.h',
     'HTMLFontElement.h',
     'HTMLFormControlsCollection.h',
     'HTMLFormElement.h',
+    'HTMLFormSubmission.h',
     'HTMLFrameElement.h',
     'HTMLFrameSetElement.h',
     'HTMLHeadingElement.h',
@@ -98,6 +98,7 @@ EXPORTS.mozilla.dom += [
     'HTMLSourceElement.h',
     'HTMLSpanElement.h',
     'HTMLStyleElement.h',
+    'HTMLSummaryElement.h',
     'HTMLTableCaptionElement.h',
     'HTMLTableCellElement.h',
     'HTMLTableColElement.h',
@@ -117,7 +118,6 @@ EXPORTS.mozilla.dom += [
     'RadioNodeList.h',
     'TextTrackManager.h',
     'TimeRanges.h',
-    'UndoManager.h',
     'ValidityState.h',
 ]
 
@@ -133,13 +133,14 @@ UNIFIED_SOURCES += [
     'HTMLContentElement.cpp',
     'HTMLDataElement.cpp',
     'HTMLDataListElement.cpp',
+    'HTMLDetailsElement.cpp',
     'HTMLDivElement.cpp',
     'HTMLElement.cpp',
-    'HTMLExtAppElement.cpp',
     'HTMLFieldSetElement.cpp',
     'HTMLFontElement.cpp',
     'HTMLFormControlsCollection.cpp',
     'HTMLFormElement.cpp',
+    'HTMLFormSubmission.cpp',
     'HTMLFrameElement.cpp',
     'HTMLFrameSetElement.cpp',
     'HTMLHeadingElement.cpp',
@@ -167,7 +168,6 @@ UNIFIED_SOURCES += [
     'HTMLPictureElement.cpp',
     'HTMLPreElement.cpp',
     'HTMLProgressElement.cpp',
-    'HTMLPropertiesCollection.cpp',
     'HTMLScriptElement.cpp',
     'HTMLSelectElement.cpp',
     'HTMLShadowElement.cpp',
@@ -177,6 +177,7 @@ UNIFIED_SOURCES += [
     'HTMLSourceElement.cpp',
     'HTMLSpanElement.cpp',
     'HTMLStyleElement.cpp',
+    'HTMLSummaryElement.cpp',
     'HTMLTableCaptionElement.cpp',
     'HTMLTableCellElement.cpp',
     'HTMLTableColElement.cpp',
@@ -195,7 +196,6 @@ UNIFIED_SOURCES += [
     'MediaError.cpp',
     'nsBrowserElement.cpp',
     'nsDOMStringMap.cpp',
-    'nsFormSubmission.cpp',
     'nsGenericHTMLElement.cpp',
     'nsGenericHTMLFrameElement.cpp',
     'nsHTMLContentSink.cpp',
@@ -207,7 +207,6 @@ UNIFIED_SOURCES += [
     'RadioNodeList.cpp',
     'TextTrackManager.cpp',
     'TimeRanges.cpp',
-    'UndoManager.cpp',
     'ValidityState.cpp',
     'VideoDocument.cpp',
 ]
@@ -232,7 +231,6 @@ LOCAL_INCLUDES += [
     '/dom/media/',
     '/dom/xbl',
     '/dom/xul',
-    '/editor/libeditor',
     '/editor/txmgr',
     '/image',
     '/layout/forms',
@@ -244,3 +242,6 @@ LOCAL_INCLUDES += [
 ]
 
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

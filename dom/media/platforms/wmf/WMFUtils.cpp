@@ -135,6 +135,9 @@ GetPictureRegion(IMFMediaType* aMediaType, nsIntRect& aOutPictureRegion)
   UINT32 width = 0, height = 0;
   hr = MFGetAttributeSize(aMediaType, MF_MT_FRAME_SIZE, &width, &height);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+  NS_ENSURE_TRUE(width <= MAX_VIDEO_WIDTH, E_FAIL);
+  NS_ENSURE_TRUE(height <= MAX_VIDEO_HEIGHT, E_FAIL);
+
   aOutPictureRegion = nsIntRect(0, 0, width, height);
   return S_OK;
 }
@@ -202,8 +205,20 @@ LoadDLLs()
 HRESULT
 MFStartup()
 {
+  if (!IsVistaOrLater() || IsWin7AndPre2000Compatible()) {
+    // *Only* use WMF on Vista and later, as if Firefox is run in Windows 95
+    // compatibility mode on Windows 7 (it does happen!) we may crash trying
+    // to startup WMF. So we need to detect the OS version here, as in
+    // compatibility mode IsVistaOrLater() and friends behave as if we're on
+    // the emulated version of Windows. See bug 1279171.
+    // Using GetVersionEx API which takes compatibility mode into account.
+    return E_FAIL;
+  }
+
   HRESULT hr = LoadDLLs();
-  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+  if (FAILED(hr)) {
+    return hr;
+  }
 
   const int MF_VISTA_VERSION = (0x0001 << 16 | MF_API_VERSION);
   const int MF_WIN7_VERSION = (0x0002 << 16 | MF_API_VERSION);

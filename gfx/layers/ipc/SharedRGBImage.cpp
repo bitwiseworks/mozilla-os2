@@ -15,7 +15,6 @@
 #include "mozilla/layers/TextureClient.h"  // for BufferTextureClient, etc
 #include "mozilla/layers/ImageBridgeChild.h"  // for ImageBridgeChild
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Image::AddRef, etc
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -31,9 +30,9 @@ CreateSharedRGBImage(ImageContainer *aImageContainer,
                      gfx::IntSize aSize,
                      gfxImageFormat aImageFormat)
 {
-  NS_ASSERTION(aImageFormat == gfxImageFormat::ARGB32 ||
-               aImageFormat == gfxImageFormat::RGB24 ||
-               aImageFormat == gfxImageFormat::RGB16_565,
+  NS_ASSERTION(aImageFormat == gfx::SurfaceFormat::A8R8G8B8_UINT32 ||
+               aImageFormat == gfx::SurfaceFormat::X8R8G8B8_UINT32 ||
+               aImageFormat == gfx::SurfaceFormat::R5G6B5_UINT16,
                "RGB formats supported only");
 
   if (!aImageContainer) {
@@ -69,8 +68,6 @@ SharedRGBImage::~SharedRGBImage()
     ADDREF_MANUALLY(mTextureClient);
     ImageBridgeChild::DispatchReleaseTextureClient(mTextureClient);
     mTextureClient = nullptr;
-
-    ImageBridgeChild::DispatchReleaseImageClient(mCompositable.forget().take());
   }
 }
 
@@ -101,7 +98,7 @@ SharedRGBImage::GetSize()
 }
 
 TextureClient*
-SharedRGBImage::GetTextureClient(CompositableClient* aClient)
+SharedRGBImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
   return mTextureClient.get();
 }

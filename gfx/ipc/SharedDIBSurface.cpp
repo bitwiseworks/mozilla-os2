@@ -58,9 +58,9 @@ SharedDIBSurface::InitSurface(uint32_t aWidth, uint32_t aHeight,
   unsigned char* data = reinterpret_cast<unsigned char*>(mSharedDIB.GetBits());
 
 #if defined(XP_OS2)
-  gfxImageFormat format = gfxImageFormat::RGB24;
+  gfxImageFormat format = SurfaceFormat::X8R8G8B8_UINT32;
 #else
-  gfxImageFormat format = aTransparent ? gfxImageFormat::ARGB32 : gfxImageFormat::RGB24;
+  gfxImageFormat format = aTransparent ? SurfaceFormat::A8R8G8B8_UINT32 : SurfaceFormat::X8R8G8B8_UINT32;
 #endif
 
   gfxImageSurface::InitWithData(data, IntSize(aWidth, aHeight),

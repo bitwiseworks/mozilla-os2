@@ -4,11 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_psm__NSSCertDBTrustDomain_h
-#define mozilla_psm__NSSCertDBTrustDomain_h
+#ifndef NSSCertDBTrustDomain_h
+#define NSSCertDBTrustDomain_h
 
 #include "CertVerifier.h"
+#include "ScopedNSSTypes.h"
+#include "mozilla/BasePrincipal.h"
 #include "nsICertBlocklist.h"
+#include "nsString.h"
 #include "pkix/pkixtypes.h"
 #include "secmodt.h"
 
@@ -17,6 +20,20 @@ namespace mozilla { namespace psm {
 enum class ValidityCheckingMode {
   CheckingOff = 0,
   CheckForEV = 1,
+};
+
+// Policy options for matching id-Netscape-stepUp with id-kp-serverAuth (for CA
+// certificates only):
+// * Always match: the step-up OID is considered equivalent to serverAuth
+// * Match before 23 August 2016: the OID is considered equivalent if the
+//   certificate's notBefore is before 23 August 2016
+// * Match before 23 August 2015: similarly, but for 23 August 2015
+// * Never match: the OID is never considered equivalent to serverAuth
+enum class NetscapeStepUpPolicy : uint32_t {
+  AlwaysMatch = 0,
+  MatchBefore23August2016 = 1,
+  MatchBefore23August2015 = 2,
+  NeverMatch = 3,
 };
 
 SECStatus InitializeNSS(const char* dir, bool readOnly, bool loadPKCS11Modules);
@@ -36,17 +53,10 @@ SECStatus LoadLoadableRoots(/*optional*/ const char* dir,
 
 void UnloadLoadableRoots(const char* modNameUTF8);
 
-// Caller must free the result with PR_Free
-char* DefaultServerNicknameForCert(CERTCertificate* cert);
+nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
+                              /*out*/ nsCString& nickname);
 
-void SaveIntermediateCerts(const ScopedCERTCertList& certList);
-
-enum SignatureDigestOption {
-  AcceptAllAlgorithms,
-  DisableSHA1ForEE,
-  DisableSHA1ForCA,
-  DisableSHA1Everywhere,
-};
+void SaveIntermediateCerts(const UniqueCERTCertList& certList);
 
 class NSSCertDBTrustDomain : public mozilla::pkix::TrustDomain
 {
@@ -69,11 +79,12 @@ public:
                        CertVerifier::PinningMode pinningMode,
                        unsigned int minRSABits,
                        ValidityCheckingMode validityCheckingMode,
-                       SignatureDigestOption signatureDigestOption,
                        CertVerifier::SHA1Mode sha1Mode,
+                       NetscapeStepUpPolicy netscapeStepUpPolicy,
+                       const NeckoOriginAttributes& originAttributes,
+                       UniqueCERTCertList& builtChain,
           /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-          /*optional*/ const char* hostname = nullptr,
-      /*optional out*/ ScopedCERTCertList* builtChain = nullptr);
+          /*optional*/ const char* hostname = nullptr);
 
   virtual Result FindIssuer(mozilla::pkix::Input encodedIssuerName,
                             IssuerChecker& checker,
@@ -116,6 +127,10 @@ public:
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
 
+  virtual Result NetscapeStepUpMatchesServerAuth(
+                   mozilla::pkix::Time notBefore,
+                   /*out*/ bool& matches) override;
+
   virtual Result CheckRevocation(
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    const mozilla::pkix::CertID& certID,
@@ -128,14 +143,26 @@ public:
   virtual Result IsChainValid(const mozilla::pkix::DERArray& certChain,
                               mozilla::pkix::Time time) override;
 
+  virtual void NoteAuxiliaryExtension(
+                   mozilla::pkix::AuxiliaryExtension extension,
+                   mozilla::pkix::Input extensionData) override;
+
+  // Resets the OCSP stapling status and SCT lists accumulated during
+  // the chain building.
+  void ResetAccumulatedState();
+
   CertVerifier::OCSPStaplingStatus GetOCSPStaplingStatus() const
   {
     return mOCSPStaplingStatus;
   }
-  void ResetOCSPStaplingStatus()
-  {
-    mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_NEVER_CHECKED;
-  }
+
+  // SCT lists (see Certificate Transparency) extracted during
+  // certificate verification. Note that the returned Inputs are invalidated
+  // the next time a chain is built and by ResetAccumulatedState method
+  // (and when the TrustDomain object is destroyed).
+
+  mozilla::pkix::Input GetSCTListFromCertificate() const;
+  mozilla::pkix::Input GetSCTListFromOCSPStapling() const;
 
 private:
   enum EncodedResponseSource {
@@ -156,15 +183,19 @@ private:
   CertVerifier::PinningMode mPinningMode;
   const unsigned int mMinRSABits;
   ValidityCheckingMode mValidityCheckingMode;
-  SignatureDigestOption mSignatureDigestOption;
   CertVerifier::SHA1Mode mSHA1Mode;
+  NetscapeStepUpPolicy mNetscapeStepUpPolicy;
+  const NeckoOriginAttributes& mOriginAttributes;
+  UniqueCERTCertList& mBuiltChain; // non-owning
   PinningTelemetryInfo* mPinningTelemetryInfo;
   const char* mHostname; // non-owning - only used for pinning checks
-  ScopedCERTCertList* mBuiltChain; // non-owning
   nsCOMPtr<nsICertBlocklist> mCertBlocklist;
   CertVerifier::OCSPStaplingStatus mOCSPStaplingStatus;
+  // Certificate Transparency data extracted during certificate verification
+  UniqueSECItem mSCTListFromCertificate;
+  UniqueSECItem mSCTListFromOCSPStapling;
 };
 
 } } // namespace mozilla::psm
 
-#endif // mozilla_psm__NSSCertDBTrustDomain_h
+#endif // NSSCertDBTrustDomain_h

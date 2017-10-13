@@ -10,6 +10,7 @@
 #include "nsIStreamConverter.h"
 #include "nsICompressConvStats.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 
 #include "zlib.h"
 
@@ -106,7 +107,7 @@ private:
     nsCOMPtr<nsISupports>   mAsyncConvContext;
     nsCOMPtr<nsIStringInputStream>  mStream;
 
-    static NS_METHOD
+    static nsresult
     BrotliHandler(nsIInputStream *stream, void *closure, const char *dataIn,
                   uint32_t, uint32_t avail, uint32_t *countRead);
 

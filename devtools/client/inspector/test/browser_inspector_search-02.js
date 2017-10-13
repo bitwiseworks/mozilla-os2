@@ -6,7 +6,7 @@
 // Testing that searching for combining selectors using the inspector search
 // field produces correct suggestions.
 
-const TEST_URL = TEST_URL_ROOT + "doc_inspector_search-suggestions.html";
+const TEST_URL = URL_ROOT + "doc_inspector_search-suggestions.html";
 
 // An array of (key, suggestions) pairs where key is a key to press and
 // suggestions is an array of suggestions that should be shown in the popup.
@@ -141,7 +141,7 @@ add_task(function* () {
   for (let { key, suggestions } of TEST_DATA) {
     info("Pressing " + key + " to get " + formatSuggestions(suggestions));
 
-    let command = once(searchBox, "command");
+    let command = once(searchBox, "input");
     EventUtils.synthesizeKey(key, {}, inspector.panelWin);
     yield command;
 
@@ -152,7 +152,7 @@ add_task(function* () {
       "' - key pressed: " + key);
     let actualSuggestions = popup.getItems().reverse();
 
-    is(popup.isOpen ? actualSuggestions.length: 0, suggestions.length,
+    is(popup.isOpen ? actualSuggestions.length : 0, suggestions.length,
        "There are expected number of suggestions.");
 
     for (let i = 0; i < suggestions.length; i++) {

@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Tests if a warning is shown in the inspector when debugger is paused.
@@ -11,7 +13,11 @@ var gTab, gPanel, gDebugger;
 var gTarget, gToolbox;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -24,8 +30,8 @@ function test() {
 
 function testPause() {
   gDebugger.gThreadClient.addOneTimeListener("paused", () => {
-    ok(gTarget.isThreadPaused,
-      "target.isThreadPaused has been updated to true.");
+    ok(gDebugger.gThreadClient.paused,
+      "threadClient.paused has been updated to true.");
 
     gToolbox.once("inspector-selected").then(inspector => {
       inspector.once("inspector-updated").then(testNotificationIsUp1);
@@ -77,8 +83,8 @@ function testNotificationIsUp2() {
 
 function testResume() {
   gDebugger.gThreadClient.addOneTimeListener("resumed", () => {
-    ok(!gTarget.isThreadPaused,
-      "target.isThreadPaused has been updated to false.");
+    ok(!gDebugger.gThreadClient.paused,
+      "threadClient.paused has been updated to false.");
 
     let notificationBox = gToolbox.getNotificationBox();
     let notification = notificationBox.getNotificationWithValue("inspector-script-paused");
@@ -94,7 +100,7 @@ function testResume() {
     gDebugger);
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

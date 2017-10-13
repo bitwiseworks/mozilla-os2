@@ -40,10 +40,6 @@
 #include "mozilla/Omnijar.h"
 #include "mozilla/Attributes.h"
 
-#ifdef MOZ_B2G_LOADER
-#include "mozilla/FileLocation.h"
-#endif
-
 struct nsFactoryEntry;
 class nsIServiceManager;
 struct PRThread;
@@ -69,13 +65,7 @@ extern const char staticComponentType[];
 #endif
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(MOZILLA_XPCOMRT_API)
-extern const mozilla::Module kXPCOMRTModule;
-extern const mozilla::Module kNeckoStandaloneModule;
-extern const mozilla::Module kStunUDPSocketFilterHandlerModule;
-#else
 extern const mozilla::Module kXPCOMModule;
-#endif
 
 /**
  * This is a wrapper around mozilla::Mutex which provides runtime
@@ -339,31 +329,6 @@ public:
   nsTArray<PendingServiceInfo> mPendingServices;
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-
-#ifdef MOZ_B2G_LOADER
-  // Preload XPT interface info for B2G loader.
-  // This function is called before XPCOM has been initialized.
-  static void PreloadXPT(nsIFile* aFile);
-#endif
-
-#ifdef MOZ_B2G_LOADER
-  // Parsing functions of directives of manifest for XPT only parsing.
-  struct XPTOnlyManifestProcessingContext
-  {
-    XPTOnlyManifestProcessingContext(mozilla::FileLocation& aFile)
-      : mFile(aFile)
-    {
-    }
-
-    ~XPTOnlyManifestProcessingContext() {}
-
-    mozilla::FileLocation mFile;
-  };
-  static void XPTOnlyManifestManifest(XPTOnlyManifestProcessingContext& aCx,
-                                      int aLineNo, char* const* aArgv);
-  static void XPTOnlyManifestXPT(XPTOnlyManifestProcessingContext& aCx,
-                                 int aLineNo, char* const* aArgv);
-#endif
 
 private:
   ~nsComponentManagerImpl();

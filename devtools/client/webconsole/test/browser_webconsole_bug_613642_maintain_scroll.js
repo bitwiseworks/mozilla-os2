@@ -1,28 +1,26 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- *
- * Contributor(s):
- *   Mihai Șucan <mihai.sucan@gmail.com>
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
 var TEST_URI = "data:text/html;charset=utf-8,Web Console test for " +
                "bug 613642: remember scroll location";
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   let hud = yield openConsole();
 
   hud.jsterm.clearOutput();
   let outputNode = hud.outputNode;
-  let scrollBox = outputNode.parentNode;
+  let scrollBox = hud.ui.outputWrapper;
 
   for (let i = 0; i < 150; i++) {
-    content.console.log("test message " + i);
+    ContentTask.spawn(gBrowser.selectedBrowser, i, function* (num) {
+      content.console.log("test message " + num);
+    });
   }
 
   yield waitForMessages({
@@ -56,7 +54,8 @@ var test = asyncTest(function* () {
   yield scrolled.promise;
 
   // add a message and make sure scroll doesn't change
-  content.console.log("test message 150");
+  ContentTask.spawn(gBrowser.selectedBrowser, null,
+    "() => content.console.log('test message 150')");
 
   yield waitForMessages({
     webconsole: hud,
@@ -102,7 +101,8 @@ var test = asyncTest(function* () {
 
   let oldScrollTop = scrollBox.scrollTop;
 
-  content.console.log("test message 151");
+  ContentTask.spawn(gBrowser.selectedBrowser, null,
+    "() => content.console.log('test message 151')");
 
   scrolled = promise.defer();
   scrollBox.onscroll = () => {

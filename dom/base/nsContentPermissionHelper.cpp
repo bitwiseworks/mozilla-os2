@@ -21,7 +21,7 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsArrayUtils.h"
 #include "nsIMutableArray.h"
@@ -40,9 +40,28 @@ using namespace mozilla;
 
 #define kVisibilityChange "visibilitychange"
 
+class VisibilityChangeListener final : public nsIDOMEventListener
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIDOMEVENTLISTENER
+
+  explicit VisibilityChangeListener(nsPIDOMWindowInner* aWindow);
+
+  void RemoveListener();
+  void SetCallback(nsIContentPermissionRequestCallback* aCallback);
+  already_AddRefed<nsIContentPermissionRequestCallback> GetCallback();
+
+private:
+  virtual ~VisibilityChangeListener() {}
+
+  nsWeakPtr mWindow;
+  nsCOMPtr<nsIContentPermissionRequestCallback> mCallback;
+};
+
 NS_IMPL_ISUPPORTS(VisibilityChangeListener, nsIDOMEventListener)
 
-VisibilityChangeListener::VisibilityChangeListener(nsPIDOMWindow* aWindow)
+VisibilityChangeListener::VisibilityChangeListener(nsPIDOMWindowInner* aWindow)
 {
   MOZ_ASSERT(aWindow);
 
@@ -80,7 +99,7 @@ VisibilityChangeListener::HandleEvent(nsIDOMEvent* aEvent)
 void
 VisibilityChangeListener::RemoveListener()
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow);
   if (!window) {
     return;
   }
@@ -346,7 +365,8 @@ nsContentPermissionUtils::CreateContentPermissionRequestParent(const nsTArray<Pe
 }
 
 /* static */ nsresult
-nsContentPermissionUtils::AskPermission(nsIContentPermissionRequest* aRequest, nsPIDOMWindow* aWindow)
+nsContentPermissionUtils::AskPermission(nsIContentPermissionRequest* aRequest,
+                                        nsPIDOMWindowInner* aWindow)
 {
   MOZ_ASSERT(!aWindow || aWindow->IsInnerWindow());
   NS_ENSURE_STATE(aWindow && aWindow->IsCurrentInnerWindow());
@@ -444,10 +464,10 @@ nsContentPermissionUtils::NotifyRemoveContentPermissionRequestChild(
 
 NS_IMPL_ISUPPORTS(nsContentPermissionRequester, nsIContentPermissionRequester)
 
-nsContentPermissionRequester::nsContentPermissionRequester(nsPIDOMWindow* aWindow)
-  : mWindow(aWindow)
+nsContentPermissionRequester::nsContentPermissionRequester(nsPIDOMWindowInner* aWindow)
+  : mWindow(do_GetWeakReference(aWindow))
+  , mListener(new VisibilityChangeListener(aWindow))
 {
-  mListener = new VisibilityChangeListener(mWindow);
 }
 
 nsContentPermissionRequester::~nsContentPermissionRequester()
@@ -461,12 +481,12 @@ nsContentPermissionRequester::GetVisibility(nsIContentPermissionRequestCallback*
 {
   NS_ENSURE_ARG_POINTER(aCallback);
 
-  if (!mWindow) {
-    MOZ_ASSERT(false);
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow);
+  if (!window) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIDocShell> docshell = mWindow->GetDocShell();
+  nsCOMPtr<nsIDocShell> docshell = window->GetDocShell();
   if (!docshell) {
     return NS_ERROR_FAILURE;
   }
@@ -601,7 +621,7 @@ nsContentPermissionRequestProxy::GetTypes(nsIArray** aTypes)
 }
 
 NS_IMETHODIMP
-nsContentPermissionRequestProxy::GetWindow(nsIDOMWindow * *aRequestingWindow)
+nsContentPermissionRequestProxy::GetWindow(mozIDOMWindow * *aRequestingWindow)
 {
   NS_ENSURE_ARG_POINTER(aRequestingWindow);
   *aRequestingWindow = nullptr; // ipc doesn't have a window
@@ -665,22 +685,6 @@ nsContentPermissionRequestProxy::Allow(JS::HandleValue aChoices)
   if (mParent->IsBeingDestroyed()) {
     return NS_ERROR_FAILURE;
   }
-
-#ifdef MOZ_WIDGET_GONK
-  uint32_t len = mPermissionRequests.Length();
-  for (uint32_t i = 0; i < len; i++) {
-    if (mPermissionRequests[i].type().EqualsLiteral("audio-capture")) {
-      GonkPermissionService::GetInstance()->addGrantInfo(
-        "android.permission.RECORD_AUDIO",
-        static_cast<ContentParent*>(mParent->Manager())->Pid());
-    }
-    if (mPermissionRequests[i].type().EqualsLiteral("video-capture")) {
-      GonkPermissionService::GetInstance()->addGrantInfo(
-        "android.permission.CAMERA",
-        static_cast<ContentParent*>(mParent->Manager())->Pid());
-    }
-  }
-#endif
 
   nsTArray<PermissionChoice> choices;
   if (aChoices.isNullOrUndefined()) {
@@ -746,7 +750,7 @@ NS_IMPL_ISUPPORTS(RemotePermissionRequest, nsIContentPermissionRequestCallback);
 
 RemotePermissionRequest::RemotePermissionRequest(
   nsIContentPermissionRequest* aRequest,
-  nsPIDOMWindow* aWindow)
+  nsPIDOMWindowInner* aWindow)
   : mRequest(aRequest)
   , mWindow(aWindow)
   , mIPCOpen(false)
@@ -754,6 +758,11 @@ RemotePermissionRequest::RemotePermissionRequest(
 {
   mListener = new VisibilityChangeListener(mWindow);
   mListener->SetCallback(this);
+}
+
+RemotePermissionRequest::~RemotePermissionRequest()
+{
+  MOZ_ASSERT(!mIPCOpen, "Protocol must not be open when RemotePermissionRequest is destroyed.");
 }
 
 void

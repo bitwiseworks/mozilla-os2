@@ -4,33 +4,29 @@
 
 using struct gfxPoint from "gfxPoint.h";
 using nsIntRegion from "nsRegion.h";
-using struct mozilla::layers::MagicGrallocBufferHandle from "gfxipc/ShadowLayerUtils.h";
-using struct mozilla::layers::GrallocBufferRef from "gfxipc/ShadowLayerUtils.h";
 using struct mozilla::layers::SurfaceDescriptorX11 from "gfxipc/ShadowLayerUtils.h";
+using mozilla::StereoMode from "ImageTypes.h";
+using mozilla::YUVColorSpace from "ImageTypes.h";
 using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::gfx::IntRect from "mozilla/gfx/Rect.h";
 using mozilla::gfx::IntSize from "mozilla/gfx/Point.h";
 using gfxImageFormat from "gfxTypes.h";
+using struct mozilla::layers::GonkNativeHandle from "mozilla/layers/GonkNativeHandleUtils.h";
 
 namespace mozilla {
 namespace layers {
 
 union OverlayHandle {
   int32_t;
+  GonkNativeHandle;
   null_t;
 };
 
 struct OverlaySource {
   OverlayHandle handle;
   IntSize size;
-};
-
-union MaybeMagicGrallocBufferHandle {
-  MagicGrallocBufferHandle;
-  GrallocBufferRef;
-  null_t;
 };
 
 struct SurfaceDescriptorD3D9 {
@@ -90,30 +86,44 @@ struct SurfaceDescriptorSharedGLTexture {
   bool hasAlpha;
 };
 
-struct SurfaceDescriptorGralloc {
-  MaybeMagicGrallocBufferHandle buffer;
-  bool isOpaque;
+struct SurfaceDescriptorGPUVideo {
+  uint64_t handle;
 };
 
-/**
- * Used for shmem-backed YCbCr and (flavors of) RGBA textures
- */
-struct SurfaceDescriptorShmem {
-  Shmem data;
+struct RGBDescriptor {
+  IntSize size;
   SurfaceFormat format;
+  bool hasIntermediateBuffer;
 };
 
-/**
- * Used for "raw memory"-backed YCbCr and (flavors of) RGBA textures
- */
-struct SurfaceDescriptorMemory {
-  uintptr_t data;
-  SurfaceFormat format;
+struct YCbCrDescriptor {
+  IntSize ySize;
+  IntSize cbCrSize;
+  uint32_t yOffset;
+  uint32_t cbOffset;
+  uint32_t crOffset;
+  StereoMode stereoMode;
+  YUVColorSpace yUVColorSpace;
+  bool hasIntermediateBuffer;
+};
+
+union BufferDescriptor {
+  RGBDescriptor;
+  YCbCrDescriptor;
+};
+
+union MemoryOrShmem {
+  uintptr_t;
+  Shmem;
+};
+
+struct SurfaceDescriptorBuffer {
+  BufferDescriptor desc;
+  MemoryOrShmem data;
 };
 
 union SurfaceDescriptor {
-  SurfaceDescriptorShmem;
-  SurfaceDescriptorMemory;
+  SurfaceDescriptorBuffer;
   SurfaceDescriptorD3D9;
   SurfaceDescriptorDIB;
   SurfaceDescriptorD3D10;
@@ -123,8 +133,8 @@ union SurfaceDescriptor {
   SurfaceTextureDescriptor;
   EGLImageDescriptor;
   SurfaceDescriptorMacIOSurface;
-  SurfaceDescriptorGralloc;
   SurfaceDescriptorSharedGLTexture;
+  SurfaceDescriptorGPUVideo;
   null_t;
 };
 

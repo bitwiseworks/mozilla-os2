@@ -7,15 +7,14 @@
  *
  * To add metrics for a tool:
  *
- * 1. Create boolean, flag and exponential entries in
+ * 1. Create count, flag, and exponential entries in
  *    toolkit/components/telemetry/Histograms.json. Each type is optional but it
  *    is best if all three can be included.
  *
  * 2. Add your chart entries to devtools/client/shared/telemetry.js
  *    (Telemetry.prototype._histograms):
  *    mytoolname: {
- *      histogram: "DEVTOOLS_MYTOOLNAME_OPENED_BOOLEAN",
- *      userHistogram: "DEVTOOLS_MYTOOLNAME_OPENED_PER_USER_FLAG",
+ *      histogram: "DEVTOOLS_MYTOOLNAME_OPENED_COUNT",
  *      timerHistogram: "DEVTOOLS_MYTOOLNAME_TIME_ACTIVE_SECONDS"
  *    },
  *
@@ -39,9 +38,11 @@
  * telemetry.mozilla.org.
  */
 
+"use strict";
+
 const TOOLS_OPENED_PREF = "devtools.telemetry.tools.opened.version";
 
-this.Telemetry = function() {
+function Telemetry() {
   // Bind pretty much all functions so that callers do not need to.
   this.toolOpened = this.toolOpened.bind(this);
   this.toolClosed = this.toolClosed.bind(this);
@@ -50,180 +51,153 @@ this.Telemetry = function() {
   this.destroy = this.destroy.bind(this);
 
   this._timers = new Map();
-};
+}
 
 module.exports = Telemetry;
 
-var {Cc, Ci, Cu} = require("chrome");
-var {Services} = Cu.import("resource://gre/modules/Services.jsm", {});
-var {XPCOMUtils} = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
+var Services = require("Services");
 
 Telemetry.prototype = {
   _histograms: {
     toolbox: {
-      histogram: "DEVTOOLS_TOOLBOX_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_TOOLBOX_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_TOOLBOX_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS"
     },
     options: {
-      histogram: "DEVTOOLS_OPTIONS_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_OPTIONS_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_OPTIONS_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_OPTIONS_TIME_ACTIVE_SECONDS"
     },
     webconsole: {
-      histogram: "DEVTOOLS_WEBCONSOLE_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBCONSOLE_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBCONSOLE_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_WEBCONSOLE_TIME_ACTIVE_SECONDS"
     },
     browserconsole: {
-      histogram: "DEVTOOLS_BROWSERCONSOLE_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_BROWSERCONSOLE_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_BROWSERCONSOLE_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_BROWSERCONSOLE_TIME_ACTIVE_SECONDS"
     },
     inspector: {
-      histogram: "DEVTOOLS_INSPECTOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_INSPECTOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_INSPECTOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_INSPECTOR_TIME_ACTIVE_SECONDS"
     },
     ruleview: {
-      histogram: "DEVTOOLS_RULEVIEW_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_RULEVIEW_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_RULEVIEW_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_RULEVIEW_TIME_ACTIVE_SECONDS"
     },
     computedview: {
-      histogram: "DEVTOOLS_COMPUTEDVIEW_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_COMPUTEDVIEW_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_COMPUTEDVIEW_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_COMPUTEDVIEW_TIME_ACTIVE_SECONDS"
     },
-    layoutview: {
-      histogram: "DEVTOOLS_LAYOUTVIEW_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_LAYOUTVIEW_OPENED_PER_USER_FLAG",
-      timerHistogram: "DEVTOOLS_LAYOUTVIEW_TIME_ACTIVE_SECONDS"
-    },
     fontinspector: {
-      histogram: "DEVTOOLS_FONTINSPECTOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_FONTINSPECTOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_FONTINSPECTOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_FONTINSPECTOR_TIME_ACTIVE_SECONDS"
     },
     animationinspector: {
-      histogram: "DEVTOOLS_ANIMATIONINSPECTOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_ANIMATIONINSPECTOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_ANIMATIONINSPECTOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_ANIMATIONINSPECTOR_TIME_ACTIVE_SECONDS"
     },
     jsdebugger: {
-      histogram: "DEVTOOLS_JSDEBUGGER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_JSDEBUGGER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_JSDEBUGGER_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_JSDEBUGGER_TIME_ACTIVE_SECONDS"
     },
     jsbrowserdebugger: {
-      histogram: "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_JSBROWSERDEBUGGER_TIME_ACTIVE_SECONDS"
     },
     styleeditor: {
-      histogram: "DEVTOOLS_STYLEEDITOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_STYLEEDITOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_STYLEEDITOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_STYLEEDITOR_TIME_ACTIVE_SECONDS"
     },
     shadereditor: {
-      histogram: "DEVTOOLS_SHADEREDITOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_SHADEREDITOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_SHADEREDITOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_SHADEREDITOR_TIME_ACTIVE_SECONDS"
     },
     webaudioeditor: {
-      histogram: "DEVTOOLS_WEBAUDIOEDITOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBAUDIOEDITOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBAUDIOEDITOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_WEBAUDIOEDITOR_TIME_ACTIVE_SECONDS"
     },
     canvasdebugger: {
-      histogram: "DEVTOOLS_CANVASDEBUGGER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_CANVASDEBUGGER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_CANVASDEBUGGER_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_CANVASDEBUGGER_TIME_ACTIVE_SECONDS"
     },
     performance: {
-      histogram: "DEVTOOLS_JSPROFILER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_JSPROFILER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_JSPROFILER_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_JSPROFILER_TIME_ACTIVE_SECONDS"
     },
+    memory: {
+      histogram: "DEVTOOLS_MEMORY_OPENED_COUNT",
+      timerHistogram: "DEVTOOLS_MEMORY_TIME_ACTIVE_SECONDS"
+    },
     netmonitor: {
-      histogram: "DEVTOOLS_NETMONITOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_NETMONITOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_NETMONITOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_NETMONITOR_TIME_ACTIVE_SECONDS"
     },
     storage: {
-      histogram: "DEVTOOLS_STORAGE_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_STORAGE_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_STORAGE_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_STORAGE_TIME_ACTIVE_SECONDS"
     },
-    tilt: {
-      histogram: "DEVTOOLS_TILT_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_TILT_OPENED_PER_USER_FLAG",
-      timerHistogram: "DEVTOOLS_TILT_TIME_ACTIVE_SECONDS"
-    },
     paintflashing: {
-      histogram: "DEVTOOLS_PAINTFLASHING_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_PAINTFLASHING_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_PAINTFLASHING_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_PAINTFLASHING_TIME_ACTIVE_SECONDS"
     },
     scratchpad: {
-      histogram: "DEVTOOLS_SCRATCHPAD_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_SCRATCHPAD_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_SCRATCHPAD_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_SCRATCHPAD_TIME_ACTIVE_SECONDS"
     },
+    "scratchpad-window": {
+      histogram: "DEVTOOLS_SCRATCHPAD_WINDOW_OPENED_COUNT",
+      timerHistogram: "DEVTOOLS_SCRATCHPAD_WINDOW_TIME_ACTIVE_SECONDS"
+    },
     responsive: {
-      histogram: "DEVTOOLS_RESPONSIVE_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_RESPONSIVE_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_RESPONSIVE_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_RESPONSIVE_TIME_ACTIVE_SECONDS"
     },
     eyedropper: {
-      histogram: "DEVTOOLS_EYEDROPPER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_EYEDROPPER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_EYEDROPPER_OPENED_COUNT",
     },
     menueyedropper: {
-      histogram: "DEVTOOLS_MENU_EYEDROPPER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_MENU_EYEDROPPER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_MENU_EYEDROPPER_OPENED_COUNT",
     },
     pickereyedropper: {
-      histogram: "DEVTOOLS_PICKER_EYEDROPPER_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_PICKER_EYEDROPPER_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_PICKER_EYEDROPPER_OPENED_COUNT",
+    },
+    toolbareyedropper: {
+      histogram: "DEVTOOLS_TOOLBAR_EYEDROPPER_OPENED_COUNT",
     },
     developertoolbar: {
-      histogram: "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_DEVELOPERTOOLBAR_TIME_ACTIVE_SECONDS"
     },
     aboutdebugging: {
-      histogram: "DEVTOOLS_ABOUTDEBUGGING_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_ABOUTDEBUGGING_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_ABOUTDEBUGGING_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_ABOUTDEBUGGING_TIME_ACTIVE_SECONDS"
     },
     webide: {
-      histogram: "DEVTOOLS_WEBIDE_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBIDE_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBIDE_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_WEBIDE_TIME_ACTIVE_SECONDS"
     },
     webideProjectEditor: {
-      histogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_TIME_ACTIVE_SECONDS"
     },
     webideProjectEditorSave: {
-      histogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_SAVE_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_SAVE_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBIDE_PROJECT_EDITOR_SAVE_COUNT",
     },
     webideNewProject: {
-      histogram: "DEVTOOLS_WEBIDE_NEW_PROJECT_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBIDE_NEW_PROJECT_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBIDE_NEW_PROJECT_COUNT",
     },
     webideImportProject: {
-      histogram: "DEVTOOLS_WEBIDE_IMPORT_PROJECT_BOOLEAN",
-      userHistogram: "DEVTOOLS_WEBIDE_IMPORT_PROJECT_PER_USER_FLAG",
+      histogram: "DEVTOOLS_WEBIDE_IMPORT_PROJECT_COUNT",
     },
     custom: {
-      histogram: "DEVTOOLS_CUSTOM_OPENED_BOOLEAN",
-      userHistogram: "DEVTOOLS_CUSTOM_OPENED_PER_USER_FLAG",
+      histogram: "DEVTOOLS_CUSTOM_OPENED_COUNT",
       timerHistogram: "DEVTOOLS_CUSTOM_TIME_ACTIVE_SECONDS"
-    }
+    },
+    reloadAddonInstalled: {
+      histogram: "DEVTOOLS_RELOAD_ADDON_INSTALLED_COUNT",
+    },
+    reloadAddonReload: {
+      histogram: "DEVTOOLS_RELOAD_ADDON_RELOAD_COUNT",
+    },
   },
 
   /**
@@ -233,14 +207,11 @@ Telemetry.prototype = {
    *         Used to look up the relevant histogram ID and log true to that
    *         histogram.
    */
-  toolOpened: function(id) {
+  toolOpened: function (id) {
     let charts = this._histograms[id] || this._histograms.custom;
 
     if (charts.histogram) {
       this.log(charts.histogram, true);
-    }
-    if (charts.userHistogram) {
-      this.logOncePerBrowserVersion(charts.userHistogram, true);
     }
     if (charts.timerHistogram) {
       this.startTimer(charts.timerHistogram);
@@ -256,7 +227,7 @@ Telemetry.prototype = {
     this.toolOpened(id);
   },
 
-  toolClosed: function(id) {
+  toolClosed: function (id) {
     let charts = this._histograms[id];
 
     if (!charts || !charts.timerHistogram) {
@@ -272,7 +243,7 @@ Telemetry.prototype = {
    * @param String histogramId
    *        Histogram in which the data is to be stored.
    */
-  startTimer: function(histogramId) {
+  startTimer: function (histogramId) {
     this._timers.set(histogramId, new Date());
   },
 
@@ -284,7 +255,7 @@ Telemetry.prototype = {
    * @param String key [optional]
    *        Optional key for a keyed histogram.
    */
-  stopTimer: function(histogramId, key) {
+  stopTimer: function (histogramId, key) {
     let startTime = this._timers.get(histogramId);
     if (startTime) {
       let time = (new Date() - startTime) / 1000;
@@ -305,12 +276,12 @@ Telemetry.prototype = {
    * @param  value
    *         Value to store.
    */
-  log: function(histogramId, value) {
+  log: function (histogramId, value) {
     if (histogramId) {
       try {
         let histogram = Services.telemetry.getHistogramById(histogramId);
         histogram.add(value);
-      } catch(e) {
+      } catch (e) {
         dump("Warning: An attempt was made to write to the " + histogramId +
              " histogram, which is not defined in Histograms.json\n");
       }
@@ -327,12 +298,12 @@ Telemetry.prototype = {
    * @param  value
    *         Value to store.
    */
-  logKeyed: function(histogramId, key, value) {
+  logKeyed: function (histogramId, key, value) {
     if (histogramId) {
       try {
         let histogram = Services.telemetry.getKeyedHistogramById(histogramId);
         histogram.add(key, value);
-      } catch(e) {
+      } catch (e) {
         dump("Warning: An attempt was made to write to the " + histogramId +
              " histogram, which is not defined in Histograms.json\n");
       }
@@ -346,8 +317,8 @@ Telemetry.prototype = {
    * @param  {String} perUserHistogram
    *         Histogram in which the data is to be stored.
    */
-  logOncePerBrowserVersion: function(perUserHistogram, value) {
-    let currentVersion = appInfo.version;
+  logOncePerBrowserVersion: function (perUserHistogram, value) {
+    let currentVersion = Services.appinfo.version;
     let latest = Services.prefs.getCharPref(TOOLS_OPENED_PREF);
     let latestObj = JSON.parse(latest);
 
@@ -362,13 +333,9 @@ Telemetry.prototype = {
     }
   },
 
-  destroy: function() {
+  destroy: function () {
     for (let histogramId of this._timers.keys()) {
       this.stopTimer(histogramId);
     }
   }
 };
-
-XPCOMUtils.defineLazyGetter(this, "appInfo", function() {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULAppInfo);
-});

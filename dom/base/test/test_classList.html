@@ -98,15 +98,20 @@ function assignToClassListStrict(e) {
   "use strict";
   try {
     e.classList = "foo";
-    ok(false, "assigning to classList didn't throw");
-  } catch (e) { }
+    ok(true, "assigning to classList didn't throw");
+    e.removeAttribute("class");
+  } catch (e) {
+    ok(false, "assigning to classList threw");
+  }
 }
 
 function assignToClassList(e) {
   try {
     var expect = e.classList;
     e.classList = "foo";
+    ok(true, "assigning to classList didn't throw");
     is(e.classList, expect, "classList should be unchanged after assignment");
+    e.removeAttribute("class");
   } catch (e) {
     ok(false, "assigning to classList threw");
   }
@@ -160,8 +165,6 @@ function testClassList(e) {
 
   ok(DOMTokenList.prototype.hasOwnProperty("toString"),
      "Should have own toString on DOMTokenList")
-  ok(!DOMSettableTokenList.prototype.hasOwnProperty("toString"),
-     "Should not have own toString on DOMSettableTokenList")
 
   e.removeAttribute("class");
   is(e.classList.toString(), "", "wrong classList.toString() value");
@@ -213,24 +216,21 @@ function testClassList(e) {
   is(e.classList.contains("a"), false, "wrong classList.contains() result");
   try {
     e.classList.contains("");
-    ok(false, "classList.contains() didn't throw");
+    ok(true, "classList.contains(empty_string) didn't throw");
   } catch (e) {
-    is(e.name, "SyntaxError", "wrong exception thrown");
-    is(e.code, DOMException.SYNTAX_ERR, "wrong exception thrown");
+    ok(false, "classList.contains(empty_string) threw");
   }
   try {
     e.classList.contains("  ");
-    ok(false, "classList.contains() didn't throw");
+    ok(true, "classList.contains(string_with_spaces) didn't throw");
   } catch (e) {
-    is(e.name, "InvalidCharacterError", "wrong exception thrown");
-    is(e.code, DOMException.INVALID_CHARACTER_ERR, "wrong exception thrown");
+    ok(false, "classList.contains(string_with_spaces) threw");
   }
   try {
     e.classList.contains("aa ");
-    ok(false, "classList.contains() didn't throw");
+    ok(true, "classList.contains(string_with_spaces) didn't throw");
   } catch (e) {
-    is(e.name, "InvalidCharacterError", "wrong exception thrown");
-    is(e.code, DOMException.INVALID_CHARACTER_ERR, "wrong exception thrown");
+    ok(false, "classList.contains(string_with_spaces) threw");
   }
 
   e.setAttribute("class", "");
@@ -308,22 +308,22 @@ function testClassList(e) {
 
   checkRemove(null, "a", null);
   checkRemove("", "a", "");
-  checkRemove("a b  c", "d", "a b  c");
-  checkRemove("a b  c", "A", "a b  c");
+  checkRemove("a b  c", "d", "a b c");
+  checkRemove("a b  c", "A", "a b c");
   checkRemove(" a a a ", "a", "");
   checkRemove("a  b", "a", "b");
-  checkRemove("a  b  ", "a", "b  ");
+  checkRemove("a  b  ", "a", "b");
   checkRemove("a a b", "a", "b");
   checkRemove("aa aa bb", "aa", "bb");
   checkRemove("a a b a a c a a", "a", "b c");
 
   checkRemove("a  b  c", "b", "a c");
   checkRemove("aaa  bbb  ccc", "bbb", "aaa ccc");
-  checkRemove(" a  b  c ", "b", " a c ");
+  checkRemove(" a  b  c ", "b", "a c");
   checkRemove("a b b b c", "b", "a c");
 
-  checkRemove("a  b  c", "c", "a  b");
-  checkRemove(" a  b  c ", "c", " a  b");
+  checkRemove("a  b  c", "c", "a b");
+  checkRemove(" a  b  c ", "c", "a b");
   checkRemove("a b c c c", "c", "a b");
 
   checkRemove("a b a c a d a", "a", "b c d");
@@ -332,12 +332,12 @@ function testClassList(e) {
   checkRemove("\ra\na\ta\f", "a", "");
 
   // multiple remove
-  checkRemove("a b c ", ["d", "e"], "a b c ");
-  checkRemove("a b c ", ["a", "b"], "c ");
+  checkRemove("a b c ", ["d", "e"], "a b c");
+  checkRemove("a b c ", ["a", "b"], "c");
   checkRemove("a b c ", ["a", "c"], "b");
-  checkRemove("a b c ", ["a", "a"], "b c ");
-  checkRemove("a b c ", ["d", "d"], "a b c ");
-  checkRemove("a b c ", [], "a b c ");
+  checkRemove("a b c ", ["a", "a"], "b c");
+  checkRemove("a b c ", ["d", "d"], "a b c");
+  checkRemove("a b c ", [], "a b c");
   checkRemove(null, ["a", "b"], null);
   checkRemove("", ["a", "b"], "");
 
@@ -366,10 +366,10 @@ function testClassList(e) {
   checkToggle("a", "a", false, "");
   checkToggle(" a a a ", "a", false, "");
   checkToggle(" A A A ", "a", true, " A A A a");
-  checkToggle(" a b c ", "b", false, " a c ");
-  checkToggle(" a b c b b", "b", false, " a c");
-  checkToggle(" a b  c  ", "c", false, " a b");
-  checkToggle(" a b c ", "a", false, "b c ");
+  checkToggle(" a b c ", "b", false, "a c");
+  checkToggle(" a b c b b", "b", false, "a c");
+  checkToggle(" a b  c  ", "c", false, "a b");
+  checkToggle(" a b c ", "a", false, "b c");
 
   // Test for bug 530171
   checkToggle("null", null, false, "");
@@ -379,7 +379,7 @@ function testClassList(e) {
 
 
   // tests for the force argument handling
-  
+
   function checkForceToggle(before, argument, force, expectedRes, after, expectedException) {
     checkModification(e, "toggle", [argument, force], expectedRes, before, after, expectedException);
   }

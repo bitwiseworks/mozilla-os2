@@ -11,8 +11,6 @@
 using namespace js;
 using JS::PerfMeasurement;
 
-using mozilla::UniquePtr;
-
 // You cannot forward-declare a static object in C++, so instead
 // we have to forward-declare the helper function that refers to it.
 static PerfMeasurement* GetPM(JSContext* cx, JS::HandleValue value, const char* fname);
@@ -161,10 +159,22 @@ static const struct pm_const {
 static bool pm_construct(JSContext* cx, unsigned argc, Value* vp);
 static void pm_finalize(JSFreeOp* fop, JSObject* obj);
 
+static const JSClassOps pm_classOps = {
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    pm_finalize
+};
+
 static const JSClass pm_class = {
-    "PerfMeasurement", JSCLASS_HAS_PRIVATE,
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, pm_finalize
+    "PerfMeasurement",
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_FOREGROUND_FINALIZE,
+    &pm_classOps
 };
 
 // Constructor and destructor
@@ -212,11 +222,10 @@ static PerfMeasurement*
 GetPM(JSContext* cx, JS::HandleValue value, const char* fname)
 {
     if (!value.isObject()) {
-        UniquePtr<char[], JS::FreePolicy> bytes =
-            DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, value, nullptr);
+        UniqueChars bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, value, nullptr);
         if (!bytes)
             return nullptr;
-        JS_ReportErrorNumber(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
         return nullptr;
     }
     RootedObject obj(cx, &value.toObject());
@@ -227,8 +236,8 @@ GetPM(JSContext* cx, JS::HandleValue value, const char* fname)
 
     // JS_GetInstancePrivate only sets an exception if its last argument
     // is nonzero, so we have to do it by hand.
-    JS_ReportErrorNumber(cx, GetErrorMessage, 0, JSMSG_INCOMPATIBLE_PROTO,
-                         pm_class.name, fname, JS_GetClass(obj)->name);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, 0, JSMSG_INCOMPATIBLE_PROTO,
+                              pm_class.name, fname, JS_GetClass(obj)->name);
     return nullptr;
 }
 
@@ -267,7 +276,7 @@ RegisterPerfMeasurement(JSContext* cx, HandleObject globalArg)
 }
 
 PerfMeasurement*
-ExtractPerfMeasurement(Value wrapper)
+ExtractPerfMeasurement(const Value& wrapper)
 {
     if (wrapper.isPrimitive())
         return 0;

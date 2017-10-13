@@ -9,10 +9,10 @@
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileSystemUtils.h"
+#include "nsIGlobalObject.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsIFile.h"
-#include "nsPIDOMWindow.h"
 
 namespace mozilla {
 namespace dom {
@@ -20,40 +20,41 @@ namespace dom {
 OSFileSystem::OSFileSystem(const nsAString& aRootDir)
 {
   mLocalRootPath = aRootDir;
-  FileSystemUtils::LocalPathToNormalizedPath(mLocalRootPath,
-                                             mNormalizedLocalRootPath);
+}
 
-  // Non-mobile devices don't have the concept of separate permissions to
-  // access different parts of devices storage like Pictures, or Videos, etc.
-  mRequiresPermissionChecks = false;
+already_AddRefed<FileSystemBase>
+OSFileSystem::Clone()
+{
+  AssertIsOnOwningThread();
 
-  mString = mLocalRootPath;
+  RefPtr<OSFileSystem> fs = new OSFileSystem(mLocalRootPath);
+  if (mParent) {
+    fs->Init(mParent);
+  }
+
+  return fs.forget();
+}
+
+void
+OSFileSystem::Init(nsISupports* aParent)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mParent, "No duple Init() calls");
+  MOZ_ASSERT(aParent);
+
+  mParent = aParent;
 
 #ifdef DEBUG
-  mPermission.AssignLiteral("never-used");
+  nsCOMPtr<nsIGlobalObject> obj = do_QueryInterface(aParent);
+  MOZ_ASSERT(obj);
 #endif
 }
 
-void
-OSFileSystem::Init(nsPIDOMWindow* aWindow)
+nsISupports*
+OSFileSystem::GetParentObject() const
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
-  MOZ_ASSERT(!mWindow, "No duple Init() calls");
-  MOZ_ASSERT(aWindow);
-  mWindow = aWindow;
-}
-
-nsPIDOMWindow*
-OSFileSystem::GetWindow() const
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
-  return mWindow;
-}
-
-void
-OSFileSystem::GetRootName(nsAString& aRetval) const
-{
-  return aRetval.AssignLiteral("/");
+  AssertIsOnOwningThread();
+  return mParent;
 }
 
 bool
@@ -74,6 +75,38 @@ OSFileSystem::IsSafeDirectory(Directory* aDir) const
   // storage that it is being used with.
   MOZ_CRASH("Don't use OSFileSystem with the Device Storage API");
   return true;
+}
+
+void
+OSFileSystem::Unlink()
+{
+  AssertIsOnOwningThread();
+  mParent = nullptr;
+}
+
+void
+OSFileSystem::Traverse(nsCycleCollectionTraversalCallback &cb)
+{
+  AssertIsOnOwningThread();
+
+  OSFileSystem* tmp = this;
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent);
+}
+
+void
+OSFileSystem::SerializeDOMPath(nsAString& aOutput) const
+{
+  AssertIsOnOwningThread();
+  aOutput = mLocalRootPath;
+}
+
+/**
+ * OSFileSystemParent
+ */
+
+OSFileSystemParent::OSFileSystemParent(const nsAString& aRootDir)
+{
+  mLocalRootPath = aRootDir;
 }
 
 } // namespace dom

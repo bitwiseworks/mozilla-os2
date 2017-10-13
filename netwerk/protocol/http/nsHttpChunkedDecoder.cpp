@@ -8,6 +8,7 @@
 #include <errno.h>
 #include "nsHttpChunkedDecoder.h"
 #include <algorithm>
+#include "plstr.h"
 
 namespace mozilla {
 namespace net {
@@ -116,7 +117,7 @@ nsHttpChunkedDecoder::ParseChunkRemaining(char *buf,
                 if (!mTrailers) {
                     mTrailers = new nsHttpHeaderArray();
                 }
-                mTrailers->ParseHeaderLine(buf);
+                mTrailers->ParseHeaderLine(nsDependentCSubstring(buf, count));
             }
             else {
                 mWaitEOF = false;

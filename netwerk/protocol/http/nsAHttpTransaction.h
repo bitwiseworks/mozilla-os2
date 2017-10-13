@@ -11,7 +11,7 @@
 
 class nsIInterfaceRequestor;
 class nsITransport;
-class nsISchedulingContext;
+class nsIRequestContext;
 
 namespace mozilla { namespace net {
 
@@ -158,8 +158,8 @@ public:
     // other types
     virtual SpdyConnectTransaction *QuerySpdyConnectTransaction() { return nullptr; }
 
-    // return the scheduling context associated with the transaction
-    virtual nsISchedulingContext *SchedulingContext() { return nullptr; }
+    // return the request context associated with the transaction
+    virtual nsIRequestContext *RequestContext() { return nullptr; }
 
     // return the connection information associated with the transaction
     virtual nsHttpConnectionInfo *ConnectionInfo() = 0;
@@ -204,6 +204,22 @@ public:
 
     virtual void DisableSpdy() { }
     virtual void ReuseConnectionOnRestartOK(bool) { }
+
+    // Returns true if early-data is possible.
+    virtual bool Do0RTT() {
+        return false;
+    }
+    // This function will be called when a tls handshake has been finished and
+    // we know whether early-data that was sent has been accepted or not, e.g.
+    // do we need to restart a transaction. This will be called only if Do0RTT
+    // returns true.
+    // If aRestart parameter is true we need to restart the transaction,
+    // otherwise the erly-data has been accepted and we can continue the
+    // transaction.
+    // The function will return success or failure of the transaction restart.
+    virtual nsresult Finish0RTT(bool aRestart) {
+        return NS_ERROR_NOT_IMPLEMENTED;
+    }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransaction, NS_AHTTPTRANSACTION_IID)

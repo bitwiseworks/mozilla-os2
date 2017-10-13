@@ -9,11 +9,14 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 
 import org.mozilla.gecko.sync.InfoCollections;
+import org.mozilla.gecko.sync.InfoConfiguration;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionCreationDelegate;
 
 import android.content.Context;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 
 /**
  * A Server11Repository implements fetching and storing against the Sync 1.1 API.
@@ -27,6 +30,8 @@ public class Server11Repository extends Repository {
   protected final AuthHeaderProvider authHeaderProvider;
   protected final InfoCollections infoCollections;
 
+  private final InfoConfiguration infoConfiguration;
+
   /**
    * Construct a new repository that fetches and stores against the Sync 1.1. API.
    *
@@ -36,7 +41,7 @@ public class Server11Repository extends Repository {
    * @param infoCollections instance; must not be null.
    * @throws URISyntaxException
    */
-  public Server11Repository(String collection, String storageURL, AuthHeaderProvider authHeaderProvider, InfoCollections infoCollections) throws URISyntaxException {
+  public Server11Repository(@NonNull String collection, @NonNull String storageURL, AuthHeaderProvider authHeaderProvider, @NonNull InfoCollections infoCollections, @NonNull InfoConfiguration infoConfiguration) throws URISyntaxException {
     if (collection == null) {
       throw new IllegalArgumentException("collection must not be null");
     }
@@ -50,6 +55,7 @@ public class Server11Repository extends Repository {
     this.collectionURI = new URI(storageURL + (storageURL.endsWith("/") ? collection : "/" + collection));
     this.authHeaderProvider = authHeaderProvider;
     this.infoCollections = infoCollections;
+    this.infoConfiguration = infoConfiguration;
   }
 
   @Override
@@ -62,7 +68,7 @@ public class Server11Repository extends Repository {
     return this.collectionURI;
   }
 
-  public URI collectionURI(boolean full, long newer, long limit, String sort, String ids) throws URISyntaxException {
+  public URI collectionURI(boolean full, long newer, long limit, String sort, String ids, String offset) throws URISyntaxException {
     ArrayList<String> params = new ArrayList<String>();
     if (full) {
       params.add("full=1");
@@ -81,7 +87,10 @@ public class Server11Repository extends Repository {
     if (ids != null) {
       params.add("ids=" + ids);         // We trust these values.
     }
-
+    if (offset != null) {
+      // Offset comes straight out of HTTP headers and it is the responsibility of the caller to URI-escape it.
+      params.add("offset=" + offset);
+    }
     if (params.size() == 0) {
       return this.collectionURI;
     }
@@ -103,13 +112,17 @@ public class Server11Repository extends Repository {
 
   // Override these.
   @SuppressWarnings("static-method")
-  protected long getDefaultFetchLimit() {
+  public long getDefaultBatchLimit() {
     return -1;
   }
 
   @SuppressWarnings("static-method")
-  protected String getDefaultSort() {
+  public String getDefaultSort() {
     return null;
+  }
+
+  public long getDefaultTotalLimit() {
+    return -1;
   }
 
   public AuthHeaderProvider getAuthHeaderProvider() {
@@ -118,5 +131,14 @@ public class Server11Repository extends Repository {
 
   public boolean updateNeeded(long lastSyncTimestamp) {
     return infoCollections.updateNeeded(collection, lastSyncTimestamp);
+  }
+
+  @Nullable
+  public Long getCollectionLastModified() {
+    return infoCollections.getTimestamp(collection);
+  }
+
+  public InfoConfiguration getInfoConfiguration() {
+    return infoConfiguration;
   }
 }

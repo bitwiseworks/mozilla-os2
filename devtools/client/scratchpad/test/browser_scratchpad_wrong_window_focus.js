@@ -3,6 +3,11 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 /* Bug 661762 */
 
+// Use the old webconsole since scratchpad focus isn't working on new one (Bug 1304794)
+Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", false);
+registerCleanupFunction(function* () {
+  Services.prefs.clearUserPref("devtools.webconsole.new-frontend-enabled");
+});
 
 function test()
 {
@@ -50,10 +55,11 @@ function testFocus(sw, hud) {
     let msg = [...messages][0];
     let node = msg.node;
 
-    var loc = node.querySelector(".message-location");
+    var loc = node.querySelector(".frame-link");
     ok(loc, "location element exists");
-    is(loc.textContent.trim(), sw.Scratchpad.uniqueName + ":1:1",
-        "location value is correct");
+    is(loc.getAttribute("data-url"), sw.Scratchpad.uniqueName, "location value is correct");
+    is(loc.getAttribute("data-line"), "1", "line value is correct");
+    is(loc.getAttribute("data-column"), "1", "column value is correct");
 
     sw.addEventListener("focus", function onFocus() {
       sw.removeEventListener("focus", onFocus, true);

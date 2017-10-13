@@ -6,6 +6,7 @@
 #include "gfxGDIFont.h"
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/WindowsVersion.h"
 
 #include <algorithm>
@@ -51,6 +52,7 @@ gfxGDIFont::gfxGDIFont(GDIFontEntry *aFontEntry,
       mNeedsBold(aNeedsBold),
       mScriptCache(nullptr)
 {
+    Initialize();
 }
 
 gfxGDIFont::~gfxGDIFont()
@@ -78,17 +80,14 @@ gfxGDIFont::CopyWithAntialiasOption(AntialiasOption anAAOption)
 }
 
 bool
-gfxGDIFont::ShapeText(gfxContext     *aContext,
+gfxGDIFont::ShapeText(DrawTarget     *aDrawTarget,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      int32_t         aScript,
+                      Script          aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
-    if (!mMetrics) {
-        Initialize();
-    }
     if (!mIsValid) {
         NS_WARNING("invalid font! expect incorrect text rendering");
         return false;
@@ -98,60 +97,50 @@ gfxGDIFont::ShapeText(gfxContext     *aContext,
     // creating a "toy" font internally (see bug 544617).
     // We must check that this succeeded, otherwise we risk cairo creating the
     // wrong kind of font internally as a fallback (bug 744480).
-    if (!SetupCairoFont(aContext)) {
+    if (!SetupCairoFont(aDrawTarget)) {
         return false;
     }
 
-    return gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
+    return gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
                               aVertical, aShapedText);
 }
 
 const gfxFont::Metrics&
 gfxGDIFont::GetHorizontalMetrics()
 {
-    if (!mMetrics) {
-        Initialize();
-    }
     return *mMetrics;
 }
 
 uint32_t
 gfxGDIFont::GetSpaceGlyph()
 {
-    if (!mMetrics) {
-        Initialize();
-    }
     return mSpaceGlyph;
 }
 
 bool
-gfxGDIFont::SetupCairoFont(gfxContext *aContext)
+gfxGDIFont::SetupCairoFont(DrawTarget* aDrawTarget)
 {
-    if (!mMetrics) {
-        Initialize();
-    }
     if (!mScaledFont ||
         cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
         // Don't cairo_set_scaled_font as that would propagate the error to
         // the cairo_t, precluding any further drawing.
         return false;
     }
-    cairo_set_scaled_font(aContext->GetCairo(), mScaledFont);
+    cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
     return true;
 }
 
 gfxFont::RunMetrics
-gfxGDIFont::Measure(gfxTextRun *aTextRun,
+gfxGDIFont::Measure(const gfxTextRun *aTextRun,
                     uint32_t aStart, uint32_t aEnd,
                     BoundingBoxType aBoundingBoxType,
-                    gfxContext *aRefContext,
+                    DrawTarget *aRefDrawTarget,
                     Spacing *aSpacing,
                     uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
-        gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefContext, aSpacing,
-                         aOrientation);
+        gfxFont::Measure(aTextRun, aStart, aEnd, aBoundingBoxType,
+                         aRefDrawTarget, aSpacing, aOrientation);
 
     // if aBoundingBoxType is LOOSE_INK_EXTENTS
     // and the underlying cairo font may be antialiased,
@@ -202,10 +191,13 @@ gfxGDIFont::Initialize()
             // initialize its metrics so we can calculate size adjustment
             Initialize();
 
+            // Unless the font was so small that GDI metrics rounded to zero,
             // calculate the properly adjusted size, and then proceed
             // to recreate mFont and recalculate metrics
-            gfxFloat aspect = mMetrics->xHeight / mMetrics->emHeight;
-            mAdjustedSize = mStyle.GetAdjustedSize(aspect);
+            if (mMetrics->xHeight > 0.0 && mMetrics->emHeight > 0.0) {
+                gfxFloat aspect = mMetrics->xHeight / mMetrics->emHeight;
+                mAdjustedSize = mStyle.GetAdjustedSize(aspect);
+            }
 
             // delete the temporary font and metrics
             ::DeleteObject(mFont);
@@ -258,6 +250,12 @@ gfxGDIFont::Initialize()
             } else {
                 mMetrics->xHeight = gm.gmptGlyphOrigin.y;
             }
+            len = GetGlyphOutlineW(dc.GetDC(), char16_t('H'), GGO_METRICS, &gm, 0, nullptr, &kIdentityMatrix);
+            if (len == GDI_ERROR || gm.gmptGlyphOrigin.y <= 0) {
+                mMetrics->capHeight = metrics.tmAscent - metrics.tmInternalLeading;
+            } else {
+                mMetrics->capHeight = gm.gmptGlyphOrigin.y;
+            }
             mMetrics->emHeight = metrics.tmHeight - metrics.tmInternalLeading;
             gfxFloat typEmHeight = (double)oMetrics.otmAscent - (double)oMetrics.otmDescent;
             mMetrics->emAscent = ROUND(mMetrics->emHeight * (double)oMetrics.otmAscent / typEmHeight);
@@ -288,6 +286,7 @@ gfxGDIFont::Initialize()
             mMetrics->emHeight = metrics.tmHeight - metrics.tmInternalLeading;
             mMetrics->emAscent = metrics.tmAscent - metrics.tmInternalLeading;
             mMetrics->emDescent = metrics.tmDescent;
+            mMetrics->capHeight = mMetrics->emAscent;
         }
 
         mMetrics->internalLeading = metrics.tmInternalLeading;
@@ -332,6 +331,19 @@ gfxGDIFont::Initialize()
                     lineHeight = std::max(lineHeight, mMetrics->maxHeight);
                     mMetrics->externalLeading =
                         lineHeight - mMetrics->maxHeight;
+                }
+            }
+            // although sxHeight and sCapHeight are signed fields, we consider
+            // negative values to be erroneous and just ignore them
+            if (uint16_t(os2->version) >= 2) {
+                // version 2 and later includes the x-height and cap-height fields
+                if (len >= offsetof(OS2Table, sxHeight) + sizeof(int16_t) &&
+                    int16_t(os2->sxHeight) > 0) {
+                    mMetrics->xHeight = ROUND(int16_t(os2->sxHeight) * mFUnitsConvFactor);
+                }
+                if (len >= offsetof(OS2Table, sCapHeight) + sizeof(int16_t) &&
+                    int16_t(os2->sCapHeight) > 0) {
+                    mMetrics->capHeight = ROUND(int16_t(os2->sCapHeight) * mFUnitsConvFactor);
                 }
             }
         }
@@ -404,9 +416,9 @@ gfxGDIFont::Initialize()
         cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
 #ifdef DEBUG
         char warnBuf[1024];
-        sprintf(warnBuf, "Failed to create scaled font: %s status: %d",
-                NS_ConvertUTF16toUTF8(mFontEntry->Name()).get(),
-                mScaledFont ? cairo_scaled_font_status(mScaledFont) : 0);
+        SprintfLiteral(warnBuf, "Failed to create scaled font: %s status: %d",
+                       NS_ConvertUTF16toUTF8(mFontEntry->Name()).get(),
+                       mScaledFont ? cairo_scaled_font_status(mScaledFont) : 0);
         NS_WARNING(warnBuf);
 #endif
         mIsValid = false;
@@ -420,7 +432,8 @@ gfxGDIFont::Initialize()
     printf("    emHeight: %f emAscent: %f emDescent: %f\n", mMetrics->emHeight, mMetrics->emAscent, mMetrics->emDescent);
     printf("    maxAscent: %f maxDescent: %f maxAdvance: %f\n", mMetrics->maxAscent, mMetrics->maxDescent, mMetrics->maxAdvance);
     printf("    internalLeading: %f externalLeading: %f\n", mMetrics->internalLeading, mMetrics->externalLeading);
-    printf("    spaceWidth: %f aveCharWidth: %f xHeight: %f\n", mMetrics->spaceWidth, mMetrics->aveCharWidth, mMetrics->xHeight);
+    printf("    spaceWidth: %f aveCharWidth: %f\n", mMetrics->spaceWidth, mMetrics->aveCharWidth);
+    printf("    xHeight: %f capHeight: %f\n", mMetrics->xHeight, mMetrics->capHeight);
     printf("    uOff: %f uSize: %f stOff: %f stSize: %f\n",
            mMetrics->underlineOffset, mMetrics->underlineSize, mMetrics->strikeoutOffset, mMetrics->strikeoutSize);
 #endif
@@ -470,7 +483,7 @@ gfxGDIFont::GetGlyph(uint32_t aUnicode, uint32_t aVarSelector)
     }
 
     if (!mGlyphIDs) {
-        mGlyphIDs = new nsDataHashtable<nsUint32HashKey,uint32_t>(64);
+        mGlyphIDs = MakeUnique<nsDataHashtable<nsUint32HashKey,uint32_t>>(64);
     }
 
     uint32_t gid;
@@ -507,7 +520,7 @@ int32_t
 gfxGDIFont::GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID)
 {
     if (!mGlyphWidths) {
-        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(128);
+        mGlyphWidths = MakeUnique<nsDataHashtable<nsUint32HashKey,int32_t>>(128);
     }
 
     int32_t width;

@@ -83,13 +83,16 @@ this.EXPORTED_SYMBOLS = [
  *   function lists where some items have been converted to tasks and some not.
  */
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
+
+// For now, we're worried about add-ons using Tasks with CPOWs, so we'll
+// permit them in this scope, but this support will go away soon.
+Cu.permitCPOWsInScope(this);
 
 Cu.import("resource://gre/modules/Promise.jsm");
 
@@ -120,7 +123,7 @@ function* linesOf(string) {
   while ((match = reLine.exec(string))) {
     yield [match[0], match.index];
   }
-};
+}
 
 /**
  * Detect whether a value is a generator.
@@ -133,8 +136,7 @@ function isGenerator(aValue) {
   return Object.prototype.toString.call(aValue) == "[object Generator]";
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Task
+// Task
 
 /**
  * This object provides the public module functions.
@@ -259,8 +261,7 @@ function createAsyncFunction(aTask) {
   return asyncFunction;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// TaskImpl
+// TaskImpl
 
 /**
  * Executes the specified iterator as a task, and gives access to the promise
@@ -311,20 +312,24 @@ TaskImpl.prototype = {
       gCurrentTask = this;
 
       if (this._isStarGenerator) {
-        try {
-          let result = aSendResolved ? this._iterator.next(aSendValue)
-                                     : this._iterator.throw(aSendValue);
+        if (Cu.isDeadWrapper(this._iterator)) {
+          this.deferred.resolve(undefined);
+        } else {
+          try {
+            let result = aSendResolved ? this._iterator.next(aSendValue)
+                                       : this._iterator.throw(aSendValue);
 
-          if (result.done) {
-            // The generator function returned.
-            this.deferred.resolve(result.value);
-          } else {
-            // The generator function yielded.
-            this._handleResultValue(result.value);
+            if (result.done) {
+              // The generator function returned.
+              this.deferred.resolve(result.value);
+            } else {
+              // The generator function yielded.
+              this._handleResultValue(result.value);
+            }
+          } catch (ex) {
+            // The generator function failed with an uncaught exception.
+            this._handleException(ex);
           }
-        } catch (ex) {
-          // The generator function failed with an uncaught exception.
-          this._handleException(ex);
         }
       } else {
         try {

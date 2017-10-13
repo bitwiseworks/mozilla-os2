@@ -11,7 +11,7 @@ try {
   var mDBConn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
                                    .DBConnection;
 }
-catch(ex) {
+catch (ex) {
   do_throw("Could not get database connection\n");
 }
 
@@ -32,7 +32,7 @@ var invalidURITest = {
                                          PlacesUtils.bookmarks.DEFAULT_INDEX,
                                          this._itemTitle);
     // this bookmark will go corrupt
-    this._itemId = 
+    this._itemId =
       PlacesUtils.bookmarks.insertBookmark(PlacesUtils.toolbarFolderId,
                                            PlacesUtils._uri(this._itemUrl),
                                            PlacesUtils.bookmarks.DEFAULT_INDEX,
@@ -101,7 +101,7 @@ add_task(function*() {
   // restore json file
   try {
     yield BookmarkJSONUtils.importFromFile(jsonFile, true);
-  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
+  } catch (ex) { do_throw("couldn't import the exported file: " + ex); }
 
   // validate
   tests.forEach(function(aTest) {

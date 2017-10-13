@@ -11,6 +11,7 @@ const Cr = Components.results;
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
+/* globals AddonManagerPrivate*/
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
@@ -23,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository_SQLiteMigrator",
                                   "resource://gre/modules/addons/AddonRepository_SQLiteMigrator.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
@@ -98,10 +101,6 @@ const INTEGER_KEY_MAP = {
   daily_users:      "dailyUsers"
 };
 
-// Wrap the XHR factory so that tests can override with a mock
-var XHRequest = Components.Constructor("@mozilla.org/xmlextras/xmlhttprequest;1",
-                                       "nsIXMLHttpRequest");
-
 function convertHTMLToPlainText(html) {
   if (!html)
     return html;
@@ -138,7 +137,7 @@ function getAddonsToCache(aIds, aCallback) {
       try {
         if (!Services.prefs.getBoolPref(preference))
           continue;
-      } catch(e) {
+      } catch (e) {
         // If the preference doesn't exist caching is enabled by default
       }
 
@@ -399,7 +398,7 @@ AddonSearchResult.prototype = {
    *         A platform version to test against
    * @return Boolean representing if the add-on is compatible
    */
-  isCompatibleWith: function(aAppVerison, aPlatformVersion) {
+  isCompatibleWith: function(aAppVersion, aPlatformVersion) {
     return true;
   },
 
@@ -428,7 +427,8 @@ AddonSearchResult.prototype = {
   toJSON: function() {
     let json = {};
 
-    for (let [property, value] of Iterator(this)) {
+    for (let property of Object.keys(this)) {
+      let value = this[property];
       if (property.startsWith("_") ||
           typeof(value) === "function")
         continue;
@@ -451,7 +451,8 @@ AddonSearchResult.prototype = {
       }
     }
 
-    for (let [property, value] of Iterator(this._unsupportedProperties)) {
+    for (let property of Object.keys(this._unsupportedProperties)) {
+      let value = this._unsupportedProperties[property];
       if (!property.startsWith("_"))
         json[property] = value;
     }
@@ -476,18 +477,11 @@ this.AddonRepository = {
    * Whether caching is currently enabled
    */
   get cacheEnabled() {
-    // Act as though caching is disabled if there was an unrecoverable error
-    // openning the database.
-    if (!AddonDatabase.databaseOk) {
-      logger.warn("Cache is disabled because database is not OK");
-      return false;
-    }
-
     let preference = PREF_GETADDONS_CACHE_ENABLED;
     let enabled = false;
     try {
       enabled = Services.prefs.getBoolPref(preference);
-    } catch(e) {
+    } catch (e) {
       logger.warn("cacheEnabled: Couldn't get pref: " + preference);
     }
 
@@ -629,7 +623,8 @@ this.AddonRepository = {
     // Completely remove cache if caching is not enabled
     if (!this.cacheEnabled) {
       logger.debug("Clearing cache because it is disabled");
-      return this._clearCache();
+      yield this._clearCache();
+      return;
     }
 
     let ids = allAddons.map(a => a.id);
@@ -641,7 +636,8 @@ this.AddonRepository = {
     // Completely remove cache if there are no add-ons to cache
     if (addonsToCache.length == 0) {
       logger.debug("Clearing cache because 0 add-ons were requested");
-      return this._clearCache();
+      yield this._clearCache();
+      return;
     }
 
     yield new Promise((resolve, reject) =>
@@ -1449,7 +1445,7 @@ this.AddonRepository = {
 
     logger.debug("Requesting " + aURI);
 
-    this._request = new XHRequest();
+    this._request = new ServiceRequest();
     this._request.mozBackgroundRequest = true;
     this._request.open("GET", aURI, true);
     this._request.overrideMimeType("text/xml");
@@ -1514,7 +1510,7 @@ this.AddonRepository = {
     let url = null;
     try {
       url = Services.prefs.getCharPref(aPreference);
-    } catch(e) {
+    } catch (e) {
       logger.warn("_formatURLPref: Couldn't get pref: " + aPreference);
       return null;
     }
@@ -1556,9 +1552,6 @@ this.AddonRepository = {
 };
 
 var AddonDatabase = {
-  // false if there was an unrecoverable error opening the database
-  databaseOk: true,
-
   connectionPromise: null,
   // the in-memory database
   DB: BLANK_DB(),
@@ -1604,31 +1597,30 @@ var AddonDatabase = {
        } catch (e) {
          if (e instanceof OS.File.Error && e.becauseNoSuchFile) {
            logger.debug("No " + FILE_DATABASE + " found.");
+         } else {
+           logger.error(`Malformed ${FILE_DATABASE}: ${e} - resetting to empty`);
+         }
 
-           // Create a blank addons.json file
-           this._saveDBToDisk();
+         // Create a blank addons.json file
+         this._saveDBToDisk();
 
-           let dbSchema = 0;
-           try {
-             dbSchema = Services.prefs.getIntPref(PREF_GETADDONS_DB_SCHEMA);
-           } catch (e) {}
+         let dbSchema = 0;
+         try {
+           dbSchema = Services.prefs.getIntPref(PREF_GETADDONS_DB_SCHEMA);
+         } catch (e) {}
 
-           if (dbSchema < DB_MIN_JSON_SCHEMA) {
-             let results = yield new Promise((resolve, reject) => {
-               AddonRepository_SQLiteMigrator.migrate(resolve);
-             });
+         if (dbSchema < DB_MIN_JSON_SCHEMA) {
+           let results = yield new Promise((resolve, reject) => {
+             AddonRepository_SQLiteMigrator.migrate(resolve);
+           });
 
-             if (results.length) {
-               yield this._insertAddons(results);
-             }
-
+           if (results.length) {
+             yield this._insertAddons(results);
            }
 
-           Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
-         } else {
-           logger.error("Malformed " + FILE_DATABASE + ": " + e);
-           this.databaseOk = false;
          }
+
+         Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
          return this.DB;
        }
 
@@ -1666,8 +1658,6 @@ var AddonDatabase = {
    *         when the database is going to be deleted afterwards.
    */
   shutdown: function(aSkipFlush) {
-    this.databaseOk = true;
-
     if (!this.connectionPromise) {
       return Promise.resolve();
     }
@@ -1676,9 +1666,8 @@ var AddonDatabase = {
 
     if (aSkipFlush) {
       return Promise.resolve();
-    } else {
-      return this.Writer.flush();
     }
+    return this.Writer.flush();
   },
 
   /**
@@ -1749,7 +1738,7 @@ var AddonDatabase = {
    * @return: Promise{Map}
    *          Resolves when the add-ons are retrieved from the database
    */
-  retrieveStoredData: function(){
+  retrieveStoredData: function() {
     return this.openConnection().then(db => db.addons);
   },
 
@@ -1833,7 +1822,7 @@ var AddonDatabase = {
 
     let addon = new AddonSearchResult(id);
 
-    for (let [expectedProperty,] of Iterator(AddonSearchResult.prototype)) {
+    for (let expectedProperty of Object.keys(AddonSearchResult.prototype)) {
       if (!(expectedProperty in aObj) ||
           typeof(aObj[expectedProperty]) === "function")
         continue;
@@ -1881,8 +1870,8 @@ var AddonDatabase = {
 
           case "icons":
             if (!addon.icons) addon.icons = {};
-            for (let [size, url] of Iterator(aObj.icons)) {
-              addon.icons[size] = url;
+            for (let size of Object.keys(aObj.icons)) {
+              addon.icons[size] = aObj.icons[size];
             }
             break;
 

@@ -326,7 +326,7 @@ IdentityManager.prototype = {
       try {
         this._syncKeyBundle = new SyncKeyBundle(this.username, this.syncKey);
       } catch (ex) {
-        this._log.warn(Utils.exceptionStr(ex));
+        this._log.warn("Failed to create sync bundle", ex);
         return null;
       }
     }
@@ -446,7 +446,10 @@ IdentityManager.prototype = {
     // cache.
     try {
       service.recordManager.get(service.storageURL + "meta/fxa_credentials");
-    } catch (ex if !Async.isShutdownException(ex)) {
+    } catch (ex) {
+      if (Async.isShutdownException(ex)) {
+        throw ex;
+      }
       this._log.warn("Failed to pre-fetch the migration sentinel", ex);
     }
   },

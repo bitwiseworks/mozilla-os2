@@ -13,7 +13,10 @@
 #include "mozilla/dom/ServiceWorkerMessageEvent.h"
 #include "mozilla/dom/ServiceWorkerMessageEventBinding.h"
 #include "nsGlobalWindow.h"
+#include "nsIBrowserDOMWindow.h"
 #include "nsIDocument.h"
+#include "ServiceWorker.h"
+#include "ServiceWorkerPrivate.h"
 #include "WorkerPrivate.h"
 
 using namespace mozilla;
@@ -32,6 +35,7 @@ NS_INTERFACE_MAP_END
 
 ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
   : mWindowId(0)
+  , mFrameType(FrameType::None)
 {
   MOZ_ASSERT(aDoc);
   nsresult rv = aDoc->GetOrCreateId(mClientId);
@@ -39,14 +43,19 @@ ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
     NS_WARNING("Failed to get the UUID of the document.");
   }
 
-  RefPtr<nsGlobalWindow> innerWindow = static_cast<nsGlobalWindow*>(aDoc->GetInnerWindow());
+  RefPtr<nsGlobalWindow> innerWindow = nsGlobalWindow::Cast(aDoc->GetInnerWindow());
   if (innerWindow) {
     // XXXcatalinb: The inner window can be null if the document is navigating
     // and was detached.
     mWindowId = innerWindow->WindowID();
   }
 
-  aDoc->GetURL(mUrl);
+  nsCOMPtr<nsIURI> originalURI = aDoc->GetOriginalURI();
+  if (originalURI) {
+    nsAutoCString spec;
+    originalURI->GetSpec(spec);
+    CopyUTF8toUTF16(spec, mUrl);
+  }
   mVisibilityState = aDoc->VisibilityState();
 
   ErrorResult result;
@@ -55,9 +64,10 @@ ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
     NS_WARNING("Failed to get focus information.");
   }
 
-  RefPtr<nsGlobalWindow> outerWindow = static_cast<nsGlobalWindow*>(aDoc->GetWindow());
-  MOZ_ASSERT(outerWindow);
-  if (!outerWindow->IsTopLevelWindow()) {
+  RefPtr<nsGlobalWindow> outerWindow = nsGlobalWindow::Cast(aDoc->GetWindow());
+  if (!outerWindow) {
+    MOZ_ASSERT(mFrameType == FrameType::None);
+  } else if (!outerWindow->IsTopLevelWindow()) {
     mFrameType = FrameType::Nested;
   } else if (outerWindow->HadOriginalOpener()) {
     mFrameType = FrameType::Auxiliary;
@@ -75,7 +85,7 @@ ServiceWorkerClient::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProt
 namespace {
 
 class ServiceWorkerClientPostMessageRunnable final
-  : public nsRunnable
+  : public Runnable
   , public StructuredCloneHolder
 {
   uint64_t mWindowId;
@@ -83,12 +93,12 @@ class ServiceWorkerClientPostMessageRunnable final
 public:
   explicit ServiceWorkerClientPostMessageRunnable(uint64_t aWindowId)
     : StructuredCloneHolder(CloningSupported, TransferringSupported,
-                            SameProcessDifferentThread)
+                            StructuredCloneScope::SameProcessDifferentThread)
     , mWindowId(aWindowId)
   {}
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     AssertIsOnMainThread();
     nsGlobalWindow* window = nsGlobalWindow::GetInnerWindowWithId(mWindowId);
@@ -118,6 +128,9 @@ private:
   {
     AssertIsOnMainThread();
 
+    MOZ_ASSERT(aTargetContainer->GetParentObject(),
+               "How come we don't have a window here?!");
+
     JS::Rooted<JS::Value> messageData(aCx);
     ErrorResult rv;
     Read(aTargetContainer->GetParentObject(), aCx, &messageData, rv);
@@ -128,30 +141,38 @@ private:
 
     RootedDictionary<ServiceWorkerMessageEventInit> init(aCx);
 
+    nsCOMPtr<nsIPrincipal> principal = aTargetContainer->GetParentObject()->PrincipalOrNull();
+    NS_WARNING_ASSERTION(principal, "Why is the principal null here?");
+
+    bool isNullPrincipal = false;
+    bool isSystemPrincipal = false;
+    if (principal) {
+      isNullPrincipal = principal->GetIsNullPrincipal();
+      MOZ_ASSERT(!isNullPrincipal);
+      isSystemPrincipal = principal->GetIsSystemPrincipal();
+      MOZ_ASSERT(!isSystemPrincipal);
+    }
+
     init.mData = messageData;
-    init.mOrigin.Construct(EmptyString());
-    init.mLastEventId.Construct(EmptyString());
-    init.mPorts.Construct();
-    init.mPorts.Value().SetNull();
+    nsAutoCString origin;
+    if (principal && !isNullPrincipal && !isSystemPrincipal) {
+      principal->GetOrigin(origin);
+    }
+    init.mOrigin = NS_ConvertUTF8toUTF16(origin);
 
     RefPtr<ServiceWorker> serviceWorker = aTargetContainer->GetController();
-    init.mSource.Construct();
     if (serviceWorker) {
-      init.mSource.Value().SetValue().SetAsServiceWorker() = serviceWorker;
-    } else {
-      init.mSource.Value().SetNull();
+      init.mSource.SetValue().SetAsServiceWorker() = serviceWorker;
+    }
+
+    if (!TakeTransferredPortsAsSequence(init.mPorts)) {
+      return NS_ERROR_OUT_OF_MEMORY;
     }
 
     RefPtr<ServiceWorkerMessageEvent> event =
       ServiceWorkerMessageEvent::Constructor(aTargetContainer,
-                                             NS_LITERAL_STRING("message"), init, rv);
-
-    nsTArray<RefPtr<MessagePort>> ports = TakeTransferredPorts();
-
-    RefPtr<MessagePortList> portList =
-      new MessagePortList(static_cast<dom::Event*>(event.get()),
-                          ports);
-    event->SetPorts(portList);
+                                             NS_LITERAL_STRING("message"),
+                                             init);
 
     event->SetTrusted(true);
     bool status = false;
@@ -197,12 +218,13 @@ ServiceWorkerClient::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
   RefPtr<ServiceWorkerClientPostMessageRunnable> runnable =
     new ServiceWorkerClientPostMessageRunnable(mWindowId);
 
-  runnable->Write(aCx, aMessage, transferable, aRv);
+  runnable->Write(aCx, aMessage, transferable, JS::CloneDataPolicy().denySharedArrayBuffer(),
+                  aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  aRv = NS_DispatchToMainThread(runnable);
+  aRv = workerPrivate->DispatchToMainThread(runnable.forget());
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }

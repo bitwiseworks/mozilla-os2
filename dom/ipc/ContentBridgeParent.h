@@ -27,7 +27,7 @@ public:
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
   void DeferredDestroy();
-  virtual bool IsContentBridgeParent() override { return true; }
+  virtual bool IsContentBridgeParent() const override { return true; }
   void NotifyTabDestroyed();
 
   static ContentBridgeParent*
@@ -46,19 +46,26 @@ public:
                           const bool& aIsForApp,
                           const bool& aIsForBrowser) override;
 
+  FORWARD_SHMEM_ALLOCATOR_TO(PContentBridgeParent)
+
   jsipc::CPOWManager* GetCPOWManager() override;
 
-  virtual ContentParentId ChildID() override
+  virtual ContentParentId ChildID() const override
   {
     return mChildID;
   }
-  virtual bool IsForApp() override
+  virtual bool IsForApp() const override
   {
     return mIsForApp;
   }
-  virtual bool IsForBrowser() override
+  virtual bool IsForBrowser() const override
   {
     return mIsForBrowser;
+  }
+  virtual int32_t Pid() const override
+  {
+    // XXX: do we need this for ContentBridgeParent?
+    return -1;
   }
 
 protected:
@@ -68,27 +75,38 @@ protected:
   {
     mChildID = aId;
   }
+
   void SetIsForApp(bool aIsForApp)
   {
     mIsForApp = aIsForApp;
   }
+
   void SetIsForBrowser(bool aIsForBrowser)
   {
     mIsForBrowser = aIsForBrowser;
   }
 
+  void Close()
+  {
+    // Trick NewRunnableMethod
+    PContentBridgeParent::Close();
+  }
+
 protected:
-  virtual bool RecvSyncMessage(const nsString& aMsg,
-                               const ClonedMessageData& aData,
-                               InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                               const IPC::Principal& aPrincipal,
-                               nsTArray<StructuredCloneData>* aRetvals) override;
+  virtual bool
+  RecvSyncMessage(const nsString& aMsg,
+                  const ClonedMessageData& aData,
+                  InfallibleTArray<jsipc::CpowEntry>&& aCpows,
+                  const IPC::Principal& aPrincipal,
+                  nsTArray<StructuredCloneData>* aRetvals) override;
+
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData) override;
 
   virtual jsipc::PJavaScriptParent* AllocPJavaScriptParent() override;
+
   virtual bool
   DeallocPJavaScriptParent(jsipc::PJavaScriptParent*) override;
 
@@ -99,12 +117,23 @@ protected:
                       const ContentParentId& aCpID,
                       const bool& aIsForApp,
                       const bool& aIsForBrowser) override;
+
   virtual bool DeallocPBrowserParent(PBrowserParent*) override;
 
   virtual PBlobParent*
   AllocPBlobParent(const BlobConstructorParams& aParams) override;
 
   virtual bool DeallocPBlobParent(PBlobParent*) override;
+
+  virtual PSendStreamParent* AllocPSendStreamParent() override;
+
+  virtual bool DeallocPSendStreamParent(PSendStreamParent* aActor) override;
+
+  virtual PFileDescriptorSetParent*
+  AllocPFileDescriptorSetParent(const mozilla::ipc::FileDescriptor&) override;
+
+  virtual bool
+  DeallocPFileDescriptorSetParent(PFileDescriptorSetParent*) override;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentBridgeParent);
 

@@ -11,7 +11,7 @@ assertEq(WeakMap.length, 0);
 assertEq(WeakMap.name, "WeakMap");
 
 assertEq(Object.getPrototypeOf(WeakMap.prototype), Object.prototype);
-assertEq(Object.prototype.toString.call(WeakMap.prototype), "[object Object]");
+assertEq(Object.prototype.toString.call(WeakMap.prototype), "[object WeakMap]");
 assertEq(Object.prototype.toString.call(new WeakMap()), "[object WeakMap]");
 assertEq(Object.keys(WeakMap.prototype).join(), "");
 assertEq(WeakMap.prototype.constructor, WeakMap);
@@ -30,4 +30,3 @@ checkMethod("get", 1);
 checkMethod("has", 1);
 checkMethod("set", 2);
 checkMethod("delete", 1);
-checkMethod("clear", 0);

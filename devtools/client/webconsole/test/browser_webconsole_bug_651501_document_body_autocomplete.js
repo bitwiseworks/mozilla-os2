@@ -1,8 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests that document.body autocompletes in the web console.
 
@@ -13,7 +12,7 @@ const TEST_URI = "data:text/html;charset=utf-8,Web Console autocompletion " +
 
 var gHUD;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   gHUD = yield openConsole();
@@ -34,9 +33,7 @@ function consoleOpened() {
 
   ok(!popup.isOpen, "popup is not open");
 
-  popup._panel.addEventListener("popupshown", function onShown() {
-    popup._panel.removeEventListener("popupshown", onShown, false);
-
+  popup.once("popup-opened", () => {
     ok(popup.isOpen, "popup is open");
 
     is(popup.itemCount, jsterm._autocompleteCache.length,
@@ -48,10 +45,11 @@ function consoleOpened() {
     isnot(jsterm._autocompleteCache.indexOf("ATTRIBUTE_NODE"), -1,
           "ATTRIBUTE_NODE is in the list of suggestions");
 
-    popup._panel.addEventListener("popuphidden", deferred.resolve, false);
-
+    popup.once("popup-closed", () => {
+      deferred.resolve();
+    });
     EventUtils.synthesizeKey("VK_ESCAPE", {});
-  }, false);
+  });
 
   jsterm.setInputValue("document.body");
   EventUtils.synthesizeKey(".", {});
@@ -66,12 +64,9 @@ function autocompletePopupHidden() {
   let popup = jsterm.autocompletePopup;
   let completeNode = jsterm.completeNode;
 
-  popup._panel.removeEventListener("popuphidden", autocompletePopupHidden,
-                                   false);
-
   ok(!popup.isOpen, "popup is not open");
 
-  jsterm.once("autocomplete-updated", function() {
+  jsterm.once("autocomplete-updated", function () {
     is(completeNode.value, testStr + "dy", "autocomplete shows document.body");
     deferred.resolve();
   });
@@ -90,8 +85,8 @@ function testPropertyPanel() {
   let jsterm = gHUD.jsterm;
   jsterm.clearOutput();
   jsterm.execute("document", (msg) => {
-    jsterm.once("variablesview-fetched", (aEvent, aView) => {
-      deferred.resolve(aView);
+    jsterm.once("variablesview-fetched", (evt, view) => {
+      deferred.resolve(view);
     });
     let anchor = msg.querySelector(".message-body a");
     EventUtils.synthesizeMouse(anchor, 2, 2, {}, gHUD.iframeWindow);

@@ -1,12 +1,12 @@
 // Tests that the suggestion popup appears at the right times in response to
 // focus and user events (mouse, keyboard, drop).
 
-// Instead of loading ChromeUtils.js into the test scope in browser-test.js for all tests,
-// we only need ChromeUtils.js for a few files which is why we are using loadSubScript.
-var ChromeUtils = {};
+// Instead of loading EventUtils.js into the test scope in browser-test.js for all tests,
+// we only need EventUtils.js for a few files which is why we are using loadSubScript.
+var EventUtils = {};
 this._scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                      getService(Ci.mozIJSSubScriptLoader);
-this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
+this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
 
 const searchbar = document.getElementById("searchbar");
 const searchIcon = document.getAnonymousElementByAttribute(searchbar, "anonid", "searchbar-search-button");
@@ -24,7 +24,7 @@ const scale = utils.screenPixelsPerCSSPixel;
 
 function* synthesizeNativeMouseClick(aElement) {
   let rect = aElement.getBoundingClientRect();
-  let win = aElement.ownerDocument.defaultView;
+  let win = aElement.ownerGlobal;
   let x = win.mozInnerScreenX + (rect.left + rect.right) / 2;
   let y = win.mozInnerScreenY + (rect.top + rect.bottom) / 2;
 
@@ -132,7 +132,6 @@ add_task(function* open_empty() {
   textbox.value = "foo";
 
   promise = promiseEvent(searchPopup, "popuphidden");
-  let clickPromise = promiseEvent(searchIcon, "click");
 
   info("Hiding popup");
   yield synthesizeNativeMouseClick(searchIcon);
@@ -281,7 +280,7 @@ add_task(function* contextmenu_closes_popup() {
 
   promise = promiseEvent(searchPopup, "popuphidden");
 
-  //synthesizeKey does not work with VK_CONTEXT_MENU (bug 1127368)
+  // synthesizeKey does not work with VK_CONTEXT_MENU (bug 1127368)
   EventUtils.synthesizeMouseAtCenter(textbox, { type: "contextmenu", button: null });
 
   yield promise;
@@ -413,7 +412,7 @@ add_no_popup_task(function* search_go_doesnt_open_popup() {
   textbox.value = "foo";
   searchbar.updateGoButtonVisibility();
 
-  let promise = promiseOnLoad();
+  let promise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   EventUtils.synthesizeMouseAtCenter(goButton, {});
   yield promise;
 
@@ -447,7 +446,7 @@ add_task(function* dont_consume_clicks() {
 // Dropping text to the searchbar should open the popup
 add_task(function* drop_opens_popup() {
   let promise = promiseEvent(searchPopup, "popupshown");
-  ChromeUtils.synthesizeDrop(searchIcon, textbox.inputField, [[ {type: "text/plain", data: "foo" } ]], "move", window);
+  EventUtils.synthesizeDrop(searchIcon, textbox.inputField, [[ {type: "text/plain", data: "foo" } ]], "move", window);
   yield promise;
 
   isnot(searchPopup.getAttribute("showonlysettings"), "true", "Should show the full popup");

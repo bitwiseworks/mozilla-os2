@@ -4,30 +4,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "secdert.h"
-#include "nspr.h"
-#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
-#include "keyhi.h"
-#include "secder.h"
-#include "cryptohi.h"
 #include "base64.h"
-#include "secasn1.h"
+#include "cryptohi.h"
+#include "keyhi.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Telemetry.h"
+#include "nsIContent.h"
+#include "nsIDOMHTMLSelectElement.h"
+#include "nsIGenKeypairInfoDlg.h"
+#include "nsIServiceManager.h"
+#include "nsITokenDialogs.h"
 #include "nsKeygenHandler.h"
 #include "nsKeygenHandlerContent.h"
-#include "nsIServiceManager.h"
-#include "nsIDOMHTMLSelectElement.h"
-#include "nsIContent.h"
 #include "nsKeygenThread.h"
+#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
 #include "nsNSSHelper.h"
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
-#include "nsCRT.h"
-#include "nsITokenDialogs.h"
-#include "nsIGenKeypairInfoDlg.h"
-#include "nsNSSShutDown.h"
 #include "nsXULAppAPI.h"
-
-#include "mozilla/Telemetry.h"
+#include "nspr.h"
+#include "secasn1.h"
+#include "secder.h"
+#include "secdert.h"
 
 //These defines are taken from the PKCS#11 spec
 #define CKM_RSA_PKCS_KEY_PAIR_GEN     0x00000000
@@ -150,10 +148,9 @@ static CurveNameTagPair nameTagPair[] =
 
 };
 
-SECKEYECParams * 
-decode_ec_params(const char *curve)
+mozilla::UniqueSECItem
+DecodeECParams(const char* curve)
 {
-    SECKEYECParams *ecparams;
     SECOidData *oidData = nullptr;
     SECOidTag curveOidTag = SEC_OID_UNKNOWN; /* default */
     int i, numCurves;
@@ -173,10 +170,11 @@ decode_ec_params(const char *curve)
         return nullptr;
     }
 
-    ecparams = SECITEM_AllocItem(nullptr, nullptr, (2 + oidData->oid.len));
-
-    if (!ecparams)
-      return nullptr;
+    mozilla::UniqueSECItem ecparams(SECITEM_AllocItem(nullptr, nullptr,
+                                                      2 + oidData->oid.len));
+    if (!ecparams) {
+        return nullptr;
+    }
 
     /* 
      * ecparams->data needs to contain the ASN encoding of an object ID (OID)
@@ -204,7 +202,7 @@ nsKeygenFormProcessor::~nsKeygenFormProcessor()
     return;
   }
 
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 nsresult
@@ -299,7 +297,7 @@ GetSlotWithMechanism(uint32_t aMechanism, nsIInterfaceRequestor* m_ctx,
 {
     PK11SlotList * slotList = nullptr;
     char16_t** tokenNameList = nullptr;
-    nsITokenDialogs * dialogs;
+    nsCOMPtr<nsITokenDialogs> dialogs;
     char16_t *unicodeTokenChosen;
     PK11SlotListElement *slotElement, *tmpSlot;
     uint32_t numSlots = 0, i = 0;
@@ -350,12 +348,13 @@ GetSlotWithMechanism(uint32_t aMechanism, nsIInterfaceRequestor* m_ctx,
             }
         }
 
-		/* Throw up the token list dialog and get back the token */
-		rv = getNSSDialogs((void**)&dialogs,
-			               NS_GET_IID(nsITokenDialogs),
-                     NS_TOKENDIALOGS_CONTRACTID);
+        // Throw up the token list dialog and get back the token.
+        rv = getNSSDialogs(getter_AddRefs(dialogs), NS_GET_IID(nsITokenDialogs),
+                           NS_TOKENDIALOGS_CONTRACTID);
 
-		if (NS_FAILED(rv)) goto loser;
+        if (NS_FAILED(rv)) {
+            goto loser;
+        }
 
     if (!tokenNameList || !*tokenNameList) {
         rv = NS_ERROR_OUT_OF_MEMORY;
@@ -363,7 +362,6 @@ GetSlotWithMechanism(uint32_t aMechanism, nsIInterfaceRequestor* m_ctx,
         rv = dialogs->ChooseToken(m_ctx, (const char16_t**)tokenNameList,
                                   numSlots, &unicodeTokenChosen, &canceled);
     }
-		NS_RELEASE(dialogs);
 		if (NS_FAILED(rv)) goto loser;
 
 		if (canceled) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
@@ -414,7 +412,7 @@ GatherKeygenTelemetry(uint32_t keyGenMechanism, int keysize, char* curve)
     nsCString secp384r1 = NS_LITERAL_CSTRING("secp384r1");
     nsCString secp256r1 = NS_LITERAL_CSTRING("secp256r1");
 
-    SECKEYECParams* decoded = decode_ec_params(curve);
+    mozilla::UniqueSECItem decoded = DecodeECParams(curve);
     if (!decoded) {
       switch (keysize) {
         case 2048:
@@ -428,7 +426,6 @@ GatherKeygenTelemetry(uint32_t keyGenMechanism, int keysize, char* curve)
           break;
       }
     } else {
-      SECITEM_FreeItem(decoded, true);
       if (secp384r1.EqualsIgnoreCase(curve, secp384r1.Length())) {
           mozilla::Telemetry::Accumulate(
               mozilla::Telemetry::KEYGEN_GENERATED_KEY_TYPE, secp384r1);
@@ -459,30 +456,35 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
     }
 
     nsresult rv = NS_ERROR_FAILURE;
-    char *keystring = nullptr;
+    UniquePORTString keystring;
     char *keyparamsString = nullptr;
     uint32_t keyGenMechanism;
     PK11SlotInfo *slot = nullptr;
     PK11RSAGenParams rsaParams;
+    mozilla::UniqueSECItem ecParams;
     SECOidTag algTag;
     int keysize = 0;
-    void *params = nullptr;
+    void *params = nullptr; // Non-owning.
     SECKEYPrivateKey *privateKey = nullptr;
     SECKEYPublicKey *publicKey = nullptr;
     CERTSubjectPublicKeyInfo *spkInfo = nullptr;
-    PLArenaPool *arena = nullptr;
-    SECStatus sec_rv = SECFailure;
+    SECStatus srv = SECFailure;
     SECItem spkiItem;
     SECItem pkacItem;
     SECItem signedItem;
     CERTPublicKeyAndChallenge pkac;
     pkac.challenge.data = nullptr;
-    nsIGeneratingKeypairInfoDialogs * dialogs;
+    nsCOMPtr<nsIGeneratingKeypairInfoDialogs> dialogs;
     nsKeygenThread *KeygenRunnable = 0;
     nsCOMPtr<nsIKeygenThread> runnable;
 
     // permanent and sensitive flags for keygen
     PK11AttrFlags attrFlags = PK11_ATTR_TOKEN | PK11_ATTR_SENSITIVE | PK11_ATTR_PRIVATE;
+
+    UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    if (!arena) {
+        goto loser;
+    }
 
     // Get the key size //
     for (size_t i = 0; i < number_of_key_size_choices; ++i) {
@@ -492,11 +494,6 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
         }
     }
     if (!keysize) {
-        goto loser;
-    }
-
-    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-    if (!arena) {
         goto loser;
     }
 
@@ -546,7 +543,8 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
              * is silently ignored when a valid curve is presented
              * in keyparams.
              */
-            if ((params = decode_ec_params(keyparamsString)) == nullptr) {
+            ecParams = DecodeECParams(keyparamsString);
+            if (!ecParams) {
                 /* The keyparams attribute did not specify a valid
                  * curve name so use a curve based on the keysize.
                  * NOTE: Here keysize is used only as an indication of
@@ -556,14 +554,16 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
                  */
                 switch (keysize) {
                 case 2048:
-                    params = decode_ec_params("secp384r1");
+                    ecParams = DecodeECParams("secp384r1");
                     break;
                 case 1024:
                 case 512:
-                    params = decode_ec_params("secp256r1");
+                    ecParams = DecodeECParams("secp256r1");
                     break;
                 } 
             }
+            MOZ_ASSERT(ecParams);
+            params = ecParams.get();
             /* XXX The signature algorithm ought to choose the hashing
              * algorithm based on key size once ECDSA variations based
              * on SHA256 SHA384 and SHA512 are standardized.
@@ -579,12 +579,12 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
     if (NS_FAILED(rv))
         goto loser;
 
-    sec_rv = PK11_Authenticate(slot, true, m_ctx);
-    if (sec_rv != SECSuccess) {
+    srv = PK11_Authenticate(slot, true, m_ctx);
+    if (srv != SECSuccess) {
         goto loser;
     }
 
-    rv = getNSSDialogs((void**)&dialogs,
+    rv = getNSSDialogs(getter_AddRefs(dialogs),
                        NS_GET_IID(nsIGeneratingKeypairInfoDialogs),
                        NS_GENERATINGKEYPAIRINFODIALOGS_CONTRACTID);
 
@@ -602,14 +602,12 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
                                    keyGenMechanism, params, m_ctx );
 
         runnable = do_QueryInterface(KeygenRunnable);
-        
         if (runnable) {
             rv = dialogs->DisplayGeneratingKeypairInfo(m_ctx, runnable);
             // We call join on the thread so we can be sure that no
             // simultaneous access to the passed parameters will happen.
             KeygenRunnable->Join();
 
-            NS_RELEASE(dialogs);
             if (NS_SUCCEEDED(rv)) {
                 PK11SlotInfo *used_slot = nullptr;
                 rv = KeygenRunnable->ConsumeResult(&used_slot, &privateKey, &publicKey);
@@ -633,12 +631,13 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
     if ( !spkInfo ) {
         goto loser;
     }
-    
+
     /*
      * Now DER encode the whole subjectPublicKeyInfo.
      */
-    sec_rv=DER_Encode(arena, &spkiItem, CERTSubjectPublicKeyInfoTemplate, spkInfo);
-    if (sec_rv != SECSuccess) {
+    srv = DER_Encode(arena.get(), &spkiItem, CERTSubjectPublicKeyInfoTemplate,
+                     spkInfo);
+    if (srv != SECSuccess) {
         goto loser;
     }
 
@@ -652,38 +651,39 @@ nsKeygenFormProcessor::GetPublicKey(const nsAString& aValue,
         rv = NS_ERROR_OUT_OF_MEMORY;
         goto loser;
     }
-    
-    sec_rv = DER_Encode(arena, &pkacItem, CERTPublicKeyAndChallengeTemplate, &pkac);
-    if ( sec_rv != SECSuccess ) {
+
+    srv = DER_Encode(arena.get(), &pkacItem, CERTPublicKeyAndChallengeTemplate,
+                     &pkac);
+    if (srv != SECSuccess) {
         goto loser;
     }
 
     /*
      * now sign the DER encoded PublicKeyAndChallenge
      */
-    sec_rv = SEC_DerSignData(arena, &signedItem, pkacItem.data, pkacItem.len,
-			 privateKey, algTag);
-    if ( sec_rv != SECSuccess ) {
+    srv = SEC_DerSignData(arena.get(), &signedItem, pkacItem.data, pkacItem.len,
+                          privateKey, algTag);
+    if (srv != SECSuccess) {
         goto loser;
     }
-    
+
     /*
      * Convert the signed public key and challenge into base64/ascii.
      */
-    keystring = BTOA_DataToAscii(signedItem.data, signedItem.len);
+    keystring = UniquePORTString(
+      BTOA_DataToAscii(signedItem.data, signedItem.len));
     if (!keystring) {
         rv = NS_ERROR_OUT_OF_MEMORY;
         goto loser;
     }
 
-    CopyASCIItoUTF16(keystring, aOutPublicKey);
-    free(keystring);
+    CopyASCIItoUTF16(keystring.get(), aOutPublicKey);
 
     rv = NS_OK;
 
     GatherKeygenTelemetry(keyGenMechanism, keysize, keyparamsString);
 loser:
-    if ( sec_rv != SECSuccess ) {
+    if (srv != SECSuccess) {
         if ( privateKey ) {
             PK11_DestroyTokenObject(privateKey->pkcs11Slot,privateKey->pkcs11ID);
         }
@@ -700,9 +700,6 @@ loser:
     if ( privateKey ) {
         SECKEY_DestroyPrivateKey(privateKey);
     }
-    if ( arena ) {
-        PORT_FreeArena(arena, true);
-    }
     if (slot) {
         PK11_FreeSlot(slot);
     }
@@ -714,12 +711,6 @@ loser:
     }
     if (pkac.challenge.data) {
         free(pkac.challenge.data);
-    }
-    // If params is non-null and doesn't point to rsaParams, it was allocated
-    // in decode_ec_params. We have to free this memory.
-    if (params && params != &rsaParams) {
-        SECITEM_FreeItem(static_cast<SECItem*>(params), true);
-        params = nullptr;
     }
     return rv;
 }

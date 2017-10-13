@@ -33,11 +33,11 @@
 interface nsIURI;
 interface nsIObserver;
 interface nsIPrincipal;
-interface nsIDOMWindow;
+interface mozIDOMWindow;
 interface nsIPermission;
 interface nsISimpleEnumerator;
 
-[scriptable, uuid(a15cd7ef-f7a0-43d2-be86-8bf488dc760b)]
+[scriptable, uuid(4dcb3851-eba2-4e42-b236-82d2596fca22)]
 interface nsIPermissionManager : nsISupports
 {
   /**
@@ -92,6 +92,15 @@ interface nsIPermissionManager : nsISupports
            in uint32_t permission,
            [optional] in uint32_t expireType,
            [optional] in int64_t expireTime);
+
+  /**
+   * Get all custom permissions for a given URI. This will return
+   * an enumerator of all permissions which are not set to default
+   * and which belong to the matching prinicpal of the given URI.
+   *
+   * @param uri  the URI to get all permissions for
+   */
+  nsISimpleEnumerator getAllForURI(in nsIURI uri);
 
   /**
    * Add permission information for a given principal.
@@ -165,7 +174,7 @@ interface nsIPermissionManager : nsISupports
    * permission to perform a given action.  System principals will always
    * have permissions granted.
    */
-  uint32_t testPermissionFromWindow(in nsIDOMWindow window,
+  uint32_t testPermissionFromWindow(in mozIDOMWindow window,
                                     in string type);
 
   /**
@@ -215,16 +224,6 @@ interface nsIPermissionManager : nsISupports
   nsIPermission getPermissionObject(in nsIPrincipal principal,
                                     in string type,
                                     in boolean exactHost);
-
-   /**
-    * Increment or decrement our "refcount" of an app id.
-    *
-    * We use this refcount to determine an app's lifetime.  When an app's
-    * refcount goes to 0, we clear the permissions given to the app which are
-    * set to expire at the end of its session.
-    */
-   void addrefAppId(in unsigned long appId);
-   void releaseAppId(in unsigned long appId);
 
   /**
    * Allows enumeration of all stored permissions

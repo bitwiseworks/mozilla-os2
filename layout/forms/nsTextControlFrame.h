@@ -19,6 +19,7 @@ class EditorInitializerEntryTracker;
 class nsTextEditorState;
 class nsIEditor;
 namespace mozilla {
+enum class CSSPseudoElementType : uint8_t;
 namespace dom {
 class Element;
 } // namespace dom
@@ -32,7 +33,7 @@ class nsTextControlFrame final : public nsContainerFrame,
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_DECLARE_FRAME_PROPERTY(ContentScrollPos, DeleteValue<nsPoint>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ContentScrollPos, nsPoint)
 
   explicit nsTextControlFrame(nsStyleContext* aContext);
   virtual ~nsTextControlFrame();
@@ -40,29 +41,29 @@ public:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   virtual nsIScrollableFrame* GetScrollTargetFrame() override {
-    return do_QueryFrame(GetFirstPrincipalChild());
+    return do_QueryFrame(PrincipalChildList().FirstChild());
   }
 
   virtual nscoord GetMinISize(nsRenderingContext* aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext* aRenderingContext) override;
 
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual bool IsCollapsed() override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual bool IsXULCollapsed() override;
 
   virtual bool IsLeaf() const override;
   
@@ -98,10 +99,11 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
-  virtual mozilla::dom::Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
+  virtual mozilla::dom::Element*
+  GetPseudoElement(mozilla::CSSPseudoElementType aType) override;
 
 //==== BEGIN NSIFORMCONTROLFRAME
-  virtual void SetFocus(bool aOn , bool aRepaint) override; 
+  virtual void SetFocus(bool aOn , bool aRepaint) override;
   virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue) override;
 
 //==== END NSIFORMCONTROLFRAME
@@ -152,19 +154,15 @@ public:
 
   NS_DECL_QUERYFRAME
 
-  // Temp reference to scriptrunner
-  // We could make these auto-Revoking via the "delete" entry for safety
-  NS_DECLARE_FRAME_PROPERTY(TextControlInitializer, nullptr)
-
 protected:
   /**
    * Launch the reflow on the child frames - see nsTextControlFrame::Reflow()
    */
   void ReflowTextControlChild(nsIFrame*                aFrame,
                               nsPresContext*           aPresContext,
-                              const nsHTMLReflowState& aReflowState,
+                              const ReflowInput& aReflowInput,
                               nsReflowStatus&          aStatus,
-                              nsHTMLReflowMetrics& aParentDesiredSize);
+                              ReflowOutput& aParentDesiredSize);
 
 public: //for methods who access nsTextControlFrame directly
   void SetValueChanged(bool aValueChanged);
@@ -190,9 +188,9 @@ public: //for methods who access nsTextControlFrame directly
   DEFINE_TEXTCTRL_CONST_FORWARDER(bool, IsTextArea)
   DEFINE_TEXTCTRL_CONST_FORWARDER(bool, IsPlainTextControl)
   DEFINE_TEXTCTRL_CONST_FORWARDER(bool, IsPasswordTextControl)
-  DEFINE_TEXTCTRL_FORWARDER(int32_t, GetCols)
-  DEFINE_TEXTCTRL_FORWARDER(int32_t, GetWrapCols)
-  DEFINE_TEXTCTRL_FORWARDER(int32_t, GetRows)
+  DEFINE_TEXTCTRL_CONST_FORWARDER(int32_t, GetCols)
+  DEFINE_TEXTCTRL_CONST_FORWARDER(int32_t, GetWrapCols)
+  DEFINE_TEXTCTRL_CONST_FORWARDER(int32_t, GetRows)
 
 #undef DEFINE_TEXTCTRL_CONST_FORWARDER
 #undef DEFINE_TEXTCTRL_FORWARDER
@@ -202,7 +200,12 @@ protected:
   friend class EditorInitializer;
   friend class nsTextEditorState; // needs access to UpdateValueDisplay
 
-  class EditorInitializer : public nsRunnable {
+  // Temp reference to scriptrunner
+  // We could make these auto-Revoking via the "delete" entry for safety
+  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(TextControlInitializer,
+                                         EditorInitializer)
+
+  class EditorInitializer : public mozilla::Runnable {
   public:
     explicit EditorInitializer(nsTextControlFrame* aFrame) :
       mFrame(aFrame) {}
@@ -221,7 +224,7 @@ protected:
   class ScrollOnFocusEvent;
   friend class ScrollOnFocusEvent;
 
-  class ScrollOnFocusEvent : public nsRunnable {
+  class ScrollOnFocusEvent : public mozilla::Runnable {
   public:
     explicit ScrollOnFocusEvent(nsTextControlFrame* aFrame) :
       mFrame(aFrame) {}
@@ -271,10 +274,9 @@ protected:
   // Compute our intrinsic size.  This does not include any borders, paddings,
   // etc.  Just the size of our actual area for the text (and the scrollbars,
   // for <textarea>).
-  nsresult CalcIntrinsicSize(nsRenderingContext* aRenderingContext,
-                             mozilla::WritingMode aWM,
-                             mozilla::LogicalSize& aIntrinsicSize,
-                             float aFontSizeInflation);
+  mozilla::LogicalSize CalcIntrinsicSize(nsRenderingContext* aRenderingContext,
+                                         mozilla::WritingMode aWM,
+                                         float aFontSizeInflation) const;
 
   nsresult ScrollSelectionIntoView() override;
 

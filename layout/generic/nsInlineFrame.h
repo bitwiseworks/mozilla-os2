@@ -13,15 +13,13 @@
 
 class nsLineLayout;
 
-typedef nsContainerFrame nsInlineFrameBase;
-
 /**
  * Inline frame class.
  *
  * This class manages a list of child frames that are inline frames. Working with
  * nsLineLayout, the class will reflow and place inline frames on a line.
  */
-class nsInlineFrame : public nsInlineFrameBase
+class nsInlineFrame : public nsContainerFrame
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsInlineFrame)
@@ -64,7 +62,7 @@ public:
                                      bool aRespectClusters = true) override;
   
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
-  virtual nsresult StealFrame(nsIFrame* aChild, bool aForceNormal) override;
+  virtual nsresult StealFrame(nsIFrame* aChild) override;
 
   // nsIHTMLReflow overrides
   virtual void AddInlineMinISize(nsRenderingContext *aRenderingContext,
@@ -80,10 +78,10 @@ public:
               const mozilla::LogicalSize& aBorder,
               const mozilla::LogicalSize& aPadding,
               ComputeSizeFlags aFlags) override;
-  virtual nsRect ComputeTightBounds(gfxContext* aContext) const override;
+  virtual nsRect ComputeTightBounds(DrawTarget* aDrawTarget) const override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
   virtual nsresult AttributeChanged(int32_t aNameSpaceID,
@@ -120,7 +118,7 @@ public:
 
 protected:
   // Additional reflow state used during our reflow methods
-  struct InlineReflowState {
+  struct InlineReflowInput {
     nsIFrame* mPrevFrame;
     nsInlineFrame* mNextInFlow;
     nsIFrame*      mLineContainer;
@@ -128,7 +126,7 @@ protected:
     bool mSetParentPointer;  // when reflowing child frame first set its
                                      // parent frame pointer
 
-    InlineReflowState()  {
+    InlineReflowInput()  {
       mPrevFrame = nullptr;
       mNextInFlow = nullptr;
       mLineContainer = nullptr;
@@ -139,17 +137,17 @@ protected:
 
   explicit nsInlineFrame(nsStyleContext* aContext) : nsContainerFrame(aContext) {}
 
-  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
+  virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
   void ReflowFrames(nsPresContext* aPresContext,
-                    const nsHTMLReflowState& aReflowState,
-                    InlineReflowState& rs,
-                    nsHTMLReflowMetrics& aMetrics,
+                    const ReflowInput& aReflowInput,
+                    InlineReflowInput& rs,
+                    ReflowOutput& aMetrics,
                     nsReflowStatus& aStatus);
 
   void ReflowInlineFrame(nsPresContext* aPresContext,
-                         const nsHTMLReflowState& aReflowState,
-                         InlineReflowState& rs,
+                         const ReflowInput& aReflowInput,
+                         InlineReflowInput& rs,
                          nsIFrame* aFrame,
                          nsReflowStatus& aStatus);
 
@@ -163,13 +161,13 @@ protected:
                                     bool aReparentSiblings);
 
   virtual nsIFrame* PullOneFrame(nsPresContext* aPresContext,
-                                 InlineReflowState& rs,
+                                 InlineReflowInput& rs,
                                  bool* aIsComplete);
 
   virtual void PushFrames(nsPresContext* aPresContext,
                           nsIFrame* aFromChild,
                           nsIFrame* aPrevSibling,
-                          InlineReflowState& aState);
+                          InlineReflowInput& aState);
 
 private:
   // Helper method for DrainSelfOverflowList() to deal with lazy parenting
@@ -211,8 +209,8 @@ public:
 #endif
   virtual nsIAtom* GetType() const override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
   virtual void Init(nsIContent*       aContent,
@@ -225,7 +223,7 @@ protected:
   explicit nsFirstLineFrame(nsStyleContext* aContext) : nsInlineFrame(aContext) {}
 
   virtual nsIFrame* PullOneFrame(nsPresContext* aPresContext,
-                                 InlineReflowState& rs,
+                                 InlineReflowInput& rs,
                                  bool* aIsComplete) override;
 };
 

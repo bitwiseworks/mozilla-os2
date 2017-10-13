@@ -10,10 +10,10 @@
 </head>
 <body>
 
-<script type="application/javascript;version=1.8">
+<script type="text/javascript">
 "use strict";
 
-function backgroundScript() {
+function background() {
   browser.runtime.onMessage.addListener((msg, sender, sendReply) => {
     browser.test.assertTrue(sender.tab.url.endsWith("file_sample.html"), "sender url correct");
 
@@ -45,25 +45,24 @@ function contentScript() {
 }
 
 let extensionData = {
-  background: "(" + backgroundScript.toString() + ")()",
+  background,
   manifest: {
     "permissions": ["tabs"],
     "content_scripts": [{
       "matches": ["http://mochi.test/*/file_sample.html"],
       "js": ["content_script.js"],
-      "run_at": "document_start"
-    }]
+      "run_at": "document_idle",
+    }],
   },
 
   files: {
-    "content_script.js": "(" + contentScript.toString() + ")()",
+    "content_script.js": contentScript,
   },
 };
 
 add_task(function* test_contentscript() {
   let extension = ExtensionTestUtils.loadExtension(extensionData);
   yield extension.startup();
-  info("extension loaded");
 
   let win = window.open("file_sample.html");
 

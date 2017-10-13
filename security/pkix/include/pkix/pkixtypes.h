@@ -105,6 +105,21 @@ enum class TrustLevel
   InheritsTrust = 3       // certificate must chain to a trust anchor
 };
 
+// Extensions extracted during the verification flow.
+// See TrustDomain::NoteAuxiliaryExtension.
+enum class AuxiliaryExtension
+{
+  // Certificate Transparency data, specifically Signed Certificate
+  // Timestamps (SCTs). See RFC 6962.
+
+  // SCT list embedded in the end entity certificate. Called by BuildCertChain
+  // after the certificate containing the SCTs has passed the revocation checks.
+  EmbeddedSCTList = 1,
+  // SCT list from OCSP response. Called by VerifyEncodedOCSPResponse
+  // when its result is a success and the SCT list is present.
+  SCTListFromOCSPResponse = 2
+};
+
 // CertID references the information needed to do revocation checking for the
 // certificate issued by the given issuer with the given serial number.
 //
@@ -328,6 +343,22 @@ public:
                                            EndEntityOrCA endEntityOrCA,
                                            KeyPurposeId keyPurpose) = 0;
 
+  // For compatibility, a CA certificate with an extended key usage that
+  // contains the id-Netscape-stepUp OID but does not contain the
+  // id-kp-serverAuth OID may be considered valid for issuing server auth
+  // certificates. This function allows TrustDomain implementations to control
+  // this setting based on the start of the validity period of the certificate
+  // in question.
+  virtual Result NetscapeStepUpMatchesServerAuth(Time notBefore,
+                                                 /*out*/ bool& matches) = 0;
+
+  // Some certificate or OCSP response extensions do not directly participate
+  // in the verification flow, but might still be of interest to the clients
+  // (notably Certificate Transparency data, RFC 6962). Such extensions are
+  // extracted and passed to this function for further processing.
+  virtual void NoteAuxiliaryExtension(AuxiliaryExtension extension,
+                                      Input extensionData) = 0;
+
   // Compute a digest of the data in item using the given digest algorithm.
   //
   // item contains the data to hash.
@@ -347,6 +378,30 @@ protected:
 
   TrustDomain(const TrustDomain&) = delete;
   void operator=(const TrustDomain&) = delete;
+};
+
+enum class FallBackToSearchWithinSubject { No = 0, Yes = 1 };
+
+// Applications control the behavior of matching presented name information from
+// a certificate against a reference hostname by implementing the
+// NameMatchingPolicy interface. Used in concert with CheckCertHostname.
+class NameMatchingPolicy
+{
+public:
+  virtual ~NameMatchingPolicy() { }
+
+  // Given that the certificate in question has a notBefore field with the given
+  // value, should name matching fall back to searching within the subject
+  // common name field?
+  virtual Result FallBackToCommonName(
+    Time notBefore,
+    /*out*/ FallBackToSearchWithinSubject& fallBackToCommonName) = 0;
+
+protected:
+  NameMatchingPolicy() { }
+
+  NameMatchingPolicy(const NameMatchingPolicy&) = delete;
+  void operator=(const NameMatchingPolicy&) = delete;
 };
 
 } } // namespace mozilla::pkix

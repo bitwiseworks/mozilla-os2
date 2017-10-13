@@ -7,6 +7,8 @@ from __future__ import absolute_import, print_function, unicode_literals
 import argparse
 import os
 import sys
+import time
+
 from mozpack.copier import (
     FileCopier,
     FileRegistry,
@@ -15,10 +17,15 @@ from mozpack.files import (
     BaseFile,
     FileFinder,
 )
-from mozpack.manifests import InstallManifest
+from mozpack.manifests import (
+    InstallManifest,
+    InstallManifestNoSymlinks,
+)
+from mozbuild.util import DefinesAction
 
 
-COMPLETE = 'From {dest}: Kept {existing} existing; Added/updated {updated}; ' \
+COMPLETE = 'Elapsed: {elapsed:.2f}s; From {dest}: Kept {existing} existing; ' \
+    'Added/updated {updated}; ' \
     'Removed {rm_files} files and {rm_dirs} directories.'
 
 
@@ -26,6 +33,7 @@ def process_manifest(destdir, paths, track=None,
         remove_unaccounted=True,
         remove_all_directory_symlinks=True,
         remove_empty_directories=True,
+        no_symlinks=False,
         defines={}):
 
     if track:
@@ -39,11 +47,9 @@ def process_manifest(destdir, paths, track=None,
             finder = FileFinder(destdir, find_executables=False,
                                 find_dotfiles=True)
             for dest in manifest._dests:
-                if '*' in dest:
-                    for p, f in finder.find(dest):
-                        remove_unaccounted.add(p, dummy_file)
-                else:
-                    remove_unaccounted.add(dest, dummy_file)
+                for p, f in finder.find(dest):
+                    remove_unaccounted.add(p, dummy_file)
+
         else:
             # If tracking is enabled and there is no file, we don't want to
             # be removing anything.
@@ -51,9 +57,10 @@ def process_manifest(destdir, paths, track=None,
             remove_empty_directories=False
             remove_all_directory_symlinks=False
 
-    manifest = InstallManifest()
+    manifest_cls = InstallManifestNoSymlinks if no_symlinks else InstallManifest
+    manifest = manifest_cls()
     for path in paths:
-        manifest |= InstallManifest(path=path)
+        manifest |= manifest_cls(path=path)
 
     copier = FileCopier()
     manifest.populate_registry(copier, defines_override=defines)
@@ -68,22 +75,6 @@ def process_manifest(destdir, paths, track=None,
     return result
 
 
-class DefinesAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string):
-        defines = getattr(namespace, self.dest)
-        if defines is None:
-            defines = {}
-        values = values.split('=', 1)
-        if len(values) == 1:
-            name, value = values[0], 1
-        else:
-            name, value = values
-            if value.isdigit():
-                value = int(value)
-        defines[name] = value
-        setattr(namespace, self.dest, defines)
-
-
 def main(argv):
     parser = argparse.ArgumentParser(
         description='Process install manifest files.')
@@ -96,6 +87,8 @@ def main(argv):
         help='Do not remove all directory symlinks from destination.')
     parser.add_argument('--no-remove-empty-directories', action='store_true',
         help='Do not remove empty directories from destination.')
+    parser.add_argument('--no-symlinks', action='store_true',
+        help='Do not install symbolic links. Always copy files')
     parser.add_argument('--track', metavar="PATH",
         help='Use installed files tracking information from the given path.')
     parser.add_argument('-D', action=DefinesAction,
@@ -104,13 +97,20 @@ def main(argv):
 
     args = parser.parse_args(argv)
 
+    start = time.time()
+
     result = process_manifest(args.destdir, args.manifests,
         track=args.track, remove_unaccounted=not args.no_remove,
         remove_all_directory_symlinks=not args.no_remove_all_directory_symlinks,
         remove_empty_directories=not args.no_remove_empty_directories,
+        no_symlinks=args.no_symlinks,
         defines=args.defines)
 
-    print(COMPLETE.format(dest=args.destdir,
+    elapsed = time.time() - start
+
+    print(COMPLETE.format(
+        elapsed=elapsed,
+        dest=args.destdir,
         existing=result.existing_files_count,
         updated=result.updated_files_count,
         rm_files=result.removed_files_count,

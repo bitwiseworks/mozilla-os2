@@ -25,16 +25,6 @@
 #include "cairo.h"
 #include "VsyncSource.h"
 
-#ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
-#endif
-
-#ifdef MOZ_WIDGET_GONK
-#include <cutils/properties.h>
-#include "mozilla/layers/CompositorParent.h"
-#include "HwcComposer2D.h"
-#endif
-
 #include "ft2build.h"
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -71,11 +61,13 @@ public:
     }
 
     NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                              nsISupports* aData, bool aAnonymize)
+                              nsISupports* aData, bool aAnonymize) override
     {
-        return MOZ_COLLECT_REPORT(
+        MOZ_COLLECT_REPORT(
             "explicit/freetype", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
             "Memory used by Freetype.");
+
+        return NS_OK;
     }
 };
 
@@ -101,18 +93,12 @@ gfxAndroidPlatform::gfxAndroidPlatform()
     RegisterStrongMemoryReporter(new FreetypeReporter());
 
     mOffscreenFormat = GetScreenDepth() == 16
-                       ? gfxImageFormat::RGB16_565
-                       : gfxImageFormat::RGB24;
+                       ? SurfaceFormat::R5G6B5_UINT16
+                       : SurfaceFormat::X8R8G8B8_UINT32;
 
     if (gfxPrefs::AndroidRGB16Force()) {
-        mOffscreenFormat = gfxImageFormat::RGB16_565;
+        mOffscreenFormat = SurfaceFormat::R5G6B5_UINT16;
     }
-
-#ifdef MOZ_WIDGET_GONK
-    char propQemu[PROPERTY_VALUE_MAX];
-    property_get("ro.kernel.qemu", propQemu, "");
-    mIsInGonkEmulator = !strncmp(propQemu, "1", 1);
-#endif
 }
 
 gfxAndroidPlatform::~gfxAndroidPlatform()
@@ -125,6 +111,10 @@ already_AddRefed<gfxASurface>
 gfxAndroidPlatform::CreateOffscreenSurface(const IntSize& aSize,
                                            gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> newSurface;
     newSurface = new gfxImageSurface(aSize, aFormat);
 
@@ -170,21 +160,16 @@ IsJapaneseLocale()
 
 void
 gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                                           int32_t aRunScript,
+                                           Script aRunScript,
                                            nsTArray<const char*>& aFontList)
 {
     static const char kDroidSansJapanese[] = "Droid Sans Japanese";
     static const char kMotoyaLMaru[] = "MotoyaLMaru";
+    static const char kNotoSansCJKJP[] = "Noto Sans CJK JP";
     static const char kNotoColorEmoji[] = "Noto Color Emoji";
-#ifdef MOZ_WIDGET_GONK
-    static const char kFirefoxEmoji[] = "Firefox Emoji";
-#endif
 
     if (aNextCh == 0xfe0fu) {
         // if char is followed by VS16, try for a color emoji glyph
-#ifdef MOZ_WIDGET_GONK
-        aFontList.AppendElement(kFirefoxEmoji);
-#endif
         aFontList.AppendElement(kNotoColorEmoji);
     }
 
@@ -192,9 +177,6 @@ gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
         uint32_t p = aCh >> 16;
         if (p == 1) { // try color emoji font, unless VS15 (text style) present
             if (aNextCh != 0xfe0fu && aNextCh != 0xfe0eu) {
-#ifdef MOZ_WIDGET_GONK
-                aFontList.AppendElement(kFirefoxEmoji);
-#endif
                 aFontList.AppendElement(kNotoColorEmoji);
             }
         }
@@ -231,12 +213,14 @@ gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
         case 0xf9: case 0xfa:
             if (IsJapaneseLocale()) {
                 aFontList.AppendElement(kMotoyaLMaru);
+                aFontList.AppendElement(kNotoSansCJKJP);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
         default:
             if (block >= 0x2e && block <= 0x9f && IsJapaneseLocale()) {
                 aFontList.AppendElement(kMotoyaLMaru);
+                aFontList.AppendElement(kNotoSansCJKJP);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
@@ -246,35 +230,10 @@ gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
     aFontList.AppendElement("Droid Sans Fallback");
 }
 
-nsresult
-gfxAndroidPlatform::GetFontList(nsIAtom *aLangGroup,
-                                const nsACString& aGenericFamily,
-                                nsTArray<nsString>& aListOfFonts)
-{
-    gfxPlatformFontList::PlatformFontList()->GetFontList(aLangGroup,
-                                                         aGenericFamily,
-                                                         aListOfFonts);
-    return NS_OK;
-}
-
 void
 gfxAndroidPlatform::GetSystemFontList(InfallibleTArray<FontListEntry>* retValue)
 {
     gfxFT2FontList::PlatformFontList()->GetSystemFontList(retValue);
-}
-
-nsresult
-gfxAndroidPlatform::UpdateFontList()
-{
-    gfxPlatformFontList::PlatformFontList()->UpdateFontList();
-    return NS_OK;
-}
-
-nsresult
-gfxAndroidPlatform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
-{
-    gfxPlatformFontList::PlatformFontList()->GetStandardFamilyName(aFontName, aFamilyName);
-    return NS_OK;
 }
 
 gfxPlatformFontList*
@@ -326,34 +285,6 @@ gfxAndroidPlatform::GetFTLibrary()
     return gPlatformFTLibrary;
 }
 
-gfxFontEntry*
-gfxAndroidPlatform::LookupLocalFont(const nsAString& aFontName,
-                                    uint16_t aWeight,
-                                    int16_t aStretch,
-                                    uint8_t aStyle)
-{
-    return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(aFontName,
-                                                                    aWeight,
-                                                                    aStretch,
-                                                                    aStyle);
-}
-
-gfxFontEntry* 
-gfxAndroidPlatform::MakePlatformFont(const nsAString& aFontName,
-                                     uint16_t aWeight,
-                                     int16_t aStretch,
-                                     uint8_t aStyle,
-                                     const uint8_t* aFontData,
-                                     uint32_t aLength)
-{
-    return gfxPlatformFontList::PlatformFontList()->MakePlatformFont(aFontName,
-                                                                     aWeight,
-                                                                     aStretch,
-                                                                     aStyle,
-                                                                     aFontData,
-                                                                     aLength);
-}
-
 already_AddRefed<ScaledFont>
 gfxAndroidPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
@@ -366,21 +297,15 @@ gfxAndroidPlatform::FontHintingEnabled()
     // In "mobile" builds, we sometimes use non-reflow-zoom, so we
     // might not want hinting.  Let's see.
 
-#ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
-    // On android-java, we currently only use gecko to render web
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android, we currently only use gecko to render web
     // content that can always be be non-reflow-zoomed.  So turn off
     // hinting.
     // 
     // XXX when gecko-android-java is used as an "app runtime", we may
     // want to re-enable hinting for non-browser processes there.
     return false;
-#endif //  MOZ_USING_ANDROID_JAVA_WIDGETS
-
-#ifdef MOZ_WIDGET_GONK
-    // On B2G, the UX preference is currently to keep hinting disabled
-    // for all text (see bug 829523).
-    return false;
-#endif
+#endif //  MOZ_WIDGET_ANDROID
 
     // Currently, we don't have any other targets, but if/when we do,
     // decide how to handle them here.
@@ -392,8 +317,8 @@ gfxAndroidPlatform::FontHintingEnabled()
 bool
 gfxAndroidPlatform::RequiresLinearZoom()
 {
-#ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
-    // On android-java, we currently only use gecko to render web
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android, we currently only use gecko to render web
     // content that can always be be non-reflow-zoomed.
     //
     // XXX when gecko-android-java is used as an "app runtime", we may
@@ -402,115 +327,12 @@ gfxAndroidPlatform::RequiresLinearZoom()
     return true;
 #endif
 
-#ifdef MOZ_WIDGET_GONK
-    // On B2G, we need linear zoom for the browser, but otherwise prefer
-    // the improved glyph spacing that results from respecting the device
-    // pixel resolution for glyph layout (see bug 816614).
-    return XRE_IsContentProcess() &&
-           ContentChild::GetSingleton()->IsForBrowser();
-#endif
-
     NS_NOTREACHED("oops, what platform is this?");
     return gfxPlatform::RequiresLinearZoom();
 }
 
-bool
-gfxAndroidPlatform::UseAcceleratedSkiaCanvas()
-{
-    return HaveChoiceOfHWAndSWCanvas() && gfxPlatform::UseAcceleratedSkiaCanvas();
-}
-
-bool gfxAndroidPlatform::HaveChoiceOfHWAndSWCanvas()
-{
-#ifdef MOZ_WIDGET_ANDROID
-    if (!AndroidBridge::Bridge() || AndroidBridge::Bridge()->GetAPIVersion() < 11) {
-        // It's slower than software due to not having a compositing fast path
-        return false;
-    }
-#endif
-    return gfxPlatform::HaveChoiceOfHWAndSWCanvas();
-}
-
-#ifdef MOZ_WIDGET_GONK
-class GonkVsyncSource final : public VsyncSource
-{
-public:
-  GonkVsyncSource()
-  {
-  }
-
-  virtual Display& GetGlobalDisplay() override
-  {
-    return mGlobalDisplay;
-  }
-
-  class GonkDisplay final : public VsyncSource::Display
-  {
-  public:
-    GonkDisplay() : mVsyncEnabled(false)
-    {
-    }
-
-    ~GonkDisplay()
-    {
-      DisableVsync();
-    }
-
-    virtual void EnableVsync() override
-    {
-      MOZ_ASSERT(NS_IsMainThread());
-      if (IsVsyncEnabled()) {
-        return;
-      }
-      mVsyncEnabled = HwcComposer2D::GetInstance()->EnableVsync(true);
-    }
-
-    virtual void DisableVsync() override
-    {
-      MOZ_ASSERT(NS_IsMainThread());
-      if (!IsVsyncEnabled()) {
-        return;
-      }
-      mVsyncEnabled = HwcComposer2D::GetInstance()->EnableVsync(false);
-    }
-
-    virtual bool IsVsyncEnabled() override
-    {
-      MOZ_ASSERT(NS_IsMainThread());
-      return mVsyncEnabled;
-    }
-  private:
-    bool mVsyncEnabled;
-  }; // GonkDisplay
-
-private:
-  virtual ~GonkVsyncSource()
-  {
-  }
-
-  GonkDisplay mGlobalDisplay;
-}; // GonkVsyncSource
-#endif
-
 already_AddRefed<mozilla::gfx::VsyncSource>
 gfxAndroidPlatform::CreateHardwareVsyncSource()
 {
-    // Only enable true hardware vsync on kit-kat and L device. Jelly Bean has
-    // inaccurate hardware vsync so disable on JB. Android pre-JB doesn't have
-    // hardware vsync.
-    // L is android version 21, L-MR1 is 22, kit-kat is 19, 20 is kit-kat for
-    // wearables.
-#if defined(MOZ_WIDGET_GONK) && (ANDROID_VERSION == 19 || ANDROID_VERSION >= 21)
-    RefPtr<GonkVsyncSource> vsyncSource = new GonkVsyncSource();
-    VsyncSource::Display& display = vsyncSource->GetGlobalDisplay();
-    display.EnableVsync();
-    if (!display.IsVsyncEnabled()) {
-        NS_WARNING("Error enabling gonk vsync. Falling back to software vsync");
-        return gfxPlatform::CreateHardwareVsyncSource();
-    }
-    display.DisableVsync();
-    return vsyncSource.forget();
-#else
     return gfxPlatform::CreateHardwareVsyncSource();
-#endif
 }

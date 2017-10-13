@@ -80,10 +80,10 @@ static void copyFT2LCD16(const FT_Bitmap& bitmap, const SkMask& mask, int lcdIsB
 {
     SkASSERT(SkMask::kLCD16_Format == mask.fFormat);
     if (FT_PIXEL_MODE_LCD != bitmap.pixel_mode) {
-        SkASSERT(mask.fBounds.width() == bitmap.width);
+        SkASSERT(mask.fBounds.width() == static_cast<int>(bitmap.width));
     }
     if (FT_PIXEL_MODE_LCD_V != bitmap.pixel_mode) {
-        SkASSERT(mask.fBounds.height() == bitmap.rows);
+        SkASSERT(mask.fBounds.height() == static_cast<int>(bitmap.rows));
     }
 
     const uint8_t* src = bitmap.buffer;
@@ -113,7 +113,7 @@ static void copyFT2LCD16(const FT_Bitmap& bitmap, const SkMask& mask, int lcdIsB
             }
             break;
         case FT_PIXEL_MODE_LCD:
-            SkASSERT(3 * mask.fBounds.width() == bitmap.width);
+            SkASSERT(3 * mask.fBounds.width() == static_cast<int>(bitmap.width));
             for (int y = height; y --> 0;) {
                 const uint8_t* triple = src;
                 if (lcdIsBGR) {
@@ -136,7 +136,7 @@ static void copyFT2LCD16(const FT_Bitmap& bitmap, const SkMask& mask, int lcdIsB
             }
             break;
         case FT_PIXEL_MODE_LCD_V:
-            SkASSERT(3 * mask.fBounds.height() == bitmap.rows);
+            SkASSERT(3 * mask.fBounds.height() == static_cast<int>(bitmap.rows));
             for (int y = height; y --> 0;) {
                 const uint8_t* srcR = src;
                 const uint8_t* srcG = srcR + bitmap.pitch;
@@ -165,20 +165,30 @@ static void copyFT2LCD16(const FT_Bitmap& bitmap, const SkMask& mask, int lcdIsB
  *
  *  Yes, No, Never Requested, Never Produced
  *
- *                        kBW kA8 k3D kARGB32 kLCD16 kLCD32
- *  FT_PIXEL_MODE_MONO     Y   Y  NR     N       Y     NR
- *  FT_PIXEL_MODE_GRAY     N   Y  NR     N       Y     NR
- *  FT_PIXEL_MODE_GRAY2   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_GRAY4   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_LCD     NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_LCD_V   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_BGRA     N   N  NR     Y       N     NR
+ *                        kBW kA8 k3D kARGB32 kLCD16
+ *  FT_PIXEL_MODE_MONO     Y   Y  NR     N       Y
+ *  FT_PIXEL_MODE_GRAY     N   Y  NR     N       Y
+ *  FT_PIXEL_MODE_GRAY2   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_GRAY4   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_LCD     NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_LCD_V   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_BGRA     N   N  NR     Y       N
  *
  *  TODO: All of these N need to be Y or otherwise ruled out.
  */
 static void copyFTBitmap(const FT_Bitmap& srcFTBitmap, SkMask& dstMask) {
-    SkASSERT(dstMask.fBounds.width() == srcFTBitmap.width);
-    SkASSERT(dstMask.fBounds.height() == srcFTBitmap.rows);
+    SkASSERTF(dstMask.fBounds.width() == static_cast<int>(srcFTBitmap.width),
+              "dstMask.fBounds.width() = %d\n"
+              "static_cast<int>(srcFTBitmap.width) = %d",
+              dstMask.fBounds.width(),
+              static_cast<int>(srcFTBitmap.width)
+    );
+    SkASSERTF(dstMask.fBounds.height() == static_cast<int>(srcFTBitmap.rows),
+              "dstMask.fBounds.height() = %d\n"
+              "static_cast<int>(srcFTBitmap.rows) = %d",
+              dstMask.fBounds.height(),
+              static_cast<int>(srcFTBitmap.rows)
+    );
 
     const uint8_t* src = reinterpret_cast<const uint8_t*>(srcFTBitmap.buffer);
     const FT_Pixel_Mode srcFormat = static_cast<FT_Pixel_Mode>(srcFTBitmap.pixel_mode);
@@ -194,7 +204,7 @@ static void copyFTBitmap(const FT_Bitmap& srcFTBitmap, SkMask& dstMask) {
     const size_t height = srcFTBitmap.rows;
 
     if (SkMask::kLCD16_Format == dstFormat) {
-        copyFT2LCD16<false>(srcFTBitmap, dstMask, false, NULL, NULL, NULL);
+        copyFT2LCD16<false>(srcFTBitmap, dstMask, false, nullptr, nullptr, nullptr);
         return;
     }
 
@@ -334,15 +344,17 @@ inline SkColorType SkColorType_for_SkMaskFormat(SkMask::Format format) {
     }
 }
 
-void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGlyph& glyph) {
+void SkScalerContext_FreeType_Base::generateGlyphImage(
+    FT_Face face,
+    const SkGlyph& glyph,
+    const SkMatrix& bitmapTransform)
+{
     const bool doBGR = SkToBool(fRec.fFlags & SkScalerContext::kLCD_BGROrder_Flag);
     const bool doVert = SkToBool(fRec.fFlags & SkScalerContext::kLCD_Vertical_Flag);
 
     switch ( face->glyph->format ) {
         case FT_GLYPH_FORMAT_OUTLINE: {
             FT_Outline* outline = &face->glyph->outline;
-            FT_BBox     bbox;
-            FT_Bitmap   target;
 
             int dx = 0, dy = 0;
             if (fRec.fFlags & SkScalerContext::kSubpixelPositioning_Flag) {
@@ -351,30 +363,93 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
                 // negate dy since freetype-y-goes-up and skia-y-goes-down
                 dy = -dy;
             }
-            FT_Outline_Get_CBox(outline, &bbox);
-            /*
-                what we really want to do for subpixel is
-                    offset(dx, dy)
-                    compute_bounds
-                    offset(bbox & !63)
-                but that is two calls to offset, so we do the following, which
-                achieves the same thing with only one offset call.
-            */
-            FT_Outline_Translate(outline, dx - ((bbox.xMin + dx) & ~63),
-                                          dy - ((bbox.yMin + dy) & ~63));
+            memset(glyph.fImage, 0, glyph.rowBytes() * glyph.fHeight);
 
             if (SkMask::kLCD16_Format == glyph.fMaskFormat) {
-                FT_Render_Glyph(face->glyph, doVert ? FT_RENDER_MODE_LCD_V : FT_RENDER_MODE_LCD);
+                FT_Outline_Translate(outline, dx, dy);
+                FT_Error err = FT_Render_Glyph(face->glyph, doVert ? FT_RENDER_MODE_LCD_V : FT_RENDER_MODE_LCD);
+                if (err) {
+                    return;
+                }
+
                 SkMask mask;
                 glyph.toMask(&mask);
+
+                FT_GlyphSlotRec& ftGlyph = *face->glyph;
+
+                if (!SkIRect::Intersects(mask.fBounds,
+                                         SkIRect::MakeXYWH( ftGlyph.bitmap_left,
+                                                           -ftGlyph.bitmap_top,
+                                                            ftGlyph.bitmap.width,
+                                                            ftGlyph.bitmap.rows)))
+                {
+                    return;
+                }
+
+                // If the FT_Bitmap extent is larger, discard bits of the bitmap outside the mask.
+                // If the SkMask extent is larger, shrink mask to fit bitmap (clearing discarded).
+                unsigned char* origBuffer = ftGlyph.bitmap.buffer;
+                // First align the top left (origin).
+                if (-ftGlyph.bitmap_top < mask.fBounds.fTop) {
+                    int32_t topDiff = mask.fBounds.fTop - (-ftGlyph.bitmap_top);
+                    ftGlyph.bitmap.buffer += ftGlyph.bitmap.pitch * topDiff;
+                    ftGlyph.bitmap.rows -= topDiff;
+                    ftGlyph.bitmap_top = -mask.fBounds.fTop;
+                }
+                if (ftGlyph.bitmap_left < mask.fBounds.fLeft) {
+                    int32_t leftDiff = mask.fBounds.fLeft - ftGlyph.bitmap_left;
+                    ftGlyph.bitmap.buffer += leftDiff;
+                    ftGlyph.bitmap.width -= leftDiff;
+                    ftGlyph.bitmap_left = mask.fBounds.fLeft;
+                }
+                if (mask.fBounds.fTop < -ftGlyph.bitmap_top) {
+                    mask.fImage += mask.fRowBytes * (-ftGlyph.bitmap_top - mask.fBounds.fTop);
+                    mask.fBounds.fTop = -ftGlyph.bitmap_top;
+                }
+                if (mask.fBounds.fLeft < ftGlyph.bitmap_left) {
+                    mask.fImage += sizeof(uint16_t) * (ftGlyph.bitmap_left - mask.fBounds.fLeft);
+                    mask.fBounds.fLeft = ftGlyph.bitmap_left;
+                }
+                // Origins aligned, clean up the width and height.
+                int ftVertScale = (doVert ? 3 : 1);
+                int ftHoriScale = (doVert ? 1 : 3);
+                if (mask.fBounds.height() * ftVertScale < SkToInt(ftGlyph.bitmap.rows)) {
+                    ftGlyph.bitmap.rows = mask.fBounds.height() * ftVertScale;
+                }
+                if (mask.fBounds.width() * ftHoriScale < SkToInt(ftGlyph.bitmap.width)) {
+                    ftGlyph.bitmap.width = mask.fBounds.width() * ftHoriScale;
+                }
+                if (SkToInt(ftGlyph.bitmap.rows) < mask.fBounds.height() * ftVertScale) {
+                    mask.fBounds.fBottom = mask.fBounds.fTop + ftGlyph.bitmap.rows / ftVertScale;
+                }
+                if (SkToInt(ftGlyph.bitmap.width) < mask.fBounds.width() * ftHoriScale) {
+                    mask.fBounds.fRight = mask.fBounds.fLeft + ftGlyph.bitmap.width / ftHoriScale;
+                }
+
                 if (fPreBlend.isApplicable()) {
-                    copyFT2LCD16<true>(face->glyph->bitmap, mask, doBGR,
+                    copyFT2LCD16<true>(ftGlyph.bitmap, mask, doBGR,
                                        fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
                 } else {
-                    copyFT2LCD16<false>(face->glyph->bitmap, mask, doBGR,
+                    copyFT2LCD16<false>(ftGlyph.bitmap, mask, doBGR,
                                         fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
                 }
+                // Restore the buffer pointer so FreeType can properly free it.
+                ftGlyph.bitmap.buffer = origBuffer;
             } else {
+                FT_BBox     bbox;
+                FT_Bitmap   target;
+                FT_Outline_Get_CBox(outline, &bbox);
+                /*
+                    what we really want to do for subpixel is
+                        offset(dx, dy)
+                        compute_bounds
+                        offset(bbox & !63)
+                    but that is two calls to offset, so we do the following, which
+                    achieves the same thing with only one offset call.
+                */
+                FT_Outline_Translate(outline, dx - ((bbox.xMin + dx) & ~63),
+                                              dy - ((bbox.yMin + dy) & ~63));
+
                 target.width = glyph.fWidth;
                 target.rows = glyph.fHeight;
                 target.pitch = glyph.rowBytes();
@@ -382,7 +457,6 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
                 target.pixel_mode = compute_pixel_mode( (SkMask::Format)fRec.fMaskFormat);
                 target.num_grays = 256;
 
-                memset(glyph.fImage, 0, glyph.rowBytes() * glyph.fHeight);
                 FT_Outline_Get_Bitmap(face->glyph->library, outline, &target);
             }
         } break;
@@ -402,20 +476,8 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
                      SkMask::kARGB32_Format == maskFormat ||
                      SkMask::kLCD16_Format == maskFormat);
 
-            if (fRec.fFlags & SkScalerContext::kEmbolden_Flag &&
-                !(face->style_flags & FT_STYLE_FLAG_BOLD))
-            {
-                FT_GlyphSlot_Own_Bitmap(face->glyph);
-                FT_Bitmap_Embolden(face->glyph->library, &face->glyph->bitmap,
-                                   kBitmapEmboldenStrength, 0);
-            }
-
             // If no scaling needed, directly copy glyph bitmap.
-            if (glyph.fWidth == face->glyph->bitmap.width &&
-                glyph.fHeight == face->glyph->bitmap.rows &&
-                glyph.fTop == -face->glyph->bitmap_top &&
-                glyph.fLeft == face->glyph->bitmap_left)
-            {
+            if (bitmapTransform.isIdentity()) {
                 SkMask dstMask;
                 glyph.toMask(&dstMask);
                 copyFTBitmap(face->glyph->bitmap, dstMask);
@@ -426,6 +488,7 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
 
             // Copy the FT_Bitmap into an SkBitmap (either A8 or ARGB)
             SkBitmap unscaledBitmap;
+            // TODO: mark this as sRGB when the blits will be sRGB.
             unscaledBitmap.allocPixels(SkImageInfo::Make(face->glyph->bitmap.width,
                                                          face->glyph->bitmap.rows,
                                                          SkColorType_for_FTPixelMode(pixel_mode),
@@ -447,6 +510,7 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
                 bitmapRowBytes = glyph.rowBytes();
             }
             SkBitmap dstBitmap;
+            // TODO: mark this as sRGB when the blits will be sRGB.
             dstBitmap.setInfo(SkImageInfo::Make(glyph.fWidth, glyph.fHeight,
                                                 SkColorType_for_SkMaskFormat(maskFormat),
                                                 kPremul_SkAlphaType),
@@ -459,11 +523,17 @@ void SkScalerContext_FreeType_Base::generateGlyphImage(FT_Face face, const SkGly
 
             // Scale unscaledBitmap into dstBitmap.
             SkCanvas canvas(dstBitmap);
+#ifdef SK_SHOW_TEXT_BLIT_COVERAGE
+            canvas.clear(0x33FF0000);
+#else
             canvas.clear(SK_ColorTRANSPARENT);
-            canvas.scale(SkIntToScalar(glyph.fWidth) / SkIntToScalar(face->glyph->bitmap.width),
-                         SkIntToScalar(glyph.fHeight) / SkIntToScalar(face->glyph->bitmap.rows));
+#endif
+            canvas.translate(-glyph.fLeft, -glyph.fTop);
+            canvas.concat(bitmapTransform);
+            canvas.translate(face->glyph->bitmap_left, -face->glyph->bitmap_top);
+
             SkPaint paint;
-            paint.setFilterLevel(SkPaint::kLow_FilterLevel);
+            paint.setFilterQuality(kMedium_SkFilterQuality);
             canvas.drawBitmap(unscaledBitmap, 0, 0, &paint);
 
             // If the destination is BW or LCD, convert from A8.

@@ -15,11 +15,16 @@
 
 class nsDocShell;
 class nsIDocShell;
+struct JSContext;
 
 namespace mozilla {
 class TimeStamp;
 class MarkersStorage;
 class AbstractTimelineMarker;
+
+namespace dom {
+struct ProfileTimelineMarker;
+}
 
 class TimelineConsumers : public nsIObserver
 {
@@ -66,19 +71,23 @@ public:
   // Main thread only.
   void AddMarkerForDocShell(nsDocShell* aDocShell,
                             const char* aName,
-                            MarkerTracingType aTracingType);
+                            MarkerTracingType aTracingType,
+                            MarkerStackRequest aStackRequest = MarkerStackRequest::STACK);
   void AddMarkerForDocShell(nsIDocShell* aDocShell,
                             const char* aName,
-                            MarkerTracingType aTracingType);
+                            MarkerTracingType aTracingType,
+                            MarkerStackRequest aStackRequest = MarkerStackRequest::STACK);
 
   void AddMarkerForDocShell(nsDocShell* aDocShell,
                             const char* aName,
                             const TimeStamp& aTime,
-                            MarkerTracingType aTracingType);
+                            MarkerTracingType aTracingType,
+                            MarkerStackRequest aStackRequest = MarkerStackRequest::STACK);
   void AddMarkerForDocShell(nsIDocShell* aDocShell,
                             const char* aName,
                             const TimeStamp& aTime,
-                            MarkerTracingType aTracingType);
+                            MarkerTracingType aTracingType,
+                            MarkerStackRequest aStackRequest = MarkerStackRequest::STACK);
 
   // These methods register and receive ownership of an already created marker,
   // relevant for a specific docshell.
@@ -103,6 +112,10 @@ public:
   // which doesn't have to be relevant to a specific docshell.
   // May be called from any thread.
   void AddMarkerForAllObservedDocShells(UniquePtr<AbstractTimelineMarker>& aMarker);
+
+  void PopMarkers(nsDocShell* aDocShell,
+                  JSContext* aCx,
+                  nsTArray<dom::ProfileTimelineMarker>& aStore);
 
 private:
   static StaticRefPtr<TimelineConsumers> sInstance;

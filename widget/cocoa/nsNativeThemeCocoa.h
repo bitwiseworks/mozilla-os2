@@ -40,6 +40,9 @@ public:
     eThemeGeometryTypeVibrancyDark,
     eThemeGeometryTypeTooltip,
     eThemeGeometryTypeSheet,
+    eThemeGeometryTypeSourceList,
+    eThemeGeometryTypeSourceListSelection,
+    eThemeGeometryTypeActiveSourceListSelection
   };
 
   nsNativeThemeCocoa();
@@ -69,7 +72,8 @@ public:
                                   uint8_t aWidgetType,
                                   mozilla::LayoutDeviceIntSize* aResult, bool* aIsOverridable) override;
   NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
-                                nsIAtom* aAttribute, bool* aShouldRepaint) override;
+                                nsIAtom* aAttribute, bool* aShouldRepaint,
+                                const nsAttrValue* aOldValue) override;
   NS_IMETHOD ThemeChanged() override;
   bool ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame, uint8_t aWidgetType) override;
   bool WidgetIsContainer(uint8_t aWidgetType) override;
@@ -121,7 +125,7 @@ protected:
                        nsIFrame* aFrame, mozilla::EventStates inState);
   void DrawPushButton(CGContextRef cgContext, const HIRect& inBoxRect,
                       mozilla::EventStates inState, uint8_t aWidgetType,
-                      nsIFrame* aFrame);
+                      nsIFrame* aFrame, float aOriginalHeight);
   void DrawMenuIcon(CGContextRef cgContext, const CGRect& aRect,
                     mozilla::EventStates inState, nsIFrame* aFrame,
                     const NSSize& aIconSize, NSString* aImageName,
@@ -152,11 +156,8 @@ protected:
   void DrawResizer(CGContextRef cgContext, const HIRect& aRect, nsIFrame *aFrame);
 
   // Scrollbars
-  void DrawScrollbar(CGContextRef aCGContext, const HIRect& aBoxRect, nsIFrame *aFrame);
   void GetScrollbarPressStates(nsIFrame *aFrame,
                                mozilla::EventStates aButtonStates[]);
-  void GetScrollbarDrawInfo (HIThemeTrackDrawInfo& aTdi, nsIFrame *aFrame, 
-                             const CGSize& aSize, bool aShouldGetButtonStates);
   nsIFrame* GetParentScrollbarFrame(nsIFrame *aFrame);
   bool IsParentScrollbarRolledOver(nsIFrame* aFrame);
 

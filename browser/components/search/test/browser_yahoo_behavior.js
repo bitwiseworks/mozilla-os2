@@ -23,7 +23,7 @@ function test() {
 
   // Test search URLs (including purposes).
   url = engine.getSubmission("foo").uri.spec;
-  is(url, base, "Check search URL for 'foo'");
+  is(url, base + "&hsimp=yhs-001", "Check search URL for 'foo'");
 
   waitForExplicitFinish();
 
@@ -134,6 +134,9 @@ function test() {
       let docStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
                      Ci.nsIWebProgressListener.STATE_START;
       if (!(flags & docStart) || !webProgress.isTopLevel)
+        return;
+
+      if (req.originalURI.spec == "about:blank")
         return;
 
       info("received document start");

@@ -4,6 +4,7 @@
 
 #include "nsDownloader.h"
 #include "nsIInputStream.h"
+#include "nsIOutputStream.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsNetUtil.h"
@@ -87,7 +88,7 @@ nsDownloader::OnStopRequest(nsIRequest  *request,
     return NS_OK;
 }
 
-NS_METHOD
+nsresult
 nsDownloader::ConsumeData(nsIInputStream* in,
                           void* closure,
                           const char* fromRawSegment,

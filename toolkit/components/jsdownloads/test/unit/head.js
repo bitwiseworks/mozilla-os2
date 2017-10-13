@@ -9,20 +9,18 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 var Cc = Components.classes;
 var Ci = Components.interfaces;
 var Cu = Components.utils;
 var Cr = Components.results;
 
+Cu.import("resource://gre/modules/Integration.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadPaths",
                                   "resource://gre/modules/DownloadPaths.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
-                                  "resource://gre/modules/DownloadIntegration.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
@@ -50,6 +48,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "gExternalHelperAppService",
            "@mozilla.org/uriloader/external-helper-app-service;1",
            Ci.nsIExternalHelperAppService);
 
+Integration.downloads.defineModuleGetter(this, "DownloadIntegration",
+            "resource://gre/modules/DownloadIntegration.jsm");
+
 const ServerSocket = Components.Constructor(
                                 "@mozilla.org/network/server-socket;1",
                                 "nsIServerSocket",
@@ -71,10 +72,10 @@ const TEST_REFERRER_URL = "http://www.example.com/referrer.html";
 const TEST_DATA_SHORT = "This test string is downloaded.";
 // Generate using gzipCompressString in TelemetryController.jsm.
 const TEST_DATA_SHORT_GZIP_ENCODED_FIRST = [
- 31,139,8,0,0,0,0,0,0,3,11,201,200,44,86,40,73,45,46,81,40,46,41,202,204
+ 31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 11, 201, 200, 44, 86, 40, 73, 45, 46, 81, 40, 46, 41, 202, 204
 ];
 const TEST_DATA_SHORT_GZIP_ENCODED_SECOND = [
-  75,87,0,114,83,242,203,243,114,242,19,83,82,83,244,0,151,222,109,43,31,0,0,0
+  75, 87, 0, 114, 83, 242, 203, 243, 114, 242, 19, 83, 82, 83, 244, 0, 151, 222, 109, 43, 31, 0, 0, 0
 ];
 const TEST_DATA_SHORT_GZIP_ENCODED =
   TEST_DATA_SHORT_GZIP_ENCODED_FIRST.concat(TEST_DATA_SHORT_GZIP_ENCODED_SECOND);
@@ -88,8 +89,7 @@ function run_test()
   run_next_test();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Support functions
+// Support functions
 
 /**
  * HttpServer object initialized before tests start.
@@ -418,9 +418,9 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
 
       onStartRequest: function (aRequest, aContext)
       {
-        let channel = aRequest.QueryInterface(Ci.nsIChannel);
+        let requestChannel = aRequest.QueryInterface(Ci.nsIChannel);
         this.contentListener = gExternalHelperAppService.doContent(
-                                     channel.contentType, aRequest, null, true);
+                                     requestChannel.contentType, aRequest, null, true);
         this.contentListener.onStartRequest(aRequest, aContext);
       },
 
@@ -674,8 +674,7 @@ function isValidDate(aDate) {
  */
 var gMostRecentFirstBytePos;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Initialization functions common to all tests
+// Initialization functions common to all tests
 
 add_task(function test_common_initialize()
 {
@@ -683,6 +682,14 @@ add_task(function test_common_initialize()
   gHttpServer = new HttpServer();
   gHttpServer.registerDirectory("/", do_get_file("../data"));
   gHttpServer.start(-1);
+  do_register_cleanup(() => {
+    return new Promise(resolve => {
+      // Ensure all the pending HTTP requests have a chance to finish.
+      continueResponses();
+      // Stop the HTTP server, calling resolve when it's done.
+      gHttpServer.stop(resolve);
+    });
+  });
 
   // Cache locks might prevent concurrent requests to the same resource, and
   // this may block tests that use the interruptible handlers.
@@ -779,26 +786,39 @@ add_task(function test_common_initialize()
                               "Blocked by Windows Parental Controls");
     });
 
-  // Disable integration with the host application requiring profile access.
-  DownloadIntegration.dontLoadList = true;
-  DownloadIntegration.dontLoadObservers = true;
-  // Disable the parental controls checking.
-  DownloadIntegration.dontCheckParentalControls = true;
-  // Disable application reputation checks.
-  DownloadIntegration.dontCheckApplicationReputation = true;
-  // Disable the calls to the OS to launch files and open containing folders
-  DownloadIntegration.dontOpenFileAndFolder = true;
-  DownloadIntegration._deferTestOpenFile = Promise.defer();
-  DownloadIntegration._deferTestShowDir = Promise.defer();
-
-  // Avoid leaking uncaught promise errors
-  DownloadIntegration._deferTestOpenFile.promise.then(null, () => undefined);
-  DownloadIntegration._deferTestShowDir.promise.then(null, () => undefined);
-
-  // Get a reference to nsIComponentRegistrar, and ensure that is is freed
-  // before the XPCOM shutdown.
-  let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-  do_register_cleanup(() => registrar = null);
+  // During unit tests, most of the functions that require profile access or
+  // operating system features will be disabled. Individual tests may override
+  // them again to check for specific behaviors.
+  Integration.downloads.register(base => ({
+    __proto__: base,
+    loadPublicDownloadListFromStore: () => Promise.resolve(),
+    shouldKeepBlockedData: () => Promise.resolve(false),
+    shouldBlockForParentalControls: () => Promise.resolve(false),
+    shouldBlockForRuntimePermissions: () => Promise.resolve(false),
+    shouldBlockForReputationCheck: () => Promise.resolve({
+      shouldBlock: false,
+      verdict: "",
+    }),
+    confirmLaunchExecutable: () => Promise.resolve(),
+    launchFile: () => Promise.resolve(),
+    showContainingDirectory: () => Promise.resolve(),
+    // This flag allows re-enabling the default observers during their tests.
+    allowObservers: false,
+    addListObservers() {
+      return this.allowObservers ? super.addListObservers(...arguments)
+                                 : Promise.resolve();
+    },
+    // This flag allows re-enabling the download directory logic for its tests.
+    _allowDirectories: false,
+    set allowDirectories(value) {
+      this._allowDirectories = value;
+      // We have to invalidate the previously computed directory path.
+      this._downloadsDirectory = null;
+    },
+    _getDirectory(name) {
+      return super._getDirectory(this._allowDirectories ? name : "TmpD");
+    },
+  }));
 
   // Make sure that downloads started using nsIExternalHelperAppService are
   // saved to disk without asking for a destination interactively.

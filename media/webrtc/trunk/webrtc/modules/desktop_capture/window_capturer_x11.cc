@@ -46,6 +46,7 @@ class WindowCapturerLinux : public WindowCapturer,
 
   // DesktopCapturer interface.
   void Start(Callback* callback) override;
+  void Stop() override;
   void Capture(const DesktopRegion& region) override;
 
   // SharedXDisplay::XEventHandler interface.
@@ -64,6 +65,9 @@ class WindowCapturerLinux : public WindowCapturer,
 
   // Returns window title for the specified X |window|.
   bool GetWindowTitle(::Window window, std::string* title);
+
+  // Returns the id of the owning process.
+  int GetWindowProcessID(::Window window);
 
   Callback* callback_;
 
@@ -134,6 +138,19 @@ bool WindowCapturerLinux::GetWindowList(WindowList* windows) {
       if (app_window && !IsDesktopElement(app_window)) {
         Window w;
         w.id = app_window;
+
+        unsigned int processId = GetWindowProcessID(app_window);
+        w.pid = (pid_t)processId;
+
+        XWindowAttributes window_attr;
+        if(!XGetWindowAttributes(display(),w.id,&window_attr)){
+          LOG(LS_ERROR)<<"Bad request for attributes for window ID:"<<w.id;
+          continue;
+        }
+        if((window_attr.width <= 0) || (window_attr.height <=0)){
+          continue;
+        }
+
         if (GetWindowTitle(app_window, &w.title))
           result.push_back(w);
       }
@@ -223,6 +240,10 @@ void WindowCapturerLinux::Start(Callback* callback) {
   assert(callback);
 
   callback_ = callback;
+}
+
+void WindowCapturerLinux::Stop() {
+  callback_ = NULL;
 }
 
 void WindowCapturerLinux::Capture(const DesktopRegion& region) {
@@ -370,6 +391,14 @@ bool WindowCapturerLinux::GetWindowTitle(::Window window, std::string* title) {
       XFree(window_name.value);
   }
   return result;
+}
+
+int WindowCapturerLinux::GetWindowProcessID(::Window window) {
+  // Get _NET_WM_PID property of the window.
+  Atom process_atom = XInternAtom(display(), "_NET_WM_PID", True);
+  XWindowProperty<uint32_t> process_id(display(), window, process_atom);
+
+  return process_id.is_valid() ? *process_id.data() : 0;
 }
 
 }  // namespace

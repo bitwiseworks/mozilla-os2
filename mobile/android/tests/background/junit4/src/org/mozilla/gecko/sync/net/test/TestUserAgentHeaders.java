@@ -11,10 +11,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.android.sync.test.helpers.HTTPServerTestHelper;
 import org.mozilla.android.sync.test.helpers.MockServer;
-import org.mozilla.gecko.background.fxa.FxAccountClient10;
-import org.mozilla.gecko.background.fxa.FxAccountClient10.RequestDelegate;
-import org.mozilla.gecko.background.fxa.FxAccountClient10.StatusResponse;
 import org.mozilla.gecko.background.fxa.FxAccountClient20;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.RequestDelegate;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.RecoveryEmailStatusResponse;
 import org.mozilla.gecko.background.fxa.FxAccountClientException.FxAccountClientRemoteException;
 import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.background.testhelpers.WaitHelper;
@@ -107,9 +106,9 @@ public class TestUserAgentHeaders {
     WaitHelper.getTestWaiter().performWait(new Runnable() {
       @Override
       public void run() {
-        client.status(new byte[] { 0 }, new RequestDelegate<FxAccountClient10.StatusResponse>() {
+        client.recoveryEmailStatus(new byte[] { 0 }, new RequestDelegate<RecoveryEmailStatusResponse>() {
           @Override
-          public void handleSuccess(StatusResponse result) {
+          public void handleSuccess(RecoveryEmailStatusResponse result) {
             WaitHelper.getTestWaiter().performNotify();
           }
 

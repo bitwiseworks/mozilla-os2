@@ -16,7 +16,7 @@ function test_requestTypes_request(aClient, anActor)
     do_check_eq(JSON.stringify(aResponse.requestTypes),
                 JSON.stringify(expectedRequestTypes));
 
-    aClient.close(() => {
+    aClient.close().then(() => {
       do_test_finished();
     });
   });
@@ -28,7 +28,7 @@ function run_test()
   DebuggerServer.addBrowserActors();
 
   var client = new DebuggerClient(DebuggerServer.connectPipe());
-  client.connect(function() {
+  client.connect().then(function () {
     test_requestTypes_request(client);
   });
 

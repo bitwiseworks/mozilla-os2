@@ -13,8 +13,9 @@
 #define nsStyleSet_h_
 
 #include "mozilla/Attributes.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/EnumeratedArray.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/SheetType.h"
 
@@ -23,9 +24,7 @@
 #include "nsRuleNode.h"
 #include "nsTArray.h"
 #include "nsCOMArray.h"
-#include "nsAutoPtr.h"
 #include "nsIStyleRule.h"
-#include "nsCSSPseudoElements.h"
 
 class gfxFontFeatureValueSet;
 class nsCSSKeyframesRule;
@@ -41,6 +40,7 @@ struct TreeMatchContext;
 namespace mozilla {
 class CSSStyleSheet;
 class EventStates;
+enum class CSSPseudoElementType : uint8_t;
 } // namespace mozilla
 
 class nsEmptyStyleRule final : public nsIStyleRule
@@ -52,6 +52,8 @@ public:
   NS_DECL_ISUPPORTS
   virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
   virtual bool MightMapInheritedStyleData() override;
+  virtual bool GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty,
+                                             nsCSSValue* aValue) override;
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
@@ -66,6 +68,8 @@ public:
   NS_DECL_ISUPPORTS
   virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
   virtual bool MightMapInheritedStyleData() override;
+  virtual bool GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty,
+                                             nsCSSValue* aValue) override;
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
@@ -80,6 +84,8 @@ public:
   NS_DECL_ISUPPORTS
   virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
   virtual bool MightMapInheritedStyleData() override;
+  virtual bool GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty,
+                                             nsCSSValue* aValue) override;
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
@@ -161,24 +167,37 @@ class nsStyleSet final
                                  nsStyleContext* aStyleContext,
                                  nsRestyleHint aWhichToRemove);
 
-  // Get a style context for a non-element (which no rules will match),
-  // such as text nodes, placeholder frames, and the nsFirstLetterFrame
-  // for everything after the first letter.
+  // Get a style context for a text node (which no rules will match).
   //
-  // Perhaps this should go away and we shouldn't even create style
-  // contexts for such content nodes.  However, not doing any rule
-  // matching for them is a first step.
+  // The returned style context will have nsCSSAnonBoxes::mozText as its pseudo.
+  //
+  // (Perhaps mozText should go away and we shouldn't even create style
+  // contexts for such content nodes, when text-combine-upright is not
+  // present.  However, not doing any rule matching for them is a first step.)
   already_AddRefed<nsStyleContext>
-  ResolveStyleForNonElement(nsStyleContext* aParentContext);
+  ResolveStyleForText(nsIContent* aTextNode, nsStyleContext* aParentContext);
+
+  // Get a style context for a non-element (which no rules will match)
+  // other than a text node, such as placeholder frames, and the
+  // nsFirstLetterFrame for everything after the first letter.
+  //
+  // The returned style context will have nsCSSAnonBoxes::mozOtherNonElement as
+  // its pseudo.
+  //
+  // (Perhaps mozOtherNonElement should go away and we shouldn't even
+  // create style contexts for such content nodes.  However, not doing
+  // any rule matching for them is a first step.)
+  already_AddRefed<nsStyleContext>
+  ResolveStyleForOtherNonElement(nsStyleContext* aParentContext);
 
   // Get a style context for a pseudo-element.  aParentElement must be
-  // non-null.  aPseudoID is the nsCSSPseudoElements::Type for the
+  // non-null.  aPseudoID is the CSSPseudoElementType for the
   // pseudo-element.  aPseudoElement must be non-null if the pseudo-element
   // type is one that allows user action pseudo-classes after it or allows
   // style attributes; otherwise, it is ignored.
   already_AddRefed<nsStyleContext>
   ResolvePseudoElementStyle(mozilla::dom::Element* aParentElement,
-                            nsCSSPseudoElements::Type aType,
+                            mozilla::CSSPseudoElementType aType,
                             nsStyleContext* aParentContext,
                             mozilla::dom::Element* aPseudoElement);
 
@@ -187,11 +206,11 @@ class nsStyleSet final
   // pseudo element.
   already_AddRefed<nsStyleContext>
   ProbePseudoElementStyle(mozilla::dom::Element* aParentElement,
-                          nsCSSPseudoElements::Type aType,
+                          mozilla::CSSPseudoElementType aType,
                           nsStyleContext* aParentContext);
   already_AddRefed<nsStyleContext>
   ProbePseudoElementStyle(mozilla::dom::Element* aParentElement,
-                          nsCSSPseudoElements::Type aType,
+                          mozilla::CSSPseudoElementType aType,
                           nsStyleContext* aParentContext,
                           TreeMatchContext& aTreeMatchContext,
                           mozilla::dom::Element* aPseudoElement = nullptr);
@@ -261,9 +280,6 @@ class nsStyleSet final
   // Free all of the data associated with this style set.
   void Shutdown();
 
-  // Notification that a style context is being destroyed.
-  void NotifyStyleContextDestroyed(nsStyleContext* aStyleContext);
-
   // Get a new style context that lives in a different parent
   // The new context will be the same as the old if the new parent is the
   // same as the old parent.
@@ -283,7 +299,7 @@ class nsStyleSet final
   nsRestyleHint HasStateDependentStyle(mozilla::dom::Element* aElement,
                                        mozilla::EventStates aStateMask);
   nsRestyleHint HasStateDependentStyle(mozilla::dom::Element* aElement,
-                                       nsCSSPseudoElements::Type aPseudoType,
+                                       mozilla::CSSPseudoElementType aPseudoType,
                                        mozilla::dom::Element* aPseudoElement,
                                        mozilla::EventStates aStateMask);
 
@@ -326,7 +342,7 @@ class nsStyleSet final
                                   mozilla::CSSStyleSheet* aReferenceSheet);
 
   // Enable/Disable entire author style level (Doc, ScopedDoc & PresHint levels)
-  bool GetAuthorStyleDisabled();
+  bool GetAuthorStyleDisabled() const;
   nsresult SetAuthorStyleDisabled(bool aStyleDisabled);
 
   int32_t SheetCount(mozilla::SheetType aType) const {
@@ -338,11 +354,7 @@ class nsStyleSet final
     return mSheets[aType][aIndex];
   }
 
-  void AppendAllXBLStyleSheets(nsTArray<mozilla::CSSStyleSheet*>& aArray) const {
-    if (mBindingManager) {
-      mBindingManager->AppendAllSheets(aArray);
-    }
-  }
+  void AppendAllXBLStyleSheets(nsTArray<mozilla::CSSStyleSheet*>& aArray) const;
 
   nsresult RemoveDocStyleSheet(mozilla::CSSStyleSheet* aSheet);
   nsresult AddDocStyleSheet(mozilla::CSSStyleSheet* aSheet,
@@ -362,6 +374,14 @@ class nsStyleSet final
     return mInReconstruct;
   }
 
+  void RootStyleContextAdded() {
+    ++mRootStyleContextCount;
+  }
+  void RootStyleContextRemoved() {
+    MOZ_ASSERT(mRootStyleContextCount > 0);
+    --mRootStyleContextCount;
+  }
+
   // Return whether the rule tree has cached data such that we need to
   // do dynamic change handling for changes that change the results of
   // media queries or require rebuilding all style data.
@@ -369,18 +389,25 @@ class nsStyleSet final
   // they have cached rule cascades; getting the rule cascades again in
   // order to do rule matching will get the correct rule cascade.
   bool HasCachedStyleData() const {
-    return (mRuleTree && mRuleTree->TreeHasCachedData()) || !mRoots.IsEmpty();
+    return (mRuleTree && mRuleTree->TreeHasCachedData()) || mRootStyleContextCount > 0;
   }
 
   // Notify the style set that a rulenode is no longer in use, or was
   // just created and is not in use yet.
-  void RuleNodeUnused() {
+  static const uint32_t kGCInterval = 300;
+  void RuleNodeUnused(nsRuleNode* aNode, bool aMayGC) {
     ++mUnusedRuleNodeCount;
+    mUnusedRuleNodeList.insertBack(aNode);
+    if (aMayGC && mUnusedRuleNodeCount >= kGCInterval && !mInGC && !mInReconstruct) {
+      GCRuleTrees();
+    }
   }
 
   // Notify the style set that a rulenode that wasn't in use now is
-  void RuleNodeInUse() {
+  void RuleNodeInUse(nsRuleNode* aNode) {
+    MOZ_ASSERT(mUnusedRuleNodeCount > 0);
     --mUnusedRuleNodeCount;
+    aNode->removeFrom(mUnusedRuleNodeList);
   }
 
   // Returns true if a restyle of the document is needed due to cloning
@@ -401,11 +428,20 @@ class nsStyleSet final
   // to drop any nsCSSSelector pointers it has.
   void ClearSelectors();
 
+  // Returns whether aSheetType represents a level of the cascade that uses
+  // CSSStyleSheets.  See gCSSSheetTypes in nsStyleSet.cpp for the list
+  // of CSS sheet types.
+  static bool IsCSSSheetType(mozilla::SheetType aSheetType);
+
 private:
   nsStyleSet(const nsStyleSet& aCopy) = delete;
   nsStyleSet& operator=(const nsStyleSet& aCopy) = delete;
 
-  // Run mark-and-sweep GC on mRuleTree and mOldRuleTrees, based on mRoots.
+  // Free all the rules with reference-count zero. This continues iterating
+  // over the free list until it is empty, which allows immediate collection
+  // of nodes whose reference-count drops to zero during the destruction of
+  // a child node. This allows the collection of entire trees at once, since
+  // children hold their parents alive.
   void GCRuleTrees();
 
   nsresult DirtyRuleProcessors(mozilla::SheetType aType);
@@ -419,7 +455,7 @@ private:
 
   // Move aRuleWalker forward by the appropriate rule if we need to add
   // a rule due to property restrictions on pseudo-elements.
-  void WalkRestrictionRule(nsCSSPseudoElements::Type aPseudoType,
+  void WalkRestrictionRule(mozilla::CSSPseudoElementType aPseudoType,
                            nsRuleWalker* aRuleWalker);
 
   void WalkDisableTextZoomRule(mozilla::dom::Element* aElement,
@@ -431,14 +467,14 @@ private:
   // aLastPrevLevelNode.
   void AssertNoImportantRules(nsRuleNode* aCurrLevelNode,
                               nsRuleNode* aLastPrevLevelNode);
-  
+
   // Just like AddImportantRules except it doesn't actually add anything; it
   // just asserts that there are no CSS rules between aCurrLevelNode and
   // aLastPrevLevelNode.  Mostly useful for the preshint level.
   void AssertNoCSSRules(nsRuleNode* aCurrLevelNode,
                         nsRuleNode* aLastPrevLevelNode);
 #endif
-  
+
   // Enumerate the rules in a way that cares about the order of the
   // rules.
   // aElement is the element the rules are for.  It might be null.  aData
@@ -460,7 +496,7 @@ private:
   nsRuleNode* RuleNodeWithReplacement(mozilla::dom::Element* aElement,
                                       mozilla::dom::Element* aPseudoElement,
                                       nsRuleNode* aOldRuleNode,
-                                      nsCSSPseudoElements::Type aPseudoType,
+                                      mozilla::CSSPseudoElementType aPseudoType,
                                       nsRestyleHint aReplacements);
 
   already_AddRefed<nsStyleContext>
@@ -468,7 +504,7 @@ private:
              nsRuleNode* aRuleNode,
              nsRuleNode* aVisitedRuleNode,
              nsIAtom* aPseudoTag,
-             nsCSSPseudoElements::Type aPseudoType,
+             mozilla::CSSPseudoElementType aPseudoType,
              mozilla::dom::Element* aElementForAnimation,
              uint32_t aFlags);
 
@@ -492,21 +528,36 @@ private:
 
   RefPtr<nsBindingManager> mBindingManager;
 
-  nsRuleNode* mRuleTree; // This is the root of our rule tree.  It is a
-                         // lexicographic tree of matched rules that style
-                         // contexts use to look up properties.
+  RefPtr<nsRuleNode> mRuleTree; // This is the root of our rule tree.  It is a
+                                // lexicographic tree of matched rules that style
+                                // contexts use to look up properties.
 
   uint16_t mBatching;
 
   unsigned mInShutdown : 1;
+  unsigned mInGC : 1;
   unsigned mAuthorStyleDisabled: 1;
   unsigned mInReconstruct : 1;
   unsigned mInitFontFeatureValuesLookup : 1;
   unsigned mNeedsRestyleAfterEnsureUniqueInner : 1;
   unsigned mDirty : int(mozilla::SheetType::Count);  // one bit per sheet type
 
-  uint32_t mUnusedRuleNodeCount; // used to batch rule node GC
-  nsTArray<nsStyleContext*> mRoots; // style contexts with no parent
+  uint32_t mRootStyleContextCount;
+
+#ifdef DEBUG
+  // In debug builds, we stash a weak pointer here to the old root during
+  // reconstruction. During GC, we check for this pointer, and null it out
+  // when we encounter it. This allows us to assert that the old root (and
+  // thus all of its subtree) was GCed after reconstruction, which implies
+  // that there are no style contexts holding on to old rule nodes.
+  nsRuleNode* mOldRootNode;
+#endif
+
+  // Track our rule nodes with zero refcount. When this hits a threshold, we
+  // sweep and free. Keeping unused rule nodes around for a bit allows us to
+  // reuse them in many cases.
+  mozilla::LinkedList<nsRuleNode> mUnusedRuleNodeList;
+  uint32_t mUnusedRuleNodeCount;
 
   // Empty style rules to force things that restrict which properties
   // apply into different branches of the rule tree.
@@ -520,11 +571,6 @@ private:
   // <svg:text> elements to disable the effect of text zooming.
   RefPtr<nsDisableTextZoomStyleRule> mDisableTextZoomStyleRule;
 
-  // Old rule trees, which should only be non-empty between
-  // BeginReconstruct and EndReconstruct, but in case of bugs that cause
-  // style contexts to exist too long, may last longer.
-  nsTArray<nsRuleNode*> mOldRuleTrees;
-
   // whether font feature values lookup object needs initialization
   RefPtr<gfxFontFeatureValueSet> mFontFeatureValuesLookup;
 };
@@ -533,16 +579,20 @@ private:
 inline
 void nsRuleNode::AddRef()
 {
-  if (mRefCnt++ == 0 && !IsRoot()) {
-    mPresContext->StyleSet()->RuleNodeInUse();
+  if (mRefCnt++ == 0) {
+    MOZ_ASSERT(mPresContext->StyleSet()->IsGecko(),
+               "ServoStyleSets should not have rule nodes");
+    mPresContext->StyleSet()->AsGecko()->RuleNodeInUse(this);
   }
 }
 
 inline
 void nsRuleNode::Release()
 {
-  if (--mRefCnt == 0 && !IsRoot()) {
-    mPresContext->StyleSet()->RuleNodeUnused();
+  if (--mRefCnt == 0) {
+    MOZ_ASSERT(mPresContext->StyleSet()->IsGecko(),
+               "ServoStyleSets should not have rule nodes");
+    mPresContext->StyleSet()->AsGecko()->RuleNodeUnused(this, /* aMayGC = */ true);
   }
 }
 #endif

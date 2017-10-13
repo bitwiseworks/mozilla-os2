@@ -15,7 +15,8 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/CORSMode.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
+#include "mozilla/net/ReferrerPolicy.h"
 #include "nsCOMPtr.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsTArray.h"
@@ -24,6 +25,7 @@ class nsIDocument;
 class nsIURI;
 
 namespace mozilla {
+class CSSStyleSheet;
 namespace dom {
 class ShadowRoot;
 } // namespace dom
@@ -37,11 +39,11 @@ public:
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override = 0;
 
-  mozilla::CSSStyleSheet* GetSheet() const { return mStyleSheet; }
+  mozilla::StyleSheet* GetSheet() const { return mStyleSheet; }
 
   // nsIStyleSheetLinkingElement  
-  NS_IMETHOD SetStyleSheet(mozilla::CSSStyleSheet* aStyleSheet) override;
-  NS_IMETHOD_(mozilla::CSSStyleSheet*) GetStyleSheet() override;
+  NS_IMETHOD SetStyleSheet(mozilla::StyleSheet* aStyleSheet) override;
+  NS_IMETHOD_(mozilla::StyleSheet*) GetStyleSheet() override;
   NS_IMETHOD InitStyleLinkElement(bool aDontLoadStyle) override;
   NS_IMETHOD UpdateStyleSheet(nsICSSLoaderObserver* aObserver,
                               bool* aWillNotify,
@@ -104,6 +106,11 @@ protected:
     return mozilla::CORS_NONE;
   }
 
+  virtual mozilla::net::ReferrerPolicy GetLinkReferrerPolicy()
+  {
+    return mozilla::net::RP_Unset;
+  }
+
   // CC methods
   void Unlink();
   void Traverse(nsCycleCollectionTraversalCallback &cb);
@@ -128,7 +135,7 @@ private:
                               bool* aIsAlternate,
                               bool aForceUpdate);
 
-  RefPtr<mozilla::CSSStyleSheet> mStyleSheet;
+  RefPtr<mozilla::StyleSheet> mStyleSheet;
 protected:
   bool mDontLoadStyle;
   bool mUpdatesEnabled;

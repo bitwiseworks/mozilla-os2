@@ -8,7 +8,7 @@
 #include "nsComponentManagerUtils.h"
 #include "nsIDocument.h"
 #include "nsIDOMWindow.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
 
@@ -56,7 +56,7 @@ ColorPickerParent::CreateColorPicker()
     return false;
   }
 
-  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(ownerElement->OwnerDoc()->GetWindow());
+  nsCOMPtr<nsPIDOMWindowOuter> window = ownerElement->OwnerDoc()->GetWindow();
   if (!window) {
     return false;
   }

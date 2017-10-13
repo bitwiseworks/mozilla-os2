@@ -8,18 +8,18 @@
  * addon was installed and automatically activated the profiler module).
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
-const { sendProfilerCommand, PMM_isProfilerActive, PMM_stopProfiler, PMM_loadFrameScripts } = require("devtools/shared/performance/process-communication");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
+const { pmmIsProfilerActive, pmmStartProfiler, pmmStopProfiler, pmmLoadFrameScripts, pmmClearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 
-add_task(function*() {
+add_task(function* () {
   // Ensure the profiler is already running when the test starts.
-  PMM_loadFrameScripts(gBrowser);
-  let ENTRIES = 1000000;
-  let INTERVAL = 1;
-  let FEATURES = ["js"];
-  yield sendProfilerCommand("StartProfiler", [ENTRIES, INTERVAL, FEATURES, FEATURES.length]);
+  pmmLoadFrameScripts(gBrowser);
+  let entries = 1000000;
+  let interval = 1;
+  let features = ["js"];
+  yield pmmStartProfiler({ entries, interval, features });
 
-  ok((yield PMM_isProfilerActive()),
+  ok((yield pmmIsProfilerActive()),
     "The built-in profiler module should still be active.");
 
   yield addTab(MAIN_DOMAIN + "doc_perf.html");
@@ -38,14 +38,16 @@ add_task(function*() {
   yield secondFront.connect();
 
   yield secondFront.destroy();
-  yield closeDebuggerClient(client2);
-  ok((yield PMM_isProfilerActive()),
+  yield client2.close();
+  ok((yield pmmIsProfilerActive()),
     "The built-in profiler module should still be active.");
 
   yield firstFront.destroy();
-  yield closeDebuggerClient(client);
-  ok(!(yield PMM_isProfilerActive()),
+  yield client.close();
+  ok(!(yield pmmIsProfilerActive()),
     "The built-in profiler module should have been automatically stopped.");
+
+  pmmClearFrameScripts();
 
   gBrowser.removeCurrentTab();
   gBrowser.removeCurrentTab();

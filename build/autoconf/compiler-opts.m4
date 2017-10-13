@@ -16,18 +16,13 @@ dnl set DEVELOPER_OPTIONS early; MOZ_DEFAULT_COMPILER is usually the first non-s
       DEVELOPER_OPTIONS=,
       DEVELOPER_OPTIONS=1)
 
-  AC_SUBST(DEVELOPER_OPTIONS)
-
 dnl Default to MSVC for win32 and gcc-4.2 for darwin
 dnl ==============================================================
 if test -z "$CROSS_COMPILE"; then
 case "$target" in
 *-mingw*)
-    if test -z "$CC"; then CC=cl; fi
-    if test -z "$CXX"; then CXX=cl; fi
     if test -z "$CPP"; then CPP="$CC -E -nologo"; fi
     if test -z "$CXXCPP"; then CXXCPP="$CXX -TP -E -nologo"; ac_cv_prog_CXXCPP="$CXXCPP"; fi
-    if test -z "$LD"; then LD=link; fi
     if test -z "$AS"; then
         case "${target_cpu}" in
         i*86)
@@ -43,23 +38,6 @@ case "$target" in
     # need override this flag since we don't use $(LDFLAGS) for this.
     if test -z "$HOST_LDFLAGS" ; then
         HOST_LDFLAGS=" "
-    fi
-    ;;
-*-darwin*)
-    # GCC on darwin is based on gcc 4.2 and we don't support it anymore.
-    if test -z "$CC"; then
-        MOZ_PATH_PROGS(CC, clang)
-    fi
-    if test -z "$CXX"; then
-        MOZ_PATH_PROGS(CXX, clang++)
-    fi
-    IS_GCC=$($CC -v 2>&1 | grep gcc)
-    if test -n "$IS_GCC"
-    then
-      echo gcc is known to be broken on OS X, please use clang.
-      echo see http://developer.mozilla.org/en-US/docs/Developer_Guide/Build_Instructions/Mac_OS_X_Prerequisites
-      echo for more information.
-      exit 1
     fi
     ;;
 esac
@@ -97,30 +75,6 @@ dnl =
 dnl ========================================================
 AC_DEFUN([MOZ_DEBUGGING_OPTS],
 [
-dnl Debug info is ON by default.
-if test -z "$MOZ_DEBUG_FLAGS"; then
-  if test -n "$_MSC_VER"; then
-    MOZ_DEBUG_FLAGS="-Zi"
-  else
-    MOZ_DEBUG_FLAGS="-g"
-  fi
-fi
-
-AC_SUBST(MOZ_DEBUG_FLAGS)
-
-MOZ_ARG_ENABLE_STRING(debug,
-[  --enable-debug[=DBG]    Enable building with developer debug info
-                           (using compiler flags DBG)],
-[ if test "$enableval" != "no"; then
-    MOZ_DEBUG=1
-    if test -n "$enableval" -a "$enableval" != "yes"; then
-        MOZ_DEBUG_FLAGS=`echo $enableval | sed -e 's|\\\ | |g'`
-        _MOZ_DEBUG_FLAGS_SET=1
-    fi
-  else
-    MOZ_DEBUG=
-  fi ],
-  MOZ_DEBUG=)
 
 if test -z "$MOZ_DEBUG" -o -n "$MOZ_ASAN"; then
     MOZ_NO_DEBUG_RTL=1
@@ -128,60 +82,37 @@ fi
 
 AC_SUBST(MOZ_NO_DEBUG_RTL)
 
-MOZ_DEBUG_ENABLE_DEFS="-DDEBUG -DTRACING"
+MOZ_DEBUG_ENABLE_DEFS="DEBUG TRACING"
 MOZ_ARG_WITH_STRING(debug-label,
 [  --with-debug-label=LABELS
                           Define DEBUG_<value> for each comma-separated
                           value given.],
 [ for option in `echo $withval | sed 's/,/ /g'`; do
-    MOZ_DEBUG_ENABLE_DEFS="$MOZ_DEBUG_ENABLE_DEFS -DDEBUG_${option}"
+    MOZ_DEBUG_ENABLE_DEFS="$MOZ_DEBUG_ENABLE_DEFS DEBUG_${option}"
 done])
 
 if test -n "$MOZ_DEBUG"; then
-    AC_MSG_CHECKING([for valid debug flags])
-    _SAVE_CFLAGS=$CFLAGS
-    CFLAGS="$CFLAGS $MOZ_DEBUG_FLAGS"
-    AC_TRY_COMPILE([#include <stdio.h>],
-        [printf("Hello World\n");],
-        _results=yes,
-        _results=no)
-    AC_MSG_RESULT([$_results])
-    if test "$_results" = "no"; then
-        AC_MSG_ERROR([These compiler flags are invalid: $MOZ_DEBUG_FLAGS])
+    if test -n "$COMPILE_ENVIRONMENT"; then
+        AC_MSG_CHECKING([for valid debug flags])
+        _SAVE_CFLAGS=$CFLAGS
+        CFLAGS="$CFLAGS $MOZ_DEBUG_FLAGS"
+        AC_TRY_COMPILE([#include <stdio.h>],
+            [printf("Hello World\n");],
+            _results=yes,
+            _results=no)
+        AC_MSG_RESULT([$_results])
+        if test "$_results" = "no"; then
+            AC_MSG_ERROR([These compiler flags are invalid: $MOZ_DEBUG_FLAGS])
+        fi
+        CFLAGS=$_SAVE_CFLAGS
     fi
-    CFLAGS=$_SAVE_CFLAGS
 
     MOZ_DEBUG_DEFINES="$MOZ_DEBUG_ENABLE_DEFS"
 else
-    MOZ_DEBUG_DEFINES="-DNDEBUG -DTRIMMED"
+    MOZ_DEBUG_DEFINES="NDEBUG TRIMMED"
 fi
 
-AC_SUBST(MOZ_DEBUG_DEFINES)
-
-dnl ========================================================
-dnl = Enable generation of debug symbols
-dnl ========================================================
-MOZ_ARG_ENABLE_STRING(debug-symbols,
-[  --enable-debug-symbols[=DBG]
-                          Enable debugging symbols (using compiler flags DBG)],
-[ if test "$enableval" != "no"; then
-      MOZ_DEBUG_SYMBOLS=1
-      if test -n "$enableval" -a "$enableval" != "yes"; then
-          if test -z "$_MOZ_DEBUG_FLAGS_SET"; then
-              MOZ_DEBUG_FLAGS=`echo $enableval | sed -e 's|\\\ | |g'`
-          else
-              AC_MSG_ERROR([--enable-debug-symbols flags cannot be used with --enable-debug flags])
-          fi
-      fi
-  else
-      MOZ_DEBUG_SYMBOLS=
-  fi ],
-  MOZ_DEBUG_SYMBOLS=1)
-
-if test -n "$MOZ_DEBUG" -o -n "$MOZ_DEBUG_SYMBOLS"; then
-    AC_DEFINE(MOZ_DEBUG_SYMBOLS)
-    export MOZ_DEBUG_SYMBOLS
-fi
+AC_SUBST_LIST(MOZ_DEBUG_DEFINES)
 
 ])
 
@@ -197,18 +128,6 @@ if test "$CLANG_CXX"; then
     ## from C.
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wno-unknown-warning-option -Wno-return-type-c-linkage"
 fi
-
-AC_MSG_CHECKING([whether the C++ compiler ($CXX $CXXFLAGS $LDFLAGS) actually is a C++ compiler])
-AC_LANG_SAVE
-AC_LANG_CPLUSPLUS
-_SAVE_LIBS=$LIBS
-LIBS=
-AC_TRY_LINK([#include <new>], [int *foo = new int;],,
-            AC_MSG_RESULT([no])
-            AC_MSG_ERROR([$CXX $CXXFLAGS $LDFLAGS failed to compile and link a simple C++ source.]))
-LIBS=$_SAVE_LIBS
-AC_LANG_RESTORE
-AC_MSG_RESULT([yes])
 
 if test -n "$DEVELOPER_OPTIONS"; then
     MOZ_FORCE_GOLD=1
@@ -259,6 +178,24 @@ if test "$GNU_CC"; then
     fi
     CFLAGS="$CFLAGS -fno-math-errno"
     CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-math-errno"
+
+    if test -z "$CLANG_CC"; then
+        case "$CC_VERSION" in
+        4.*)
+            ;;
+        *)
+            # Lifetime Dead Store Elimination level 2 (default in GCC6+) breaks Gecko.
+            # Ideally, we'd use -flifetime-dse=1, but that means we'd forcefully
+            # enable it on optimization levels where it would otherwise not be enabled.
+            # So we disable it entirely. But since that would mean inconsistency with
+            # GCC5, which has level 1 depending on optimization level, disable it on
+            # GCC5 as well, because better safe than sorry.
+            # Add it first so that a mozconfig can override by setting CFLAGS/CXXFLAGS.
+            CFLAGS="-fno-lifetime-dse $CFLAGS"
+            CXXFLAGS="-fno-lifetime-dse $CXXFLAGS"
+            ;;
+        esac
+    fi
 fi
 
 dnl ========================================================
@@ -352,7 +289,7 @@ MOZ_ARG_ENABLE_BOOL(pie,
 if test "$GNU_CC" -a -n "$MOZ_PIE"; then
     AC_MSG_CHECKING([for PIE support])
     _SAVE_LDFLAGS=$LDFLAGS
-    LDFLAGS="$LDFLAGS -pie"
+    LDFLAGS="$LDFLAGS $DSO_PIC_CFLAGS -pie"
     AC_TRY_LINK(,,AC_MSG_RESULT([yes])
                   [MOZ_PROGRAM_LDFLAGS="$MOZ_PROGRAM_LDFLAGS -pie"],
                   AC_MSG_RESULT([no])
@@ -376,50 +313,4 @@ if test -n "$GCC_USE_GNU_LD"; then
   esac
 fi
 
-])
-
-dnl GCC and clang will fail if given an unknown warning option like -Wfoobar. 
-dnl But later versions won't fail if given an unknown negated warning option
-dnl like -Wno-foobar.  So when we are check for support of negated warning 
-dnl options, we actually test the positive form, but add the negated form to 
-dnl the flags variable.
-
-AC_DEFUN([MOZ_C_SUPPORTS_WARNING],
-[
-    AC_CACHE_CHECK(whether the C compiler supports $1$2, $3,
-        [
-            AC_LANG_SAVE
-            AC_LANG_C
-            _SAVE_CFLAGS="$CFLAGS"
-            CFLAGS="$CFLAGS -Werror -W$2"
-            AC_TRY_COMPILE([],
-                           [return(0);],
-                           $3="yes",
-                           $3="no")
-            CFLAGS="$_SAVE_CFLAGS"
-            AC_LANG_RESTORE
-        ])
-    if test "${$3}" = "yes"; then
-        _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} $1$2"
-    fi
-])
-
-AC_DEFUN([MOZ_CXX_SUPPORTS_WARNING],
-[
-    AC_CACHE_CHECK(whether the C++ compiler supports $1$2, $3,
-        [
-            AC_LANG_SAVE
-            AC_LANG_CPLUSPLUS
-            _SAVE_CXXFLAGS="$CXXFLAGS"
-            CXXFLAGS="$CXXFLAGS -Werror -W$2"
-            AC_TRY_COMPILE([],
-                           [return(0);],
-                           $3="yes",
-                           $3="no")
-            CXXFLAGS="$_SAVE_CXXFLAGS"
-            AC_LANG_RESTORE
-        ])
-    if test "${$3}" = "yes"; then
-        _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} $1$2"
-    fi
 ])

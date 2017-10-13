@@ -14,18 +14,20 @@ import android.accounts.OperationCanceledException;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.fxa.FxAccountConstants;
+import org.mozilla.gecko.fxa.FxAccountDeviceRegistrator;
 import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 import org.mozilla.gecko.fxa.login.Engaged;
 import org.mozilla.gecko.fxa.login.State;
 import org.mozilla.gecko.restrictions.Restrictable;
+import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.sync.SyncConfiguration;
 import org.mozilla.gecko.sync.Utils;
-import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.NativeEventListener;
 import org.mozilla.gecko.util.NativeJSObject;
@@ -50,7 +52,7 @@ public class AccountsHelper implements NativeEventListener {
         mContext = context;
         mProfile = profile;
 
-        EventDispatcher dispatcher = EventDispatcher.getInstance();
+        EventDispatcher dispatcher = GeckoApp.getEventDispatcher();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
@@ -66,7 +68,7 @@ public class AccountsHelper implements NativeEventListener {
     }
 
     public synchronized void uninit() {
-        EventDispatcher dispatcher = EventDispatcher.getInstance();
+        EventDispatcher dispatcher = GeckoApp.getEventDispatcher();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
@@ -94,6 +96,10 @@ public class AccountsHelper implements NativeEventListener {
         }
 
         if ("Accounts:CreateFirefoxAccountFromJSON".equals(event)) {
+            // As we are about to create a new account, let's ensure our in-memory accounts cache
+            // is empty so that there are no undesired side-effects.
+            AndroidFxAccount.invalidateCaches();
+
             AndroidFxAccount fxAccount = null;
             try {
                 final NativeJSObject json = message.getObject("json");
@@ -151,6 +157,10 @@ public class AccountsHelper implements NativeEventListener {
             }
 
         } else if ("Accounts:UpdateFirefoxAccountFromJSON".equals(event)) {
+            // We might be significantly changing state of the account; let's ensure our in-memory
+            // accounts cache is empty so that there are no undesired side-effects.
+            AndroidFxAccount.invalidateCaches();
+
             try {
                 final Account account = FirefoxAccounts.getFirefoxAccount(mContext);
                 if (account == null) {
@@ -252,8 +262,7 @@ public class AccountsHelper implements NativeEventListener {
 
             try {
                 if ("any".equals(kind)) {
-                    response.put("exists", SyncAccounts.syncAccountsExist(mContext) ||
-                            FirefoxAccounts.firefoxAccountsExist(mContext));
+                    response.put("exists", FirefoxAccounts.firefoxAccountsExist(mContext));
                     callback.sendSuccess(response);
                 } else if ("fxa".equals(kind)) {
                     final Account account = FirefoxAccounts.getFirefoxAccount(mContext);
@@ -276,9 +285,6 @@ public class AccountsHelper implements NativeEventListener {
                         }
                     }
 
-                    callback.sendSuccess(response);
-                } else if ("sync11".equals(kind)) {
-                    response.put("exists", SyncAccounts.syncAccountsExist(mContext));
                     callback.sendSuccess(response);
                 } else {
                     callback.sendError("Could not query account existence: unknown kind.");

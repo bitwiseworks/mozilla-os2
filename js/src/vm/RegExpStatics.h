@@ -21,20 +21,19 @@ class RegExpStatics
 {
     /* The latest RegExp output, set after execution. */
     VectorMatchPairs        matches;
-    RelocatablePtrLinearString matchesInput;
+    HeapPtr<JSLinearString*>  matchesInput;
 
     /*
      * The previous RegExp input, used to resolve lazy state.
      * A raw RegExpShared cannot be stored because it may be in
      * a different compartment via evalcx().
      */
-    RelocatablePtrAtom      lazySource;
+    HeapPtr<JSAtom*>          lazySource;
     RegExpFlag              lazyFlags;
     size_t                  lazyIndex;
 
     /* The latest RegExp input, set before execution. */
-    RelocatablePtrString    pendingInput;
-    RegExpFlag              flags;
+    HeapPtr<JSString*>        pendingInput;
 
     /*
      * If non-zero, |matchesInput| and the |lazy*| fields may be used
@@ -58,12 +57,8 @@ class RegExpStatics
     bool makeMatch(JSContext* cx, size_t pairNum, MutableHandleValue out);
     bool createDependent(JSContext* cx, size_t start, size_t end, MutableHandleValue out);
 
-    void markFlagsSet(JSContext* cx);
-
     struct InitBuffer {};
     explicit RegExpStatics(InitBuffer) {}
-
-    friend class AutoRegExpStaticsBuffer;
 
   public:
     /* Mutators. */
@@ -71,22 +66,12 @@ class RegExpStatics
                              RegExpShared* shared, size_t lastIndex);
     inline bool updateFromMatchPairs(JSContext* cx, JSLinearString* input, MatchPairs& newPairs);
 
-    void setMultiline(JSContext* cx, bool enabled) {
-        if (enabled) {
-            flags = RegExpFlag(flags | MultilineFlag);
-            markFlagsSet(cx);
-        } else {
-            flags = RegExpFlag(flags & ~MultilineFlag);
-        }
-    }
-
     inline void clear();
 
     /* Corresponds to JSAPI functionality to set the pending RegExp input. */
-    void reset(JSContext* cx, JSString* newInput, bool newMultiline) {
+    void reset(JSContext* cx, JSString* newInput) {
         clear();
         pendingInput = newInput;
-        setMultiline(cx, newMultiline);
         checkInvariants();
     }
 
@@ -102,20 +87,14 @@ class RegExpStatics
 
     JSString* getPendingInput() const { return pendingInput; }
 
-    RegExpFlag getFlags() const { return flags; }
-    bool multiline() const { return flags & MultilineFlag; }
-
     void mark(JSTracer* trc) {
         /*
          * Changes to this function must also be reflected in
          * RegExpStatics::AutoRooter::trace().
          */
-        if (matchesInput)
-            TraceEdge(trc, &matchesInput, "res->matchesInput");
-        if (lazySource)
-            TraceEdge(trc, &lazySource, "res->lazySource");
-        if (pendingInput)
-            TraceEdge(trc, &pendingInput, "res->pendingInput");
+        TraceNullableEdge(trc, &matchesInput, "res->matchesInput");
+        TraceNullableEdge(trc, &lazySource, "res->lazySource");
+        TraceNullableEdge(trc, &pendingInput, "res->pendingInput");
     }
 
     /* Value creators. */
@@ -158,38 +137,6 @@ class RegExpStatics
     static size_t offsetOfPendingLazyEvaluation() {
         return offsetof(RegExpStatics, pendingLazyEvaluation);
     }
-};
-
-class MOZ_RAII AutoRegExpStaticsBuffer : private JS::CustomAutoRooter
-{
-  public:
-    explicit AutoRegExpStaticsBuffer(JSContext* cx
-                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : CustomAutoRooter(cx), statics(RegExpStatics::InitBuffer())
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-
-    RegExpStatics& getStatics() { return statics; }
-
-  private:
-    virtual void trace(JSTracer* trc) {
-        if (statics.matchesInput) {
-            TraceRoot(trc, reinterpret_cast<JSString**>(&statics.matchesInput),
-                      "AutoRegExpStaticsBuffer matchesInput");
-        }
-        if (statics.lazySource) {
-            TraceRoot(trc, reinterpret_cast<JSString**>(&statics.lazySource),
-                      "AutoRegExpStaticsBuffer lazySource");
-        }
-        if (statics.pendingInput) {
-            TraceRoot(trc, reinterpret_cast<JSString**>(&statics.pendingInput),
-                      "AutoRegExpStaticsBuffer pendingInput");
-        }
-    }
-
-    RegExpStatics statics;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 inline bool
@@ -420,7 +367,6 @@ RegExpStatics::clear()
     lazyFlags = RegExpFlag(0);
     lazyIndex = size_t(-1);
     pendingInput = nullptr;
-    flags = RegExpFlag(0);
     pendingLazyEvaluation = false;
 }
 

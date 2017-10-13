@@ -23,11 +23,10 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 // Some Useful Date constants - PRTime uses microseconds, so convert
 const DAY_MICROSEC = 86400000000;
-const today = Date.now() * 1000;
+const today = PlacesUtils.toPRTime(Date.now());
 const yesterday = today - DAY_MICROSEC;
 const lastweek = today - (DAY_MICROSEC * 7);
 const daybefore = today - (DAY_MICROSEC * 2);
-const tomorrow = today + DAY_MICROSEC;
 const old = today - (DAY_MICROSEC * 3);
 const futureday = today + (DAY_MICROSEC * 3);
 const olderthansixmonths = today - (DAY_MICROSEC * 31 * 7);
@@ -42,11 +41,11 @@ const olderthansixmonths = today - (DAY_MICROSEC * 31 * 7);
 function* task_populateDB(aArray)
 {
   // Iterate over aArray and execute all instructions.
-  for ([, data] in Iterator(aArray)) {
+  for (let arrayItem of aArray) {
     try {
       // make the data object into a query data object in order to create proper
       // default values for anything left unspecified
-      var qdata = new queryData(data);
+      var qdata = new queryData(arrayItem);
       if (qdata.isVisit) {
         // Then we should add a visit for this node
         yield PlacesTestUtils.addVisits({
@@ -60,7 +59,7 @@ function* task_populateDB(aArray)
           // Set a fake visit_count, this is not a real count but can be used
           // to test sorting by visit_count.
           let stmt = DBConn().createAsyncStatement(
-            "UPDATE moz_places SET visit_count = :vc WHERE url = :url");
+            "UPDATE moz_places SET visit_count = :vc WHERE url_hash = hash(:url) AND url = :url");
           stmt.params.vc = qdata.visitCount;
           stmt.params.url = qdata.uri;
           try {
@@ -79,7 +78,7 @@ function* task_populateDB(aArray)
         // This must be async to properly enqueue after the updateFrecency call
         // done by the visit addition.
         let stmt = DBConn().createAsyncStatement(
-          "UPDATE moz_places SET hidden = 1 WHERE url = :url");
+          "UPDATE moz_places SET hidden = 1 WHERE url_hash = hash(:url) AND url = :url");
         stmt.params.url = qdata.uri;
         try {
           stmt.executeAsync();
@@ -165,7 +164,7 @@ function* task_populateDB(aArray)
           data.lastModified = new Date(qdata.lastModified / 1000);
         }
 
-        let item = yield PlacesUtils.bookmarks.insert(data);
+        yield PlacesUtils.bookmarks.insert(data);
 
         if (qdata.keyword) {
           yield PlacesUtils.keywords.insert({ url: qdata.uri,
@@ -185,8 +184,8 @@ function* task_populateDB(aArray)
         });
       }
     } catch (ex) {
-      // use the data object here in case instantiation of qdata failed
-      do_print("Problem with this URI: " + data.uri);
+      // use the arrayItem object here in case instantiation of qdata failed
+      do_print("Problem with this URI: " + arrayItem.uri);
       do_throw("Error creating database: " + ex + "\n");
     }
   }
@@ -282,7 +281,7 @@ function compareArrayToResult(aArray, aRoot) {
   for (var i = 0; i < aArray.length; i++) {
     if (aArray[i].isInQuery) {
       var child = aRoot.getChild(inQueryIndex);
-      //do_print("testing testData[" + i + "] vs result[" + inQueryIndex + "]");
+      // do_print("testing testData[" + i + "] vs result[" + inQueryIndex + "]");
       if (!aArray[i].isFolder && !aArray[i].isSeparator) {
         do_print("testing testData[" + aArray[i].uri + "] vs result[" + child.uri + "]");
         if (aArray[i].uri != child.uri) {

@@ -5,10 +5,14 @@
 
 // Services = object with smart getters for common XPCOM services
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
+Components.utils.import("resource://gre/modules/ContextualIdentityService.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Components.utils.import("resource:///modules/RecentWindow.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ShellService",
+                                  "resource:///modules/ShellService.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
@@ -62,7 +66,7 @@ function getBoolPref(prefname, def)
   try {
     return Services.prefs.getBoolPref(prefname);
   }
-  catch(er) {
+  catch (er) {
     return def;
   }
 }
@@ -111,8 +115,8 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
  *
  * Middle-clicking is the same as Ctrl+clicking (it opens a new tab).
  *
- * Exceptions: 
- * - Alt is ignored for menu items selected using the keyboard so you don't accidentally save stuff.  
+ * Exceptions:
+ * - Alt is ignored for menu items selected using the keyboard so you don't accidentally save stuff.
  *    (Currently, the Alt isn't sent here at all for menu items, but that will change in bug 126189.)
  * - Alt is hard to use in context menus, because pressing Alt closes the menu.
  * - Alt can't be used on the bookmarks toolbar because Alt is used for "treat this as something draggable".
@@ -218,29 +222,45 @@ function openLinkIn(url, where, params) {
   var aAllowPopups          = !!params.allowPopups;
   var aUserContextId        = params.userContextId;
   var aIndicateErrorPageLoad = params.indicateErrorPageLoad;
+  var aPrincipal            = params.originPrincipal;
+  var aForceAboutBlankViewerInCurrent =
+      params.forceAboutBlankViewerInCurrent;
 
-  if (where == "save") {
-    if (!aInitiatingDoc) {
-      Components.utils.reportError("openUILink/openLinkIn was called with " +
-        "where == 'save' but without initiatingDoc.  See bug 814264.");
-      return;
-    }
-    // TODO(1073187): propagate referrerPolicy.
-    saveURL(url, null, null, true, null, aNoReferrer ? null : aReferrerURI, aInitiatingDoc);
-    return;
-  }
-
+  // Establish a window in which we're running this code.
   var w = getTopWin();
+
   if ((where == "tab" || where == "tabshifted") &&
       w && !w.toolbar.visible) {
     w = getTopWin(true);
     aRelatedToCurrent = false;
   }
 
+  // Can only do this after we're sure of what |w| will be the rest of this function.
+  // Note that if |w| is null we might have no current browser (we'll open a new window).
+  var aCurrentBrowser = params.currentBrowser || (w && w.gBrowser.selectedBrowser);
+
+  if (where == "save") {
+    // TODO(1073187): propagate referrerPolicy.
+
+    // ContentClick.jsm passes isContentWindowPrivate for saveURL instead of passing a CPOW initiatingDoc
+    if ("isContentWindowPrivate" in params) {
+      saveURL(url, null, null, true, true, aNoReferrer ? null : aReferrerURI, null, params.isContentWindowPrivate);
+    }
+    else {
+      if (!aInitiatingDoc) {
+        Components.utils.reportError("openUILink/openLinkIn was called with " +
+          "where == 'save' but without initiatingDoc.  See bug 814264.");
+        return;
+      }
+      saveURL(url, null, null, true, true, aNoReferrer ? null : aReferrerURI, aInitiatingDoc);
+    }
+    return;
+  }
+
   if (!w || where == "window") {
     // This propagates to window.arguments.
-    var sa = Cc["@mozilla.org/supports-array;1"].
-             createInstance(Ci.nsISupportsArray);
+    var sa = Cc["@mozilla.org/array;1"].
+             createInstance(Ci.nsIMutableArray);
 
     var wuri = Cc["@mozilla.org/supports-string;1"].
                createInstance(Ci.nsISupportsString);
@@ -268,12 +288,18 @@ function openLinkIn(url, where, params) {
                                  createInstance(Ci.nsISupportsPRUint32);
     referrerPolicySupports.data = aReferrerPolicy;
 
-    sa.AppendElement(wuri);
-    sa.AppendElement(charset);
-    sa.AppendElement(referrerURISupports);
-    sa.AppendElement(aPostData);
-    sa.AppendElement(allowThirdPartyFixupSupports);
-    sa.AppendElement(referrerPolicySupports);
+    var userContextIdSupports = Cc["@mozilla.org/supports-PRUint32;1"].
+                                 createInstance(Ci.nsISupportsPRUint32);
+    userContextIdSupports.data = aUserContextId;
+
+    sa.appendElement(wuri, /* weak =*/ false);
+    sa.appendElement(charset, /* weak =*/ false);
+    sa.appendElement(referrerURISupports, /* weak =*/ false);
+    sa.appendElement(aPostData, /* weak =*/ false);
+    sa.appendElement(allowThirdPartyFixupSupports, /* weak =*/ false);
+    sa.appendElement(referrerPolicySupports, /* weak =*/ false);
+    sa.appendElement(userContextIdSupports, /* weak =*/ false);
+    sa.appendElement(aPrincipal, /* weak =*/ false);
 
     let features = "chrome,dialog=no,all";
     if (aIsPrivate) {
@@ -298,12 +324,17 @@ function openLinkIn(url, where, params) {
     } catch (e) {}
   }
 
-  if (where == "current" && w.gBrowser.selectedTab.pinned &&
+  // We avoid using |w| here because in the 'popup window' case,
+  // if we pass a currentBrowser param |w.gBrowser| might not be the
+  // tabbrowser that contains |aCurrentBrowser|. We really only care
+  // about the tab linked to |aCurrentBrowser|.
+  let tab = aCurrentBrowser.getTabBrowser().getTabForBrowser(aCurrentBrowser);
+  if (where == "current" && tab.pinned &&
       !aAllowPinnedTabHostChange) {
     try {
       // nsIURI.host can throw for non-nsStandardURL nsIURIs.
       if (!uriObj || (!uriObj.schemeIs("javascript") &&
-                      w.gBrowser.currentURI.host != uriObj.host)) {
+                      aCurrentBrowser.currentURI.host != uriObj.host)) {
         where = "tab";
         loadInBackground = false;
       }
@@ -317,6 +348,7 @@ function openLinkIn(url, where, params) {
   // result in a new frontmost window (e.g. "javascript:window.open('');").
   w.focus();
 
+  let browserUsedForLoad = null;
   switch (where) {
   case "current":
     let flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
@@ -326,12 +358,12 @@ function openLinkIn(url, where, params) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
     }
 
-    // LOAD_FLAGS_DISALLOW_INHERIT_OWNER isn't supported for javascript URIs,
+    // LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL isn't supported for javascript URIs,
     // i.e. it causes them not to load at all. Callers should strip
     // "javascript:" from pasted strings to protect users from malicious URIs
     // (see stripUnsafeProtocolOnPaste).
     if (aDisallowInheritPrincipal && !(uriObj && uriObj.schemeIs("javascript"))) {
-      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
+      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
     }
 
     if (aAllowPopups) {
@@ -341,18 +373,29 @@ function openLinkIn(url, where, params) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ERROR_LOAD_CHANGES_RV;
     }
 
-    w.gBrowser.loadURIWithFlags(url, {
+    let {URI_INHERITS_SECURITY_CONTEXT} = Ci.nsIProtocolHandler;
+    if (aForceAboutBlankViewerInCurrent &&
+        (!uriObj ||
+         (Services.io.getProtocolFlags(uriObj.scheme) & URI_INHERITS_SECURITY_CONTEXT))) {
+      // Unless we know for sure we're not inheriting principals,
+      // force the about:blank viewer to have the right principal:
+      aCurrentBrowser.createAboutBlankContentViewer(aPrincipal);
+    }
+
+    aCurrentBrowser.loadURIWithFlags(url, {
       flags: flags,
       referrerURI: aNoReferrer ? null : aReferrerURI,
       referrerPolicy: aReferrerPolicy,
       postData: aPostData,
+      userContextId: aUserContextId
     });
+    browserUsedForLoad = aCurrentBrowser;
     break;
   case "tabshifted":
     loadInBackground = !loadInBackground;
     // fall through
   case "tab":
-    w.gBrowser.loadOneTab(url, {
+    let tabUsedForLoad = w.gBrowser.loadOneTab(url, {
       referrerURI: aReferrerURI,
       referrerPolicy: aReferrerPolicy,
       charset: aCharset,
@@ -363,12 +406,18 @@ function openLinkIn(url, where, params) {
       skipAnimation: aSkipTabAnimation,
       allowMixedContent: aAllowMixedContent,
       noReferrer: aNoReferrer,
-      userContextId: aUserContextId
+      userContextId: aUserContextId,
+      originPrincipal: aPrincipal,
     });
+    browserUsedForLoad = tabUsedForLoad.linkedBrowser;
     break;
   }
 
-  w.gBrowser.selectedBrowser.focus();
+  // Focus the content, but only if the browser used for the load is selected.
+  if (browserUsedForLoad &&
+      browserUsedForLoad == browserUsedForLoad.getTabBrowser().selectedBrowser) {
+    browserUsedForLoad.focus();
+  }
 
   if (!loadInBackground && w.isBlankPageURL(url)) {
     w.focusAndSelectUrlBar();
@@ -400,6 +449,74 @@ function checkForMiddleClick(node, event) {
   }
 }
 
+// Populate a menu with user-context menu items. This method should be called
+// by onpopupshowing passing the event as first argument.
+function createUserContextMenu(event, isContextMenu = false, excludeUserContextId = 0) {
+  while (event.target.hasChildNodes()) {
+    event.target.removeChild(event.target.firstChild);
+  }
+
+  let bundle = document.getElementById("bundle_browser");
+  let docfrag = document.createDocumentFragment();
+
+  // If we are excluding a userContextId, we want to add a 'no-container' item.
+  if (excludeUserContextId) {
+    let menuitem = document.createElement("menuitem");
+    menuitem.setAttribute("data-usercontextid", "0");
+    menuitem.setAttribute("label", bundle.getString("userContextNone.label"));
+    menuitem.setAttribute("accesskey", bundle.getString("userContextNone.accesskey"));
+
+    // We don't set an oncommand/command attribute because if we have
+    // to exclude a userContextId we are generating the contextMenu and
+    // isContextMenu will be true.
+
+    docfrag.appendChild(menuitem);
+
+    let menuseparator = document.createElement("menuseparator");
+    docfrag.appendChild(menuseparator);
+  }
+
+  ContextualIdentityService.getIdentities().forEach(identity => {
+    if (identity.userContextId == excludeUserContextId) {
+      return;
+    }
+
+    let menuitem = document.createElement("menuitem");
+    menuitem.setAttribute("data-usercontextid", identity.userContextId);
+    menuitem.setAttribute("label", ContextualIdentityService.getUserContextLabel(identity.userContextId));
+
+    if (identity.accessKey) {
+      menuitem.setAttribute("accesskey", bundle.getString(identity.accessKey));
+    }
+
+    menuitem.classList.add("menuitem-iconic");
+    menuitem.setAttribute("data-identity-color", identity.color);
+
+    if (!isContextMenu) {
+      menuitem.setAttribute("command", "Browser:NewUserContextTab");
+    }
+
+    menuitem.setAttribute("data-identity-icon", identity.icon);
+
+    docfrag.appendChild(menuitem);
+  });
+
+  if (!isContextMenu) {
+    docfrag.appendChild(document.createElement("menuseparator"));
+
+    let menuitem = document.createElement("menuitem");
+    menuitem.setAttribute("label",
+                          bundle.getString("userContext.aboutPage.label"));
+    menuitem.setAttribute("accesskey",
+                          bundle.getString("userContext.aboutPage.accesskey"));
+    menuitem.setAttribute("command", "Browser:OpenAboutContainers");
+    docfrag.appendChild(menuitem);
+  }
+
+  event.target.appendChild(docfrag);
+  return true;
+}
+
 // Closes all popups that are ancestors of the node.
 function closeMenus(node)
 {
@@ -412,8 +529,48 @@ function closeMenus(node)
   }
 }
 
+/** This function takes in a key element and compares it to the keys pressed during an event.
+ *
+ * @param aEvent
+ *        The KeyboardEvent event you want to compare against your key.
+ *
+ * @param aKey
+ *        The <key> element checked to see if it was called in aEvent.
+ *        For example, aKey can be a variable set to document.getElementById("key_close")
+ *        to check if the close command key was pressed in aEvent.
+*/
+function eventMatchesKey(aEvent, aKey)
+{
+  let keyPressed = aKey.getAttribute("key").toLowerCase();
+  let keyModifiers = aKey.getAttribute("modifiers");
+  let modifiers = ["Alt", "Control", "Meta", "Shift"];
+
+  if (aEvent.key != keyPressed) {
+    return false;
+  }
+  let eventModifiers = modifiers.filter(modifier => aEvent.getModifierState(modifier));
+  // Check if aEvent has a modifier and aKey doesn't
+  if (eventModifiers.length > 0 && keyModifiers.length == 0) {
+     return false;
+  }
+  // Check whether aKey's modifiers match aEvent's modifiers
+  if (keyModifiers) {
+    keyModifiers = keyModifiers.split(/[\s,]+/);
+    // Capitalize first letter of aKey's modifers to compare to aEvent's modifier
+    keyModifiers.forEach(function(modifier, index) {
+      if (modifier == "accel") {
+        keyModifiers[index] = AppConstants.platform == "macosx" ?  "Meta" : "Control";
+      } else {
+        keyModifiers[index] = modifier[0].toUpperCase() + modifier.slice(1);
+      }
+    });
+    return modifiers.every(modifier => keyModifiers.includes(modifier) == aEvent.getModifierState(modifier));
+  }
+  return true;
+}
+
 // Gather all descendent text under given document node.
-function gatherTextUnder ( root ) 
+function gatherTextUnder ( root )
 {
   var text = "";
   var node = root.firstChild;
@@ -454,15 +611,10 @@ function gatherTextUnder ( root )
   return text;
 }
 
+// This function exists for legacy reasons.
 function getShellService()
 {
-  var shell = null;
-  try {
-    shell = Components.classes["@mozilla.org/browser/shell-service;1"]
-      .getService(Components.interfaces.nsIShellService);
-  } catch (e) {
-  }
-  return shell;
+  return ShellService;
 }
 
 function isBidiEnabled() {
@@ -482,7 +634,7 @@ function isBidiEnabled() {
   try {
     var localeService = Components.classes["@mozilla.org/intl/nslocaleservice;1"]
                                   .getService(Components.interfaces.nsILocaleService);
-    var systemLocale = localeService.getSystemLocale().getCategory("NSILOCALE_CTYPE").substr(0,3);
+    var systemLocale = localeService.getSystemLocale().getCategory("NSILOCALE_CTYPE").substr(0, 3);
 
     switch (systemLocale) {
       case "ar-":
@@ -556,17 +708,18 @@ function openPreferences(paneID, extraArgs)
   if (!win) {
     const Cc = Components.classes;
     const Ci = Components.interfaces;
-    let windowArguments = Cc["@mozilla.org/supports-array;1"]
-                            .createInstance(Ci.nsISupportsArray);
+    let windowArguments = Cc["@mozilla.org/array;1"]
+                            .createInstance(Ci.nsIMutableArray);
     let supportsStringPrefURL = Cc["@mozilla.org/supports-string;1"]
                                   .createInstance(Ci.nsISupportsString);
     supportsStringPrefURL.data = preferencesURL;
-    windowArguments.AppendElement(supportsStringPrefURL);
+    windowArguments.appendElement(supportsStringPrefURL, /* weak =*/ false);
 
     win = Services.ww.openWindow(null, Services.prefs.getCharPref("browser.chromeURL"),
                                  "_blank", "chrome,dialog=no,all", windowArguments);
   } else {
-    newLoad = !win.switchToTabHavingURI(preferencesURL, true, {ignoreFragment: true});
+    let shouldReplaceFragment = friendlyCategoryName ? "whenComparingAndReplace" : "whenComparing";
+    newLoad = !win.switchToTabHavingURI(preferencesURL, true, { ignoreFragment: shouldReplaceFragment, replaceQueryString: true });
     browser = win.gBrowser.selectedBrowser;
   }
 
@@ -633,8 +786,9 @@ function openTourPage()
 function buildHelpMenu()
 {
   // Enable/disable the "Report Web Forgery" menu item.
-  if (typeof gSafeBrowsing != "undefined" && AppConstants.MOZ_SAFE_BROWSING)
+  if (typeof gSafeBrowsing != "undefined") {
     gSafeBrowsing.setReportPhishingMenu();
+  }
 }
 
 function isElementVisible(aElement)
@@ -675,7 +829,7 @@ function makeURLAbsolute(aBase, aUrl)
  *        This will be used as the referrer. There will be no security check.
  * @param [optional] aReferrerPolicy
  *        Referrer policy - Ci.nsIHttpChannel.REFERRER_POLICY_*.
- */ 
+ */
 function openNewTabWith(aURL, aDocument, aPostData, aEvent,
                         aAllowThirdPartyFixup, aReferrer, aReferrerPolicy) {
 
@@ -715,13 +869,16 @@ function openNewWindowWith(aURL, aDocument, aPostData, aAllowThirdPartyFixup,
              });
 }
 
-// aCalledFromModal is optional
-function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
+function getHelpLinkURL(aHelpTopic) {
   var url = Components.classes["@mozilla.org/toolkit/URLFormatterService;1"]
                       .getService(Components.interfaces.nsIURLFormatter)
                       .formatURLPref("app.support.baseURL");
-  url += aHelpTopic;
+  return url + aHelpTopic;
+}
 
+// aCalledFromModal is optional
+function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
+  var url = getHelpLinkURL(aHelpTopic);
   var where = aWhere;
   if (!aWhere)
     where = aCalledFromModal ? "window" : "tab";
@@ -730,7 +887,7 @@ function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
 }
 
 function openPrefsHelp() {
-  // non-instant apply prefwindows are usually modal, so we can't open in the topmost window, 
+  // non-instant apply prefwindows are usually modal, so we can't open in the topmost window,
   // since its probably behind the window.
   var instantApply = getBoolPref("browser.preferences.instantApply");
 

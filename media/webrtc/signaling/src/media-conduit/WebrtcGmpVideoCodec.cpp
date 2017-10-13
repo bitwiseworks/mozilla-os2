@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "mozilla/Move.h"
-#include "mozilla/Scoped.h"
 #include "mozilla/SyncRunnable.h"
 #include "VideoConduit.h"
 #include "AudioConduit.h"
@@ -187,7 +186,11 @@ WebrtcGmpVideoEncoder::InitEncode(const webrtc::VideoCodec* aCodecSettings,
   codecParams.mMaxBitrate = aCodecSettings->maxBitrate;
   codecParams.mMaxFramerate = aCodecSettings->maxFramerate;
   mMaxPayloadSize = aMaxPayloadSize;
-  if (aCodecSettings->codecSpecific.H264.packetizationMode == 1) {
+
+  memset(&mCodecSpecificInfo, 0, sizeof(webrtc::CodecSpecificInfo));
+  mCodecSpecificInfo.codecType = webrtc::kVideoCodecH264;
+  mCodecSpecificInfo.codecSpecific.H264.packetizationMode = aCodecSettings->codecSpecific.H264.packetizationMode;
+  if (mCodecSpecificInfo.codecSpecific.H264.packetizationMode == 1) {
     mMaxPayloadSize = 0; // No limit.
   }
 
@@ -230,7 +233,8 @@ WebrtcGmpVideoEncoder::InitEncode_g(
   UniquePtr<GetGMPVideoEncoderCallback> callback(
     new InitDoneCallback(aThis, aInitDone, aCodecParams, aMaxPayloadSize));
   aThis->mInitting = true;
-  nsresult rv = aThis->mMPS->GetGMPVideoEncoder(&tags,
+  nsresult rv = aThis->mMPS->GetGMPVideoEncoder(nullptr,
+                                                &tags,
                                                 NS_LITERAL_CSTRING(""),
                                                 Move(callback));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -361,7 +365,8 @@ WebrtcGmpVideoEncoder::RegetEncoderForResolutionChange(
   nsTArray<nsCString> tags;
   tags.AppendElement(NS_LITERAL_CSTRING("h264"));
   mInitting = true;
-  if (NS_WARN_IF(NS_FAILED(mMPS->GetGMPVideoEncoder(&tags,
+  if (NS_WARN_IF(NS_FAILED(mMPS->GetGMPVideoEncoder(nullptr,
+                                                    &tags,
                                                     NS_LITERAL_CSTRING(""),
                                                     Move(callback))))) {
     aInitDone->Dispatch(WEBRTC_VIDEO_CODEC_ERROR,
@@ -579,7 +584,7 @@ WebrtcGmpVideoEncoder::Encoded(GMPVideoEncodedFrame* aEncodedFrame,
       uint32_t offset;
       uint32_t size;
     };
-    nsAutoTArray<nal_entry, 1> nals;
+    AutoTArray<nal_entry, 1> nals;
     uint32_t size;
     // make sure we don't read past the end of the buffer getting the size
     while (buffer+size_bytes < end) {
@@ -641,9 +646,15 @@ WebrtcGmpVideoEncoder::Encoded(GMPVideoEncodedFrame* aEncodedFrame,
       webrtc::EncodedImage unit(aEncodedFrame->Buffer(), size, size);
       unit._frameType = ft;
       unit._timeStamp = timestamp;
+      // Ensure we ignore this when calculating RTCP timestamps
+      unit.capture_time_ms_ = -1;
       unit._completeFrame = true;
 
-      mCallback->Encoded(unit, nullptr, &fragmentation);
+      // TODO: Currently the OpenH264 codec does not preserve any codec
+      //       specific info passed into it and just returns default values.
+      //       If this changes in the future, it would be nice to get rid of
+      //       mCodecSpecificInfo.
+      mCallback->Encoded(unit, &mCodecSpecificInfo, &fragmentation);
     }
   }
 }
@@ -710,7 +721,8 @@ WebrtcGmpVideoDecoder::InitDecode_g(
   UniquePtr<GetGMPVideoDecoderCallback> callback(
     new InitDoneCallback(aThis, aInitDone));
   aThis->mInitting = true;
-  nsresult rv = aThis->mMPS->GetGMPVideoDecoder(&tags,
+  nsresult rv = aThis->mMPS->GetGMPVideoDecoder(nullptr,
+                                                &tags,
                                                 NS_LITERAL_CSTRING(""),
                                                 Move(callback));
   if (NS_WARN_IF(NS_FAILED(rv))) {

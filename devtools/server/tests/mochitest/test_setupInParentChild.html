@@ -17,10 +17,10 @@ let Cu = Components.utils;
 let Cc = Components.classes;
 let Ci = Components.interfaces;
 
-Cu.import("resource://gre/modules/Services.jsm");
 let {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 let {DebuggerClient} = require("devtools/shared/client/main");
 let {DebuggerServer} = require("devtools/server/main");
+let Services = require("Services");
 
 window.onload = function() {
   SimpleTest.waitForExplicitFinish();
@@ -40,7 +40,7 @@ function runTests() {
   iframe.mozbrowser = true;
   document.body.appendChild(iframe);
 
-  let mm = iframe.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader.messageManager;
+  let mm = iframe.frameLoader.messageManager;
 
   // Instantiate a minimal server
   if (!DebuggerServer.initialized) {
@@ -96,7 +96,7 @@ function runTests() {
   });
 
   function cleanup() {
-    client.close(function () {
+    client.close().then(function () {
       DebuggerServer.destroy();
       iframe.remove();
       SimpleTest.finish()

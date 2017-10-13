@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_mediakeys_h__
 #define mozilla_dom_mediakeys_h__
 
-#include "nsIDOMMediaError.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
 #include "mozilla/Attributes.h"
@@ -17,8 +16,10 @@
 #include "nsRefPtrHashtable.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/MediaKeysBinding.h"
+#include "mozilla/dom/MediaKeySystemAccessBinding.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/DetailedPromise.h"
+#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 
@@ -33,35 +34,41 @@ class HTMLMediaElement;
 typedef nsRefPtrHashtable<nsStringHashKey, MediaKeySession> KeySessionHashMap;
 typedef nsRefPtrHashtable<nsUint32HashKey, dom::DetailedPromise> PromiseHashMap;
 typedef nsRefPtrHashtable<nsUint32HashKey, MediaKeySession> PendingKeySessionsHashMap;
+typedef nsDataHashtable<nsUint32HashKey, uint32_t> PendingPromiseIdTokenHashMap;
 typedef uint32_t PromiseId;
 
 // This class is used on the main thread only.
-// Note: it's addref/release is not (and can't be) thread safe!
+// Note: its addref/release is not (and can't be) thread safe!
 class MediaKeys final : public nsISupports,
-                        public nsWrapperCache
+                        public nsWrapperCache,
+                        public SupportsWeakPtr<MediaKeys>
 {
   ~MediaKeys();
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaKeys)
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MediaKeys)
 
-  MediaKeys(nsPIDOMWindow* aParentWindow, const nsAString& aKeySystem, const nsAString& aCDMVersion);
+  MediaKeys(nsPIDOMWindowInner* aParentWindow,
+            const nsAString& aKeySystem,
+            const MediaKeySystemConfiguration& aConfig);
 
   already_AddRefed<DetailedPromise> Init(ErrorResult& aRv);
 
-  nsPIDOMWindow* GetParentObject() const;
+  nsPIDOMWindowInner* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsresult Bind(HTMLMediaElement* aElement);
+  void Unbind();
 
   // Javascript: readonly attribute DOMString keySystem;
   void GetKeySystem(nsString& retval) const;
 
   // JavaScript: MediaKeys.createSession()
   already_AddRefed<MediaKeySession> CreateSession(JSContext* aCx,
-                                                  SessionType aSessionType,
+                                                  MediaKeySessionType aSessionType,
                                                   ErrorResult& aRv);
 
   // JavaScript: MediaKeys.SetServerCertificate()
@@ -100,6 +107,13 @@ public:
   // promises to be resolved.
   PromiseId StorePromise(DetailedPromise* aPromise);
 
+  // Stores a map from promise id to pending session token. Using this
+  // mapping, when a promise is rejected via its ID, we can check if the
+  // promise corresponds to a pending session and retrieve that session
+  // via the mapped-to token, and remove the pending session from the
+  // list of sessions awaiting a session id.
+  void ConnectPendingPromiseIdWithToken(PromiseId aId, uint32_t aToken);
+
   // Reject promise with DOMException corresponding to aExceptionCode.
   void RejectPromise(PromiseId aId, nsresult aExceptionCode,
                      const nsCString& aReason);
@@ -119,7 +133,9 @@ public:
 
 private:
 
-  bool IsInPrivateBrowsing();
+  // Instantiate CDMProxy instance.
+  // It could be MediaDrmCDMProxy (Widevine on Fennec) or GMPCDMProxy (the rest).
+  already_AddRefed<CDMProxy> CreateCDMProxy();
 
   // Removes promise from mPromises, and returns it.
   already_AddRefed<DetailedPromise> RetrievePromise(PromiseId aId);
@@ -130,9 +146,8 @@ private:
 
   RefPtr<HTMLMediaElement> mElement;
 
-  nsCOMPtr<nsPIDOMWindow> mParent;
+  nsCOMPtr<nsPIDOMWindowInner> mParent;
   const nsString mKeySystem;
-  const nsString mCDMVersion;
   nsCString mNodeId;
   KeySessionHashMap mKeySessions;
   PromiseHashMap mPromises;
@@ -142,6 +157,9 @@ private:
   RefPtr<nsIPrincipal> mPrincipal;
   RefPtr<nsIPrincipal> mTopLevelPrincipal;
 
+  const MediaKeySystemConfiguration mConfig;
+
+  PendingPromiseIdTokenHashMap mPromiseIdToken;
 };
 
 } // namespace dom

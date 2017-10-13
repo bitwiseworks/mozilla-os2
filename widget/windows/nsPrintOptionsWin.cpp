@@ -67,10 +67,12 @@ nsPrintOptionsWin::SerializeToPrintData(nsIPrintSettings* aSettings,
   free(deviceName);
   free(driverName);
 
-  // When creating the print dialog on Windows, the parent creates a DEVMODE
-  // which is used to convey print settings to the Windows printing backend.
-  // We don't, therefore, want or care about DEVMODEs sent up from the child.
+  // When creating the print dialog on Windows, we only need to send certain
+  // print settings information from the parent to the child not vice versa.
   if (XRE_IsParentProcess()) {
+    psWin->GetPrintableWidthInInches(&data->printableWidthInInches());
+    psWin->GetPrintableHeightInInches(&data->printableHeightInInches());
+
     // A DEVMODE can actually be of arbitrary size. If it turns out that it'll
     // make our IPC message larger than the limit, then we'll error out.
     LPDEVMODEW devModeRaw;
@@ -118,26 +120,30 @@ nsPrintOptionsWin::DeserializeToPrintSettings(const PrintData& data,
     psWin->SetDeviceName(data.deviceName().get());
     psWin->SetDriverName(data.driverName().get());
 
-    nsXPIDLString printerName;
-    settings->GetPrinterName(getter_Copies(printerName));
+    psWin->SetPrintableWidthInInches(data.printableWidthInInches());
+    psWin->SetPrintableHeightInInches(data.printableHeightInInches());
 
-    DEVMODEW* devModeRaw = (DEVMODEW*)::HeapAlloc(::GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                                  data.devModeData().Length());
-    if (!devModeRaw) {
-      return NS_ERROR_OUT_OF_MEMORY;
+    if (data.devModeData().IsEmpty()) {
+      psWin->SetDevMode(nullptr);
+    } else {
+      // Check minimum length of DEVMODE data.
+      auto devModeDataLength = data.devModeData().Length();
+      if (devModeDataLength < sizeof(DEVMODEW)) {
+        NS_WARNING("DEVMODE data is too short.");
+        return NS_ERROR_FAILURE;
+      }
+
+      DEVMODEW* devMode = reinterpret_cast<DEVMODEW*>(
+        const_cast<uint8_t*>(data.devModeData().Elements()));
+
+      // Check actual length of DEVMODE data.
+      if ((devMode->dmSize + devMode->dmDriverExtra) != devModeDataLength) {
+        NS_WARNING("DEVMODE length is incorrect.");
+        return NS_ERROR_FAILURE;
+      }
+
+      psWin->SetDevMode(devMode); // Copies
     }
-
-    nsAutoDevMode devMode(devModeRaw);
-    devModeRaw = nullptr;
-
-    // Seems a bit silly to copy the buffer out, just so that SetDevMode can
-    // copy it again. However, if I attempt to just pass
-    // data.devModeData.Elements() casted to an DEVMODEW* to SetDevMode, I get
-    // a "Conversion loses qualifiers" build-time error because
-    // data.devModeData.Elements() is of type const char *.
-    memcpy(devMode.get(), data.devModeData().Elements(), data.devModeData().Length());
-
-    psWin->SetDevMode(devMode); // Copies
   }
 
   return NS_OK;

@@ -12,6 +12,7 @@
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 #include "nsCycleCollectionParticipant.h"
 
 struct JSContext;
@@ -25,6 +26,8 @@ namespace mozilla {
 class ErrorResult;
 
 namespace gfx {
+class DataSourceSurface;
+class DrawTarget;
 class SourceSurface;
 }
 
@@ -33,22 +36,36 @@ class Image;
 }
 
 namespace dom {
+class OffscreenCanvas;
 
 namespace workers {
 class WorkerStructuredCloneClosure;
 }
 
+class ArrayBufferViewOrArrayBuffer;
 class CanvasRenderingContext2D;
+struct ChannelPixelLayout;
+class CreateImageBitmapFromBlob;
+class CreateImageBitmapFromBlobTask;
+class CreateImageBitmapFromBlobWorkerTask;
 class File;
 class HTMLCanvasElement;
 class HTMLImageElement;
 class HTMLVideoElement;
+enum class ImageBitmapFormat : uint32_t;
 class ImageData;
+class ImageUtils;
+template<typename T> class MapDataIntoBufferSource;
 class Promise;
 class PostMessageEvent; // For StructuredClone between windows.
-class CreateImageBitmapFromBlob;
-class CreateImageBitmapFromBlobTask;
-class CreateImageBitmapFromBlobWorkerTask;
+
+struct ImageBitmapCloneData final
+{
+  RefPtr<gfx::DataSourceSurface> mSurface;
+  gfx::IntRect mPictureRect;
+  bool mIsPremultipliedAlpha;
+  bool mIsCroppingAreaOutSideOfSourceImage;
+};
 
 /*
  * ImageBitmap is an opaque handler to several kinds of image-like objects from
@@ -83,6 +100,8 @@ public:
     return mPictureRect.Height();
   }
 
+  void Close();
+
   /*
    * The PrepareForDrawTarget() might return null if the mPictureRect does not
    * intersect with the size of mData.
@@ -90,33 +109,102 @@ public:
   already_AddRefed<gfx::SourceSurface>
   PrepareForDrawTarget(gfx::DrawTarget* aTarget);
 
+  /*
+   * Transfer ownership of buffer to caller. So this function call
+   * Close() implicitly.
+   */
+  already_AddRefed<layers::Image>
+  TransferAsImage();
+
+  UniquePtr<ImageBitmapCloneData>
+  ToCloneData() const;
+
+  static already_AddRefed<ImageBitmap>
+  CreateFromCloneData(nsIGlobalObject* aGlobal, ImageBitmapCloneData* aData);
+
+  static already_AddRefed<ImageBitmap>
+  CreateFromOffscreenCanvas(nsIGlobalObject* aGlobal,
+                            OffscreenCanvas& aOffscreenCanvas,
+                            ErrorResult& aRv);
+
   static already_AddRefed<Promise>
   Create(nsIGlobalObject* aGlobal, const ImageBitmapSource& aSrc,
          const Maybe<gfx::IntRect>& aCropRect, ErrorResult& aRv);
+
+  static already_AddRefed<Promise>
+  Create(nsIGlobalObject* aGlobal,
+         const ImageBitmapSource& aBuffer,
+         int32_t aOffset, int32_t aLength,
+         mozilla::dom::ImageBitmapFormat aFormat,
+         const Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
+         ErrorResult& aRv);
 
   static JSObject*
   ReadStructuredClone(JSContext* aCx,
                       JSStructuredCloneReader* aReader,
                       nsIGlobalObject* aParent,
-                      const nsTArray<RefPtr<layers::Image>>& aClonedImages,
+                      const nsTArray<RefPtr<gfx::DataSourceSurface>>& aClonedSurfaces,
                       uint32_t aIndex);
 
   static bool
   WriteStructuredClone(JSStructuredCloneWriter* aWriter,
-                       nsTArray<RefPtr<layers::Image>>& aClonedImages,
+                       nsTArray<RefPtr<gfx::DataSourceSurface>>& aClonedSurfaces,
                        ImageBitmap* aImageBitmap);
+
+  // Mozilla Extensions
+  static bool ExtensionsEnabled(JSContext* aCx, JSObject* aObj);
 
   friend CreateImageBitmapFromBlob;
   friend CreateImageBitmapFromBlobTask;
   friend CreateImageBitmapFromBlobWorkerTask;
 
+  template<typename T>
+  friend class MapDataIntoBufferSource;
+
+  // Mozilla Extensions
+  ImageBitmapFormat
+  FindOptimalFormat(const Optional<Sequence<ImageBitmapFormat>>& aPossibleFormats,
+                    ErrorResult& aRv);
+
+  int32_t
+  MappedDataLength(ImageBitmapFormat aFormat, ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  MapDataInto(JSContext* aCx,
+              ImageBitmapFormat aFormat,
+              const ArrayBufferViewOrArrayBuffer& aBuffer,
+              int32_t aOffset, ErrorResult& aRv);
+
 protected:
 
-  ImageBitmap(nsIGlobalObject* aGlobal, layers::Image* aData);
+  /*
+   * The default value of aIsPremultipliedAlpha is TRUE because that the
+   * data stored in HTMLImageElement, HTMLVideoElement, HTMLCanvasElement,
+   * CanvasRenderingContext2D are alpha-premultiplied in default.
+   *
+   * Actually, if one HTMLCanvasElement's rendering context is WebGLContext, it
+   * is possible to get un-premultipliedAlpha data out. But, we do not do it in
+   * the CreateInternal(from HTMLCanvasElement) method.
+   *
+   * It is also possible to decode an image which is encoded with alpha channel
+   * to be non-premultipliedAlpha. This could be applied in
+   * 1) the CreateInternal(from HTMLImageElement) method (which might trigger
+   *    re-decoding if the original decoded data is alpha-premultiplied) and
+   * 2) while decoding a blob. But we do not do it in both code path too.
+   *
+   * ImageData's underlying data is triggered as non-premultipliedAlpha, so set
+   * the aIsPremultipliedAlpha to be false in the
+   * CreateInternal(from ImageData) method.
+   */
+  ImageBitmap(nsIGlobalObject* aGlobal, layers::Image* aData,
+              bool aIsPremultipliedAlpha = true);
 
   virtual ~ImageBitmap();
 
   void SetPictureRect(const gfx::IntRect& aRect, ErrorResult& aRv);
+
+  void SetIsCroppingAreaOutSideOfSourceImage(const gfx::IntSize& aSourceSize,
+                                             const Maybe<gfx::IntRect>& aCroppingRect);
 
   static already_AddRefed<ImageBitmap>
   CreateInternal(nsIGlobalObject* aGlobal, HTMLImageElement& aImageEl,
@@ -162,6 +250,13 @@ protected:
   RefPtr<gfx::SourceSurface> mSurface;
 
   /*
+   * This is used in the ImageBitmap-Extensions implementation.
+   * ImageUtils is a wrapper to layers::Image, which add some common methods for
+   * accessing the layers::Image's data.
+   */
+  UniquePtr<ImageUtils> mDataWrapper;
+
+  /*
    * The mPictureRect is the size of the source image in default, however, if
    * users specify the cropping area while creating an ImageBitmap, then this
    * mPictureRect is the cropping area.
@@ -173,6 +268,18 @@ protected:
    * to draw this ImageBitmap into a HTMLCanvasElement.
    */
   gfx::IntRect mPictureRect;
+
+  const bool mIsPremultipliedAlpha;
+
+  /*
+   * Set mIsCroppingAreaOutSideOfSourceImage if image bitmap was cropped to the
+   * source rectangle so that it contains any transparent black pixels (cropping
+   * area is outside of the source image).
+   * This is used in mapDataInto() to check if we should reject promise with
+   * IndexSizeError.
+   */
+  bool mIsCroppingAreaOutSideOfSourceImage;
+
 };
 
 } // namespace dom

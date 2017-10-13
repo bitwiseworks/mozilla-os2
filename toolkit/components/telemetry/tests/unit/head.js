@@ -7,8 +7,15 @@ Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/PromiseUtils.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
+Cu.import("resource://gre/modules/FileUtils.jsm", this);
+Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://testing-common/httpd.js", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "AddonTestUtils",
+                                  "resource://testing-common/AddonTestUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
 
 const gIsWindows = AppConstants.platform == "win";
 const gIsMac = AppConstants.platform == "macosx";
@@ -22,13 +29,10 @@ const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 
-const HAS_DATAREPORTINGSERVICE = "@mozilla.org/datareporting/service;1" in Cc;
-
 const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabled";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-var gOldAppInfo = null;
 var gGlobalScope = this;
 
 const PingServer = {
@@ -80,7 +84,10 @@ const PingServer = {
 
   promiseNextRequest: function() {
     const deferred = this._defers[this._currentDeferred++];
-    return deferred.promise;
+    // Send the ping to the consumer on the next tick, so that the completion gets
+    // signaled to Telemetry.
+    return new Promise(r => Services.tm.currentThread.dispatch(() => r(deferred.promise),
+                                                               Ci.nsIThread.DISPATCH_NORMAL));
   },
 
   promiseNextPing: function() {
@@ -160,69 +167,24 @@ function wrapWithExceptionHandler(f) {
   return wrapper;
 }
 
-function loadAddonManager(id, name, version, platformVersion) {
-  let ns = {};
-  Cu.import("resource://gre/modules/Services.jsm", ns);
-  let head = "../../../../mozapps/extensions/test/xpcshell/head_addons.js";
-  let file = do_get_file(head);
-  let uri = ns.Services.io.newFileURI(file);
-  ns.Services.scriptloader.loadSubScript(uri.spec, gGlobalScope);
-  createAppInfo(id, name, version, platformVersion);
-  startupManager();
+function loadAddonManager(...args) {
+  AddonTestUtils.init(gGlobalScope);
+  AddonTestUtils.overrideCertDB();
+  createAppInfo(...args);
+
+  // As we're not running in application, we need to setup the features directory
+  // used by system add-ons.
+  const distroDir = FileUtils.getDir("ProfD", ["sysfeatures", "app0"], true);
+  AddonTestUtils.registerDirectory("XREAppFeat", distroDir);
+  return AddonTestUtils.promiseStartupManager();
 }
 
-function createAppInfo(id, name, version, platformVersion) {
-  const XULAPPINFO_CONTRACTID = "@mozilla.org/xre/app-info;1";
-  const XULAPPINFO_CID = Components.ID("{c763b610-9d49-455a-bbd2-ede71682a1ac}");
-  let gAppInfo;
-  if (!gOldAppInfo) {
-    gOldAppInfo = Cc[XULAPPINFO_CONTRACTID].getService(Ci.nsIXULRuntime);
-  }
+var gAppInfo = null;
 
-  gAppInfo = {
-    // nsIXULAppInfo
-    vendor: "Mozilla",
-    name: name,
-    ID: id,
-    version: version,
-    appBuildID: "2007010101",
-    platformVersion: platformVersion,
-    platformBuildID: "2007010101",
-
-    // nsIXULRuntime
-    inSafeMode: false,
-    logConsoleErrors: true,
-    OS: "XPCShell",
-    XPCOMABI: "noarch-spidermonkey",
-    invalidateCachesOnRestart: function invalidateCachesOnRestart() {
-      // Do nothing
-    },
-
-    // nsICrashReporter
-    annotations: {},
-
-    annotateCrashReport: function(key, data) {
-      this.annotations[key] = data;
-    },
-
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIXULAppInfo,
-                                           Ci.nsIXULRuntime,
-                                           Ci.nsICrashReporter,
-                                           Ci.nsISupports])
-  };
-
-  Object.setPrototypeOf(gAppInfo, gOldAppInfo);
-
-  var XULAppInfoFactory = {
-    createInstance: function (outer, iid) {
-      if (outer != null)
-        throw Cr.NS_ERROR_NO_AGGREGATION;
-      return gAppInfo.QueryInterface(iid);
-    }
-  };
-  var registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-  registrar.registerFactory(XULAPPINFO_CID, "XULAppInfo",
-                            XULAPPINFO_CONTRACTID, XULAppInfoFactory);
+function createAppInfo(ID="xpcshell@tests.mozilla.org", name="XPCShell",
+                       version="1.0", platformVersion="1.0") {
+  AddonTestUtils.createAppInfo(ID, name, version, platformVersion);
+  gAppInfo = AddonTestUtils.appInfo;
 }
 
 // Fake the timeout functions for the TelemetryScheduler.
@@ -286,11 +248,6 @@ function fakeCachedClientId(uuid) {
   module.Policy.getCachedClientID = () => uuid;
 }
 
-function fakeIsUnifiedOptin(isOptin) {
-  let module = Cu.import("resource://gre/modules/TelemetryController.jsm");
-  module.Policy.isUnifiedOptin = () => isOptin;
-}
-
 // Return a date that is |offset| ms in the future from |date|.
 function futureDate(date, offset) {
   return new Date(date.getTime() + offset);
@@ -327,6 +284,15 @@ function getSnapshot(histogramId) {
   return Telemetry.getHistogramById(histogramId).snapshot();
 }
 
+// Helper for setting an empty list of Environment preferences to watch.
+function setEmptyPrefWatchlist() {
+  let TelemetryEnvironment =
+    Cu.import("resource://gre/modules/TelemetryEnvironment.jsm").TelemetryEnvironment;
+  return TelemetryEnvironment.onInitialized().then(() => {
+    TelemetryEnvironment.testWatchPreferences(new Map());
+  });
+}
+
 if (runningInParent) {
   // Set logging preferences for all the tests.
   Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
@@ -345,7 +311,7 @@ if (runningInParent) {
   do_register_cleanup(() => TelemetrySend.shutdown());
 }
 
-TelemetryController.initLogging();
+TelemetryController.testInitLogging();
 
 // Avoid timers interrupting test behavior.
 fakeSchedulerTimer(() => {}, () => {});

@@ -126,14 +126,12 @@ void SkDrawLinearGradient::dump(SkAnimateMaker* maker) {
 #endif
 
 SkShader* SkDrawLinearGradient::getShader() {
-    if (addPrelude() == 0 || points.count() != 4)
-        return NULL;
-    SkShader* shader = SkGradientShader::CreateLinear((SkPoint*)points.begin(),
+    if (addPrelude() == 0 || points.count() != 4) {
+        return nullptr;
+    }
+    return SkGradientShader::MakeLinear((SkPoint*)points.begin(),
         fColors.begin(), offsets.begin(), fColors.count(), (SkShader::TileMode) tileMode,
-        0, getMatrix());
-    SkAutoTDelete<SkShader> autoDel(shader);
-    (void)autoDel.detach();
-    return shader;
+        0, getMatrix()).release();
 }
 
 
@@ -161,12 +159,10 @@ void SkDrawRadialGradient::dump(SkAnimateMaker* maker) {
 #endif
 
 SkShader* SkDrawRadialGradient::getShader() {
-    if (addPrelude() == 0)
-        return NULL;
-    SkShader* shader = SkGradientShader::CreateRadial(center,
+    if (addPrelude() == 0) {
+        return nullptr;
+    }
+    return SkGradientShader::MakeRadial(center,
         radius, fColors.begin(), offsets.begin(), fColors.count(), (SkShader::TileMode) tileMode,
-        0, getMatrix());
-    SkAutoTDelete<SkShader> autoDel(shader);
-    (void)autoDel.detach();
-    return shader;
+        0, getMatrix()).release();
 }

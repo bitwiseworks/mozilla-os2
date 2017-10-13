@@ -220,6 +220,7 @@ EventListenerService::GetListenerInfoFor(nsIDOMEventTarget* aEventTarget,
 
 NS_IMETHODIMP
 EventListenerService::GetEventTargetChainFor(nsIDOMEventTarget* aEventTarget,
+                                             bool aComposed,
                                              uint32_t* aCount,
                                              nsIDOMEventTarget*** aOutArray)
 {
@@ -227,6 +228,7 @@ EventListenerService::GetEventTargetChainFor(nsIDOMEventTarget* aEventTarget,
   *aOutArray = nullptr;
   NS_ENSURE_ARG(aEventTarget);
   WidgetEvent event(true, eVoidEvent);
+  event.SetComposed(aComposed);
   nsTArray<EventTarget*> targets;
   nsresult rv = EventDispatcher::Dispatch(aEventTarget, nullptr, &event,
                                           nullptr, nullptr, nullptr, &targets);
@@ -371,9 +373,8 @@ EventListenerService::NotifyAboutMainThreadListenerChangeInternal(dom::EventTarg
 
   if (!mPendingListenerChanges) {
     mPendingListenerChanges = nsArrayBase::Create();
-    nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableMethod(this,
-      &EventListenerService::NotifyPendingChanges);
-    NS_DispatchToCurrentThread(runnable);
+    NS_DispatchToCurrentThread(NewRunnableMethod(this,
+                                                 &EventListenerService::NotifyPendingChanges));
   }
 
   RefPtr<EventListenerChange> changes = mPendingListenerChangesSet.Get(aTarget);

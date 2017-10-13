@@ -5,7 +5,8 @@
 const { combineReducers } = require("../shared/vendor/redux");
 const createStore = require("../shared/redux/create-store");
 const reducers = require("./reducers");
-const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const { viewState } = require("./constants");
+const flags = require("devtools/shared/flags");
 
 module.exports = function () {
   let shouldLog = false;
@@ -13,11 +14,16 @@ module.exports = function () {
 
   // If testing, store the action history in an array
   // we'll later attach to the store
-  if (DevToolsUtils.testing) {
+  if (flags.testing) {
     history = [];
+    // Uncomment this for TONS of logging in tests.
+    // shouldLog = true;
   }
 
-  let store = createStore({ log: shouldLog, history })(combineReducers(reducers), {});
+  let store = createStore({
+    log: shouldLog,
+    history
+  })(combineReducers(reducers), {});
 
   if (history) {
     store.history = history;

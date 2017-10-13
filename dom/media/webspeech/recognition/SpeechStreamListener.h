@@ -8,6 +8,7 @@
 #define mozilla_dom_SpeechStreamListener_h
 
 #include "MediaStreamGraph.h"
+#include "MediaStreamListener.h"
 #include "AudioSegment.h"
 
 namespace mozilla {
@@ -24,15 +25,14 @@ public:
   explicit SpeechStreamListener(SpeechRecognition* aRecognition);
   ~SpeechStreamListener();
 
-  virtual void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                        StreamTime aTrackOffset,
-                                        uint32_t aTrackEvents,
-                                        const MediaSegment& aQueuedMedia,
-                                        MediaStream* aInputStream,
-                                        TrackID aInputTrackID) override;
+  void NotifyQueuedAudioData(MediaStreamGraph* aGraph, TrackID aID,
+                             StreamTime aTrackOffset,
+                             const AudioSegment& aQueuedMedia,
+                             MediaStream* aInputStream,
+                             TrackID aInputTrackID) override;
 
-  virtual void NotifyEvent(MediaStreamGraph* aGraph,
-                           MediaStreamListener::MediaStreamGraphEvent event) override;
+  void NotifyEvent(MediaStreamGraph* aGraph,
+                   MediaStreamGraphEvent event) override;
 
 private:
   template<typename SampleFormatType>

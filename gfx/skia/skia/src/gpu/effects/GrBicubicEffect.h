@@ -10,11 +10,10 @@
 
 #include "GrSingleTextureEffect.h"
 #include "GrTextureDomain.h"
-#include "GrDrawEffect.h"
-#include "gl/GrGLEffect.h"
-#include "GrTBackendEffectFactory.h"
+#include "glsl/GrGLSLFragmentProcessor.h"
 
 class GrGLBicubicEffect;
+class GrInvariantOutput;
 
 class GrBicubicEffect : public GrSingleTextureEffect {
 public:
@@ -24,53 +23,66 @@ public:
     };
     virtual ~GrBicubicEffect();
 
-    static const char* Name() { return "Bicubic"; }
     const float* coefficients() const { return fCoefficients; }
 
-    typedef GrGLBicubicEffect GLEffect;
-
-    virtual const GrBackendEffectFactory& getFactory() const SK_OVERRIDE;
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
+    const char* name() const override { return "Bicubic"; }
 
     const GrTextureDomain& domain() const { return fDomain; }
+
+    GrColorSpaceXform* colorSpaceXform() const { return fColorSpaceXform.get(); }
 
     /**
      * Create a simple filter effect with custom bicubic coefficients and optional domain.
      */
-    static GrEffect* Create(GrTexture* tex, const SkScalar coefficients[16],
-                            const SkRect* domain = NULL) {
-        if (NULL == domain) {
+    static sk_sp<GrFragmentProcessor> Make(GrTexture* tex,
+                                           sk_sp<GrColorSpaceXform> colorSpaceXform,
+                                           const SkScalar coefficients[16],
+                                           const SkRect* domain = nullptr) {
+        if (nullptr == domain) {
             static const SkShader::TileMode kTileModes[] = { SkShader::kClamp_TileMode,
                                                              SkShader::kClamp_TileMode };
-            return Create(tex, coefficients, MakeDivByTextureWHMatrix(tex), kTileModes);
+            return Make(tex, std::move(colorSpaceXform), coefficients,
+                        GrCoordTransform::MakeDivByTextureWHMatrix(tex), kTileModes);
         } else {
-            return SkNEW_ARGS(GrBicubicEffect, (tex, coefficients,
-                                                MakeDivByTextureWHMatrix(tex), *domain));
+            return sk_sp<GrFragmentProcessor>(
+                new GrBicubicEffect(tex, std::move(colorSpaceXform), coefficients,
+                                    GrCoordTransform::MakeDivByTextureWHMatrix(tex), *domain));
         }
     }
 
     /**
      * Create a Mitchell filter effect with specified texture matrix and x/y tile modes.
      */
-    static GrEffect* Create(GrTexture* tex, const SkMatrix& matrix,
-                            SkShader::TileMode tileModes[2]) {
-        return Create(tex, gMitchellCoefficients, matrix, tileModes);
+    static sk_sp<GrFragmentProcessor> Make(GrTexture* tex,
+                                           sk_sp<GrColorSpaceXform> colorSpaceXform,
+                                           const SkMatrix& matrix,
+                                           const SkShader::TileMode tileModes[2]) {
+        return Make(tex, std::move(colorSpaceXform), gMitchellCoefficients, matrix, tileModes);
     }
 
     /**
      * Create a filter effect with custom bicubic coefficients, the texture matrix, and the x/y
      * tilemodes.
      */
-    static GrEffect* Create(GrTexture* tex, const SkScalar coefficients[16],
-                            const SkMatrix& matrix, const SkShader::TileMode tileModes[2]) {
-        return SkNEW_ARGS(GrBicubicEffect, (tex, coefficients, matrix, tileModes));
+    static sk_sp<GrFragmentProcessor> Make(GrTexture* tex,
+                                           sk_sp<GrColorSpaceXform> colorSpaceXform, 
+                                           const SkScalar coefficients[16],
+                                           const SkMatrix& matrix,
+                                           const SkShader::TileMode tileModes[2]) {
+        return sk_sp<GrFragmentProcessor>(new GrBicubicEffect(tex, std::move(colorSpaceXform),
+                                                              coefficients, matrix, tileModes));
     }
 
     /**
      * Create a Mitchell filter effect with a texture matrix and a domain.
      */
-    static GrEffect* Create(GrTexture* tex, const SkMatrix& matrix, const SkRect& domain) {
-        return SkNEW_ARGS(GrBicubicEffect, (tex, gMitchellCoefficients, matrix, domain));
+    static sk_sp<GrFragmentProcessor> Make(GrTexture* tex,
+                                           sk_sp<GrColorSpaceXform> colorSpaceXform,
+                                           const SkMatrix& matrix,
+                                           const SkRect& domain) {
+        return sk_sp<GrFragmentProcessor>(new GrBicubicEffect(tex, std::move(colorSpaceXform),
+                                                              gMitchellCoefficients, matrix,
+                                                              domain));
     }
 
     /**
@@ -84,16 +96,24 @@ public:
                                  GrTextureParams::FilterMode* filterMode);
 
 private:
-    GrBicubicEffect(GrTexture*, const SkScalar coefficients[16],
+    GrBicubicEffect(GrTexture*, sk_sp<GrColorSpaceXform>, const SkScalar coefficients[16],
                     const SkMatrix &matrix, const SkShader::TileMode tileModes[2]);
-    GrBicubicEffect(GrTexture*, const SkScalar coefficients[16],
+    GrBicubicEffect(GrTexture*, sk_sp<GrColorSpaceXform>, const SkScalar coefficients[16],
                     const SkMatrix &matrix, const SkRect& domain);
-    virtual bool onIsEqual(const GrEffect&) const SK_OVERRIDE;
+
+    GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
+
+    void onGetGLSLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
+
+    bool onIsEqual(const GrFragmentProcessor&) const override;
+
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override;
 
     float           fCoefficients[16];
     GrTextureDomain fDomain;
+    sk_sp<GrColorSpaceXform> fColorSpaceXform;
 
-    GR_DECLARE_EFFECT_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 
     static const SkScalar gMitchellCoefficients[16];
 

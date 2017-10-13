@@ -4,8 +4,7 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
 <?xml-stylesheet href="chrome://devtools/content/shared/widgets/widgets.css" type="text/css"?>
-<?xml-stylesheet href="debugger.css" type="text/css"?>
-<?xml-stylesheet href="chrome://devtools/skin/common.css" type="text/css"?>
+<?xml-stylesheet href="chrome://devtools/content/debugger/debugger.css" type="text/css"?>
 <?xml-stylesheet href="chrome://devtools/skin/widgets.css" type="text/css"?>
 <?xml-stylesheet href="chrome://devtools/skin/debugger.css" type="text/css"?>
 <!DOCTYPE window [
@@ -29,10 +28,8 @@
   <script type="text/javascript" src="debugger-view.js"/>
   <script type="text/javascript" src="utils.js"/>
   <script type="text/javascript" src="views/workers-view.js"/>
-  <script type="text/javascript" src="views/sources-view.js"/>
   <script type="text/javascript" src="views/variable-bubble-view.js"/>
   <script type="text/javascript" src="views/watch-expressions-view.js"/>
-  <script type="text/javascript" src="views/event-listeners-view.js"/>
   <script type="text/javascript" src="views/global-search-view.js"/>
   <script type="text/javascript" src="views/toolbar-view.js"/>
   <script type="text/javascript" src="views/options-view.js"/>
@@ -53,6 +50,10 @@
                 command="addBreakpointCommand"/>
       <menuitem id="se-dbg-cMenu-addConditionalBreakpoint"
                 label="&debuggerUI.seMenuCondBreak;"
+                key="addConditionalBreakpointKey"
+                command="addConditionalBreakpointCommand"/>
+      <menuitem id="se-dbg-cMenu-editConditionalBreakpoint"
+                label="&debuggerUI.seEditMenuCondBreak;"
                 key="addConditionalBreakpointKey"
                 command="addConditionalBreakpointCommand"/>
       <menuitem id="se-dbg-cMenu-addAsWatch"
@@ -188,31 +189,15 @@
     <key id="resumeKey"
          keycode="&debuggerUI.stepping.resume1;"
          command="resumeCommand"/>
-    <key id="resumeKey2"
-         keycode="&debuggerUI.stepping.resume2;"
-         modifiers="accel"
-         command="resumeCommand"/>
     <key id="stepOverKey"
          keycode="&debuggerUI.stepping.stepOver1;"
-         command="stepOverCommand"/>
-    <key id="stepOverKey2"
-         keycode="&debuggerUI.stepping.stepOver2;"
-         modifiers="accel"
          command="stepOverCommand"/>
     <key id="stepInKey"
          keycode="&debuggerUI.stepping.stepIn1;"
          command="stepInCommand"/>
-    <key id="stepInKey2"
-         keycode="&debuggerUI.stepping.stepIn2;"
-         modifiers="accel"
-         command="stepInCommand"/>
     <key id="stepOutKey"
          keycode="&debuggerUI.stepping.stepOut1;"
          modifiers="shift"
-         command="stepOutCommand"/>
-    <key id="stepOutKey2"
-         keycode="&debuggerUI.stepping.stepOut2;"
-         modifiers="accel shift"
          command="stepOutCommand"/>
     <key id="fileSearchKey"
          key="&debuggerUI.searchFile.key;"
@@ -321,7 +306,9 @@
             </tabpanel>
           </tabpanels>
         </tabbox>
-        <splitter class="devtools-horizontal-splitter"/>
+        <splitter id="workers-splitter"
+                  class="devtools-horizontal-splitter"
+                  hidden="true" />
         <tabbox id="sources-pane"
                 class="devtools-sidebar-tabs"
                 flex="1">
@@ -354,11 +341,6 @@
                                class="devtools-toolbarbutton"
                                tooltiptext="&debuggerUI.sources.toggleBreakpoints;"
                                command="toggleBreakpointsCommand"/>
-                <toolbarbutton id="toggle-promise-debugger"
-                               class="devtools-toolbarbutton"
-                               tooltiptext="&debuggerUI.sources.togglePromiseDebugger;"
-                               command="togglePromiseDebuggerCommand"
-                               hidden="true"/>
               </toolbar>
             </tabpanel>
             <tabpanel id="callstack-tabpanel">
@@ -416,12 +398,6 @@
             </tabpanels>
           </tabbox>
         </hbox>
-        <splitter id="editor-and-promise-splitter"
-                class="devtools-horizontal-splitter"/>
-        <vbox id="promise-debugger-pane"
-              flex="1"
-              hidden="true">
-        </vbox>
       </vbox>
       <splitter id="vertical-layout-splitter"
                 class="devtools-horizontal-splitter"/>
@@ -495,7 +471,4 @@
       <textbox id="conditional-breakpoint-panel-textbox"/>
     </vbox>
   </panel>
-
-  <script type="text/javascript" src="resource://gre/browser/modules/devtools/debugger/mocks.js"/>
-  <script type="text/javascript" src="resource://gre/browser/modules/devtools/debugger/mock-init.js"/>
 </window>

@@ -12,6 +12,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Move.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtr.h"
 
 #include "GCHeapProfilerImpl.h"
 #include "GeckoProfiler.h"
@@ -23,8 +24,6 @@
 #include "nsIGlobalObject.h"
 #include "prtime.h"
 #include "xpcprivate.h"
-
-struct JSRuntime;
 
 namespace mozilla {
 
@@ -42,10 +41,10 @@ nsTArray<nsCString>
 ProfilerImpl::GetStacktrace()
 {
   nsTArray<nsCString> trace;
-  nsAutoArrayPtr<char> output(new char[BACKTRACE_BUFFER_SIZE]);
+  auto output = MakeUnique<char[]>(BACKTRACE_BUFFER_SIZE);
 
-  profiler_get_backtrace_noalloc(output, BACKTRACE_BUFFER_SIZE);
-  for (const char* p = output; *p; p += strlen(p) + 1) {
+  profiler_get_backtrace_noalloc(output.get(), BACKTRACE_BUFFER_SIZE);
+  for (const char* p = output.get(); *p; p += strlen(p) + 1) {
     trace.AppendElement()->Assign(p);
   }
 
@@ -76,9 +75,9 @@ ProfilerImpl::AddBytesSampled(uint32_t aBytes)
 NS_IMPL_ISUPPORTS(MemoryProfiler, nsIMemoryProfiler)
 
 PRLock* MemoryProfiler::sLock;
-uint32_t MemoryProfiler::sProfileRuntimeCount;
+uint32_t MemoryProfiler::sProfileContextCount;
 StaticAutoPtr<NativeProfilerImpl> MemoryProfiler::sNativeProfiler;
-StaticAutoPtr<JSRuntimeProfilerMap> MemoryProfiler::sJSRuntimeProfilerMap;
+StaticAutoPtr<JSContextProfilerMap> MemoryProfiler::sJSContextProfilerMap;
 TimeStamp MemoryProfiler::sStartTime;
 
 void
@@ -91,9 +90,9 @@ MemoryProfiler::InitOnce()
   if (!initialized) {
     MallocHook::Initialize();
     sLock = PR_NewLock();
-    sProfileRuntimeCount = 0;
-    sJSRuntimeProfilerMap = new JSRuntimeProfilerMap();
-    ClearOnShutdown(&sJSRuntimeProfilerMap);
+    sProfileContextCount = 0;
+    sJSContextProfilerMap = new JSContextProfilerMap();
+    ClearOnShutdown(&sJSContextProfilerMap);
     ClearOnShutdown(&sNativeProfiler);
     std::srand(PR_Now());
     bool ignored;
@@ -108,12 +107,12 @@ MemoryProfiler::StartProfiler()
   InitOnce();
   AutoUseUncensoredAllocator ua;
   AutoMPLock lock(sLock);
-  JSRuntime* runtime = XPCJSRuntime::Get()->Runtime();
-  ProfilerForJSRuntime profiler;
-  if (!sJSRuntimeProfilerMap->Get(runtime, &profiler) ||
+  JSContext* context = XPCJSContext::Get()->Context();
+  ProfilerForJSContext profiler;
+  if (!sJSContextProfilerMap->Get(context, &profiler) ||
       !profiler.mEnabled) {
-    if (sProfileRuntimeCount == 0) {
-      js::EnableRuntimeProfilingStack(runtime, true);
+    if (sProfileContextCount == 0) {
+      js::EnableContextProfilingStack(context, true);
       if (!sNativeProfiler) {
         sNativeProfiler = new NativeProfilerImpl();
       }
@@ -122,12 +121,12 @@ MemoryProfiler::StartProfiler()
     GCHeapProfilerImpl* gp = new GCHeapProfilerImpl();
     profiler.mEnabled = true;
     profiler.mProfiler = gp;
-    sJSRuntimeProfilerMap->Put(runtime, profiler);
-    MemProfiler::GetMemProfiler(runtime)->start(gp);
-    if (sProfileRuntimeCount == 0) {
+    sJSContextProfilerMap->Put(context, profiler);
+    MemProfiler::GetMemProfiler(context)->start(gp);
+    if (sProfileContextCount == 0) {
       MallocHook::Enable(sNativeProfiler);
     }
-    sProfileRuntimeCount++;
+    sProfileContextCount++;
   }
   return NS_OK;
 }
@@ -138,18 +137,18 @@ MemoryProfiler::StopProfiler()
   InitOnce();
   AutoUseUncensoredAllocator ua;
   AutoMPLock lock(sLock);
-  JSRuntime* runtime = XPCJSRuntime::Get()->Runtime();
-  ProfilerForJSRuntime profiler;
-  if (sJSRuntimeProfilerMap->Get(runtime, &profiler) &&
+  JSContext* context = XPCJSContext::Get()->Context();
+  ProfilerForJSContext profiler;
+  if (sJSContextProfilerMap->Get(context, &profiler) &&
       profiler.mEnabled) {
-    MemProfiler::GetMemProfiler(runtime)->stop();
-    if (--sProfileRuntimeCount == 0) {
+    MemProfiler::GetMemProfiler(context)->stop();
+    if (--sProfileContextCount == 0) {
       MallocHook::Disable();
       MemProfiler::SetNativeProfiler(nullptr);
-      js::EnableRuntimeProfilingStack(runtime, false);
+      js::EnableContextProfilingStack(context, false);
     }
     profiler.mEnabled = false;
-    sJSRuntimeProfilerMap->Put(runtime, profiler);
+    sJSContextProfilerMap->Put(context, profiler);
   }
   return NS_OK;
 }
@@ -160,15 +159,15 @@ MemoryProfiler::ResetProfiler()
   InitOnce();
   AutoUseUncensoredAllocator ua;
   AutoMPLock lock(sLock);
-  JSRuntime* runtime = XPCJSRuntime::Get()->Runtime();
-  ProfilerForJSRuntime profiler;
-  if (!sJSRuntimeProfilerMap->Get(runtime, &profiler) ||
+  JSContext* context = XPCJSContext::Get()->Context();
+  ProfilerForJSContext profiler;
+  if (!sJSContextProfilerMap->Get(context, &profiler) ||
       !profiler.mEnabled) {
     delete profiler.mProfiler;
     profiler.mProfiler = nullptr;
-    sJSRuntimeProfilerMap->Put(runtime, profiler);
+    sJSContextProfilerMap->Put(context, profiler);
   }
-  if (sProfileRuntimeCount == 0) {
+  if (sProfileContextCount == 0) {
     sNativeProfiler = nullptr;
   }
   return NS_OK;
@@ -250,18 +249,18 @@ MemoryProfiler::GetResults(JSContext* cx, JS::MutableHandle<JS::Value> aResult)
   InitOnce();
   AutoUseUncensoredAllocator ua;
   AutoMPLock lock(sLock);
-  JSRuntime* runtime = XPCJSRuntime::Get()->Runtime();
+  JSContext* context = XPCJSContext::Get()->Context();
   // Getting results when the profiler is running is not allowed.
-  if (sProfileRuntimeCount > 0) {
+  if (sProfileContextCount > 0) {
     return NS_OK;
   }
   // Return immediately when native profiler does not exist.
   if (!sNativeProfiler) {
     return NS_OK;
   }
-  // Return immediately when there's no result in current runtime.
-  ProfilerForJSRuntime profiler;
-  if (!sJSRuntimeProfilerMap->Get(runtime, &profiler) ||
+  // Return immediately when there's no result in current context.
+  ProfilerForJSContext profiler;
+  if (!sJSContextProfilerMap->Get(context, &profiler) ||
       !profiler.mProfiler) {
     return NS_OK;
   }

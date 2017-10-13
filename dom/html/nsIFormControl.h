@@ -11,18 +11,17 @@
 
 class nsIDOMHTMLFormElement;
 class nsPresState;
-class nsFormSubmission;
 
 namespace mozilla {
 namespace dom {
 class Element;
 class HTMLFieldSetElement;
+class HTMLFormSubmission;
 } // namespace dom
 } // namespace mozilla
 
 enum FormControlsTypes {
   NS_FORM_FIELDSET = 1,
-  NS_FORM_LABEL,
   NS_FORM_OUTPUT,
   NS_FORM_SELECT,
   NS_FORM_TEXTAREA,
@@ -39,14 +38,14 @@ enum FormControlsTypes {
   NS_FORM_INPUT_ELEMENT  = 0x80  // 0b10000000
 };
 
-enum ButtonElementTypes {
+enum ButtonElementTypes : uint8_t {
   NS_FORM_BUTTON_BUTTON = NS_FORM_BUTTON_ELEMENT + 1,
   NS_FORM_BUTTON_RESET,
   NS_FORM_BUTTON_SUBMIT,
   eButtonElementTypesMax
 };
 
-enum InputElementTypes {
+enum InputElementTypes : uint8_t {
   NS_FORM_INPUT_BUTTON = NS_FORM_INPUT_ELEMENT + 1,
   NS_FORM_INPUT_CHECKBOX,
   NS_FORM_INPUT_COLOR,
@@ -56,6 +55,7 @@ enum InputElementTypes {
   NS_FORM_INPUT_HIDDEN,
   NS_FORM_INPUT_RESET,
   NS_FORM_INPUT_IMAGE,
+  NS_FORM_INPUT_MONTH,
   NS_FORM_INPUT_NUMBER,
   NS_FORM_INPUT_PASSWORD,
   NS_FORM_INPUT_RADIO,
@@ -66,6 +66,8 @@ enum InputElementTypes {
   NS_FORM_INPUT_TIME,
   NS_FORM_INPUT_URL,
   NS_FORM_INPUT_RANGE,
+  NS_FORM_INPUT_WEEK,
+  NS_FORM_INPUT_DATETIME_LOCAL,
   eInputElementTypesMax
 };
 
@@ -142,7 +144,8 @@ public:
    * @param aFormSubmission the form submission to notify of names/values/files
    *                       to submit
    */
-  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) = 0;
+  NS_IMETHOD
+  SubmitNamesValues(mozilla::dom::HTMLFormSubmission* aFormSubmission) = 0;
 
   /**
    * Save to presentation state.  The form control will determine whether it
@@ -176,7 +179,14 @@ public:
    * @param  aExcludePassword  to have NS_FORM_INPUT_PASSWORD returning false.
    * @return whether this is a text control.
    */
-  inline bool IsTextControl(bool aExcludePassword) const ;
+  inline bool IsTextControl(bool aExcludePassword) const;
+
+  /**
+   * Returns true if this is a text control or a number control.
+   * @param  aExcludePassword  to have NS_FORM_INPUT_PASSWORD returning false.
+   * @return true if this is a text control or a number control.
+   */
+  inline bool IsTextOrNumberControl(bool aExcludePassword) const;
 
   /**
    * Returns whether this is a single line text control.
@@ -236,6 +246,12 @@ nsIFormControl::IsTextControl(bool aExcludePassword) const
 }
 
 bool
+nsIFormControl::IsTextOrNumberControl(bool aExcludePassword) const
+{
+  return IsTextControl(aExcludePassword) || GetType() == NS_FORM_INPUT_NUMBER;
+}
+
+bool
 nsIFormControl::IsSingleLineTextControl(bool aExcludePassword) const
 {
   return IsSingleLineTextControl(aExcludePassword, GetType());
@@ -251,8 +267,14 @@ nsIFormControl::IsSingleLineTextControl(bool aExcludePassword, uint32_t aType)
          aType == NS_FORM_INPUT_TEL ||
          aType == NS_FORM_INPUT_URL ||
          // TODO: those are temporary until bug 773205 is fixed.
-         aType == NS_FORM_INPUT_DATE ||
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+         // On Android/B2G, date/time input appears as a normal text box.
          aType == NS_FORM_INPUT_TIME ||
+#endif
+         aType == NS_FORM_INPUT_DATE ||
+         aType == NS_FORM_INPUT_MONTH ||
+         aType == NS_FORM_INPUT_WEEK ||
+         aType == NS_FORM_INPUT_DATETIME_LOCAL ||
          (!aExcludePassword && aType == NS_FORM_INPUT_PASSWORD);
 }
 
@@ -274,7 +296,6 @@ nsIFormControl::AllowDraggableChildren() const
 {
   uint32_t type = GetType();
   return type == NS_FORM_OBJECT ||
-         type == NS_FORM_LABEL ||
          type == NS_FORM_FIELDSET ||
          type == NS_FORM_OUTPUT;
 }

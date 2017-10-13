@@ -12,6 +12,7 @@ this.EXPORTED_SYMBOLS = [ "ContentLinkHandler" ];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
   "resource:///modules/Feeds.jsm");
@@ -42,7 +43,7 @@ this.ContentLinkHandler = {
       return;
 
     // Ignore sub-frames (bugs 305472, 479408).
-    let window = link.ownerDocument.defaultView;
+    let window = link.ownerGlobal;
     if (window != window.top)
       return;
 
@@ -71,47 +72,46 @@ this.ContentLinkHandler = {
           }
           break;
         case "icon":
-          if (!iconAdded) {
-            if (!Services.prefs.getBoolPref("browser.chrome.site_icons"))
-              break;
+          if (iconAdded || !Services.prefs.getBoolPref("browser.chrome.site_icons"))
+            break;
 
-            var uri = this.getLinkIconURI(link);
-            if (!uri)
-              break;
+          var uri = this.getLinkIconURI(link);
+          if (!uri)
+            break;
 
-            // Telemetry probes for measuring the sizes attribute
-            // usage and available dimensions.
-            let sizeHistogramTypes = Services.telemetry.
-                                     getHistogramById("LINK_ICON_SIZES_ATTR_USAGE");
-            let sizeHistogramDimension = Services.telemetry.
-                                         getHistogramById("LINK_ICON_SIZES_ATTR_DIMENSION");
-            let sizesType;
-            if (link.sizes.length) {
-              for (let size of link.sizes) {
-                if (size.toLowerCase() == "any") {
-                  sizesType = SIZES_TELEMETRY_ENUM.ANY;
-                  break;
+          // Telemetry probes for measuring the sizes attribute
+          // usage and available dimensions.
+          let sizeHistogramTypes = Services.telemetry.
+                                   getHistogramById("LINK_ICON_SIZES_ATTR_USAGE");
+          let sizeHistogramDimension = Services.telemetry.
+                                       getHistogramById("LINK_ICON_SIZES_ATTR_DIMENSION");
+          let sizesType;
+          if (link.sizes.length) {
+            for (let size of link.sizes) {
+              if (size.toLowerCase() == "any") {
+                sizesType = SIZES_TELEMETRY_ENUM.ANY;
+                break;
+              } else {
+                let re = /^([1-9][0-9]*)x[1-9][0-9]*$/i;
+                let values = re.exec(size);
+                if (values && values.length > 1) {
+                  sizesType = SIZES_TELEMETRY_ENUM.DIMENSION;
+                  sizeHistogramDimension.add(parseInt(values[1]));
                 } else {
-                  let re = /^([1-9][0-9]*)x[1-9][0-9]*$/i;
-                  let values = re.exec(size);
-                  if (values && values.length > 1) {
-                    sizesType = SIZES_TELEMETRY_ENUM.DIMENSION;
-                    sizeHistogramDimension.add(parseInt(values[1]));
-                  } else {
-                    sizesType = SIZES_TELEMETRY_ENUM.INVALID;
-                    break;
-                  }
+                  sizesType = SIZES_TELEMETRY_ENUM.INVALID;
+                  break;
                 }
               }
-            } else {
-              sizesType = SIZES_TELEMETRY_ENUM.NO_SIZES;
             }
-            sizeHistogramTypes.add(sizesType);
-
-            [iconAdded] = chromeGlobal.sendSyncMessage(
-                            "Link:SetIcon",
-                            {url: uri.spec, loadingPrincipal: link.ownerDocument.nodePrincipal});
+          } else {
+            sizesType = SIZES_TELEMETRY_ENUM.NO_SIZES;
           }
+          sizeHistogramTypes.add(sizesType);
+
+          chromeGlobal.sendAsyncMessage(
+            "Link:SetIcon",
+            {url: uri.spec, loadingPrincipal: link.ownerDocument.nodePrincipal});
+          iconAdded = true;
           break;
         case "search":
           if (!searchAdded && event.type == "DOMLinkAdded") {
@@ -137,44 +137,9 @@ this.ContentLinkHandler = {
   getLinkIconURI: function(aLink) {
     let targetDoc = aLink.ownerDocument;
     var uri = BrowserUtils.makeURI(aLink.href, targetDoc.characterSet);
-
-    // Verify that the load of this icon is legal.
-    // Some error or special pages can load their favicon.
-    // To be on the safe side, only allow chrome:// favicons.
-    var isAllowedPage = [
-      /^about:neterror\?/,
-      /^about:blocked\?/,
-      /^about:certerror\?/,
-      /^about:home$/,
-    ].some(re => re.test(targetDoc.documentURI));
-
-    if (!isAllowedPage || !uri.schemeIs("chrome")) {
-      var ssm = Services.scriptSecurityManager;
-      try {
-        ssm.checkLoadURIWithPrincipal(targetDoc.nodePrincipal, uri,
-                                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-      } catch(e) {
-        return null;
-      }
-    }
-
-    try {
-      var contentPolicy = Cc["@mozilla.org/layout/content-policy;1"].
-                          getService(Ci.nsIContentPolicy);
-    } catch(e) {
-      return null; // Refuse to load if we can't do a security check.
-    }
-
-    // Security says okay, now ask content policy
-    if (contentPolicy.shouldLoad(Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE,
-                                 uri, targetDoc.documentURIObject,
-                                 aLink, aLink.type, null)
-                                 != Ci.nsIContentPolicy.ACCEPT)
-      return null;
-
     try {
       uri.userPass = "";
-    } catch(e) {
+    } catch (e) {
       // some URIs are immutable
     }
     return uri;

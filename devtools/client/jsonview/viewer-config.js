@@ -3,6 +3,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* global requirejs */
+
+"use strict";
 
 /**
  * RequireJS configuration for JSON Viewer.
@@ -16,15 +19,19 @@
  *
  * The path mapping uses paths fallback (a feature supported by RequireJS)
  * See also: http://requirejs.org/docs/api.html#pathsfallbacks
+ *
+ * React module ID is using exactly the same (relative) path as the rest
+ * of the code base, so it's consistent and modules can be easily reused.
  */
 require.config({
   baseUrl: ".",
   paths: {
-    "react": [
+    "devtools/client/shared": "resource://devtools/client/shared",
+    "devtools/shared": "resource://devtools/shared",
+    "devtools/client/shared/vendor/react": [
       "resource://devtools/client/shared/vendor/react-dev",
       "resource://devtools/client/shared/vendor/react"
     ],
-    "react-dom": "resource://devtools/client/shared/vendor/react-dom"
   }
 });
 

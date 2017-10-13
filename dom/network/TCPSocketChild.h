@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_TCPSocketChild_h
 #define mozilla_dom_TCPSocketChild_h
 
+#include "mozilla/dom/TypedArray.h"
 #include "mozilla/net/PTCPSocketChild.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsCOMPtr.h"
@@ -76,9 +77,11 @@ public:
   virtual bool RecvRequestDelete() override;
   virtual bool RecvUpdateBufferedAmount(const uint32_t& aBufferred,
                                         const uint32_t& aTrackingNumber) override;
+  nsresult SetFilterName(const nsACString& aFilterName);
 private:
   nsString mHost;
   uint16_t mPort;
+  nsCString mFilterName;
 };
 
 } // namespace dom

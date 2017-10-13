@@ -12,7 +12,6 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.HashSet;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -26,29 +25,25 @@ import org.mozilla.gecko.RobocopUtils;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 
-import android.app.Activity;
 import android.content.ContentValues;
-import android.content.pm.ActivityInfo;
 import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.os.Build;
-import android.os.SystemClock;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListAdapter;
 import android.widget.TextView;
 
-import com.jayway.android.robotium.solo.Condition;
-import com.jayway.android.robotium.solo.Solo;
-import com.jayway.android.robotium.solo.Timeout;
+import com.robotium.solo.Condition;
+import com.robotium.solo.Timeout;
 
 /**
  *  A convenient base class suitable for most Robocop tests.
@@ -56,17 +51,15 @@ import com.jayway.android.robotium.solo.Timeout;
 @SuppressWarnings("unchecked")
 abstract class BaseTest extends BaseRobocopTest {
     private static final int VERIFY_URL_TIMEOUT = 2000;
-    private static final int MAX_WAIT_ENABLED_TEXT_MS = 10000;
+    private static final int MAX_WAIT_ENABLED_TEXT_MS = 15000;
     private static final int MAX_WAIT_HOME_PAGER_HIDDEN_MS = 15000;
     private static final int MAX_WAIT_VERIFY_PAGE_TITLE_MS = 15000;
     public static final int MAX_WAIT_MS = 4500;
     public static final int LONG_PRESS_TIME = 6000;
     private static final int GECKO_READY_WAIT_MS = 180000;
-    public static final int MAX_WAIT_BLOCK_FOR_EVENT_DATA_MS = 90000;
 
     protected static final String URL_HTTP_PREFIX = "http://";
 
-    private int mPreferenceRequestID = 0;
     public Device mDevice;
     protected DatabaseHelper mDatabaseHelper;
     protected int mScreenMidWidth;
@@ -105,14 +98,6 @@ abstract class BaseTest extends BaseRobocopTest {
         // Ensure Robocop tests have access to network, and are run with Display powered on.
         throwIfHttpGetFails();
         throwIfScreenNotOn();
-    }
-
-    protected GeckoProfile getTestProfile() {
-        if (mProfile.startsWith("/")) {
-            return GeckoProfile.get(getActivity(), "default", mProfile);
-        }
-
-        return GeckoProfile.get(getActivity(), mProfile);
     }
 
     protected void initializeProfile() {
@@ -248,6 +233,22 @@ abstract class BaseTest extends BaseRobocopTest {
         public boolean isSatisfied() {
             String textValue = mTextView.getText().toString();
             return mExpected.equals(textValue);
+        }
+    }
+
+    class VerifyContentDescription implements Condition {
+        private final View view;
+        private final String expected;
+
+        public VerifyContentDescription(View view, String expected) {
+            this.view = view;
+            this.expected = expected;
+        }
+
+        @Override
+        public boolean isSatisfied() {
+            final CharSequence actual = view.getContentDescription();
+            return TextUtils.equals(actual, expected);
         }
     }
 
@@ -421,22 +422,15 @@ abstract class BaseTest extends BaseRobocopTest {
     public final void selectMenuItem(String menuItemName) {
         // build the item name ready to be used
         String itemName = "^" + menuItemName + "$";
-        mActions.sendSpecialKey(Actions.SpecialKey.MENU);
-        if (waitForText(itemName, true)) {
-            mSolo.clickOnText(itemName);
-        } else {
-            // Older versions of Android have additional settings under "More",
-            // including settings that newer versions have under "Tools."
-            if (mSolo.searchText("(^More$|^Tools$)")) {
-                mSolo.clickOnText("(^More$|^Tools$)");
-            }
-            waitForText(itemName);
-            mSolo.clickOnText(itemName);
-        }
+        final View menuView = mSolo.getView(R.id.menu);
+        mAsserter.isnot(menuView, null, "Menu view is not null");
+        mSolo.clickOnView(menuView, true);
+        mAsserter.ok(waitForEnabledText(itemName), "Waiting for menu item " + itemName, itemName + " is present and enabled");
+        mSolo.clickOnText(itemName);
     }
 
     public final void verifyHomePagerHidden() {
-        final View homePagerContainer = mSolo.getView(R.id.home_pager_container);
+        final View homePagerContainer = mSolo.getView(R.id.home_screen_container);
 
         boolean rc = waitForCondition(new Condition() {
             @Override
@@ -471,6 +465,33 @@ abstract class BaseTest extends BaseRobocopTest {
             pageTitle = urlBarTitle.getText().toString();
         }
         mAsserter.is(pageTitle, expected, "Page title is correct");
+    }
+
+    public final void verifyUrlInContentDescription(String url) {
+        mAsserter.isnot(url, null, "The url argument is not null");
+
+        final String expected;
+        if (mStringHelper.ABOUT_HOME_URL.equals(url)) {
+            expected = mStringHelper.ABOUT_HOME_TITLE;
+        } else if (url.startsWith(URL_HTTP_PREFIX)) {
+            expected = url.substring(URL_HTTP_PREFIX.length());
+        } else {
+            expected = url;
+        }
+
+        final View urlDisplayLayout = mSolo.getView(R.id.display_layout);
+        assertNotNull("ToolbarDisplayLayout is not null", urlDisplayLayout);
+
+        String actualUrl = null;
+
+        // Wait for the title to make sure it has been displayed in case the view
+        // does not update fast enough
+        waitForCondition(new VerifyContentDescription(urlDisplayLayout, expected), MAX_WAIT_VERIFY_PAGE_TITLE_MS);
+        if (urlDisplayLayout.getContentDescription() != null) {
+            actualUrl = urlDisplayLayout.getContentDescription().toString();
+        }
+
+        mAsserter.is(actualUrl, expected, "Url is correct");
     }
 
     public final void verifyTabCount(int expectedTabCount) {
@@ -591,15 +612,54 @@ abstract class BaseTest extends BaseRobocopTest {
         }
     }
 
+    // A temporary tabs list/grid holder while the list and grid views are being transitioned to
+    // RecyclerViews (bug 1116415 and bug 1310081).
+    private static class TabsView {
+        private AdapterView<ListAdapter> gridView;
+        private RecyclerView listView;
+
+        public TabsView(View view) {
+            if (view instanceof RecyclerView) {
+                listView = (RecyclerView) view;
+            } else {
+                gridView = (AdapterView<ListAdapter>) view;
+            }
+        }
+
+        public void bringPositionIntoView(int index) {
+            if (gridView != null) {
+                gridView.setSelection(index);
+            } else {
+                listView.scrollToPosition(index);
+            }
+        }
+
+        public View getViewAtIndex(int index) {
+            if (gridView != null) {
+                return gridView.getChildAt(index - gridView.getFirstVisiblePosition());
+            } else {
+                final RecyclerView.ViewHolder itemViewHolder = listView.findViewHolderForLayoutPosition(index);
+                return itemViewHolder == null ? null : itemViewHolder.itemView;
+            }
+        }
+
+        public void post(Runnable runnable) {
+            if (gridView != null) {
+                gridView.post(runnable);
+            } else {
+                listView.post(runnable);
+            }
+        }
+    }
     /**
      * Gets the AdapterView of the tabs list.
      *
      * @return List view in the tabs panel
      */
-    private final AdapterView<ListAdapter> getTabsLayout() {
+    private final TabsView getTabsLayout() {
         Element tabs = mDriver.findElement(getActivity(), R.id.tabs);
         tabs.click();
-        return (AdapterView<ListAdapter>) getActivity().findViewById(R.id.normal_tabs);
+        return new TabsView(getActivity().findViewById(R.id.normal_tabs));
     }
 
     /**
@@ -610,12 +670,12 @@ abstract class BaseTest extends BaseRobocopTest {
     private View getTabViewAt(final int index) {
         final View[] childView = { null };
 
-        final AdapterView<ListAdapter> view = getTabsLayout();
+        final TabsView view = getTabsLayout();
 
         runOnUiThreadSync(new Runnable() {
             @Override
             public void run() {
-                view.setSelection(index);
+                view.bringPositionIntoView(index);
 
                 // The selection isn't updated synchronously; posting a
                 // runnable to the view's queue guarantees we'll run after the
@@ -623,11 +683,8 @@ abstract class BaseTest extends BaseRobocopTest {
                 view.post(new Runnable() {
                     @Override
                     public void run() {
-                        // getChildAt() is relative to the list of visible
-                        // views, but our index is relative to all views in the
-                        // list. Subtract the first visible list position for
-                        // the correct offset.
-                        childView[0] = view.getChildAt(index - view.getFirstVisiblePosition());
+                        // Index is relative to all views in the list.
+                        childView[0] = view.getViewAtIndex(index);
                     }
                 });
             }
@@ -886,60 +943,34 @@ abstract class BaseTest extends BaseRobocopTest {
     /**
      * Set the preference and wait for it to change before proceeding with the test.
      */
-    public void setPreferenceAndWaitForChange(final JSONObject jsonPref) {
+    public void setPreferenceAndWaitForChange(final String name, final Object value) {
         blockForGeckoReady();
-        mActions.sendGeckoEvent("Preferences:Set", jsonPref.toString());
-
-        // Get the preference name from the json and store it in an array. This array
-        // will be used later while fetching the preference data.
-        String[] prefNames = new String[1];
-        try {
-            prefNames[0] = jsonPref.getString("name");
-        } catch (JSONException e) {
-            mAsserter.ok(false, "Exception in setPreferenceAndWaitForChange", getStackTraceString(e));
-        }
+        mActions.setPref(name, value, /* flush */ false);
 
         // Wait for confirmation of the pref change before proceeding with the test.
-        final int ourRequestID = mPreferenceRequestID--;
-        final Actions.RepeatedEventExpecter eventExpecter = mActions.expectGeckoEvent("Preferences:Data");
-        mActions.sendPreferencesGetEvent(ourRequestID, prefNames);
+        mActions.getPrefs(new String[] { name }, new Actions.PrefHandlerBase() {
 
-        // Wait until we get the correct "Preferences:Data" event
-        waitForCondition(new Condition() {
-            final long endTime = SystemClock.elapsedRealtime() + MAX_WAIT_BLOCK_FOR_EVENT_DATA_MS;
-
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    long timeout = endTime - SystemClock.elapsedRealtime();
-                    if (timeout < 0) {
-                        timeout = 0;
-                    }
-
-                    JSONObject data = new JSONObject(eventExpecter.blockForEventDataWithTimeout(timeout));
-                    int requestID = data.getInt("requestId");
-                    if (requestID != ourRequestID) {
-                        return false;
-                    }
-
-                    JSONArray preferences = data.getJSONArray("preferences");
-                    mAsserter.is(preferences.length(), 1, "Expecting preference array to have one element");
-                    JSONObject prefs = (JSONObject) preferences.get(0);
-                    mAsserter.is(prefs.getString("name"), jsonPref.getString("name"),
-                            "Expecting returned preference name to be the same as the set name");
-                    mAsserter.is(prefs.getString("type"), jsonPref.getString("type"),
-                            "Expecting returned preference type to be the same as the set type");
-                    mAsserter.is(prefs.get("value"), jsonPref.get("value"),
-                            "Expecting returned preference value to be the same as the set value");
-                    return true;
-                } catch(JSONException e) {
-                    mAsserter.ok(false, "Exception in setPreferenceAndWaitForChange", getStackTraceString(e));
-                    // Please the java compiler
-                    return false;
-                }
+            @Override // Actions.PrefHandlerBase
+            public void prefValue(String pref, boolean changedValue) {
+                mAsserter.is(pref, name, "Expecting correct pref name");
+                mAsserter.ok(value instanceof Boolean, "Expecting boolean pref", "");
+                mAsserter.is(changedValue, value, "Expecting matching pref value");
             }
-        }, MAX_WAIT_BLOCK_FOR_EVENT_DATA_MS);
 
-        eventExpecter.unregisterListener();
+            @Override // Actions.PrefHandlerBase
+            public void prefValue(String pref, int changedValue) {
+                mAsserter.is(pref, name, "Expecting correct pref name");
+                mAsserter.ok(value instanceof Integer, "Expecting int pref", "");
+                mAsserter.is(changedValue, value, "Expecting matching pref value");
+            }
+
+            @Override // Actions.PrefHandlerBase
+            public void prefValue(String pref, String changedValue) {
+                mAsserter.is(pref, name, "Expecting correct pref name");
+                mAsserter.ok(value instanceof CharSequence, "Expecting string pref", "");
+                mAsserter.is(changedValue, value, "Expecting matching pref value");
+            }
+
+        }).waitForFinish();
     }
 }

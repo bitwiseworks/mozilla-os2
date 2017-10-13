@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -19,16 +19,19 @@ UNIFIED_SOURCES += [
     'src/src/jemalloc.c',
     'src/src/mb.c',
     'src/src/mutex.c',
+    'src/src/nstime.c',
     'src/src/pages.c',
+    'src/src/prng.c',
     'src/src/prof.c',
     'src/src/quarantine.c',
     'src/src/rtree.c',
+    'src/src/spin.c',
     'src/src/stats.c',
     'src/src/tcache.c',
+    'src/src/ticker.c',
     'src/src/tsd.c',
     'src/src/util.c',
-    # FIXME do we ever want valgrind.c?
-    # 'src/src/valgrind.c',
+    'src/src/witness.c',
 ]
 
 SOURCES += [
@@ -43,9 +46,10 @@ if CONFIG['OS_TARGET'] == 'Darwin' and not CONFIG['MOZ_REPLACE_MALLOC']:
         'src/src/zone.c',
     ]
 
-Library('jemalloc')
-
-FORCE_STATIC_LIB = True
+if CONFIG['MOZ_JEMALLOC4']:
+    FINAL_LIBRARY = 'memory'
+else:
+    FINAL_LIBRARY = 'replace_jemalloc'
 
 if CONFIG['MOZ_GLUE_IN_PROGRAM']:
     SDK_LIBRARY = True
@@ -61,9 +65,6 @@ if CONFIG['OS_TARGET'] == 'Linux':
     # For mremap
     DEFINES['_GNU_SOURCE'] = True
 
-if CONFIG['MOZ_NUWA_PROCESS'] and CONFIG['MOZ_JEMALLOC4']:
-    DEFINES['pthread_mutex_lock'] = '__real_pthread_mutex_lock'
-
 if CONFIG['GNU_CC']:
     CFLAGS += ['-std=gnu99']
 
@@ -76,3 +77,5 @@ LOCAL_INCLUDES += [
 
 # We allow warnings for third-party code that can be updated from upstream.
 ALLOW_COMPILER_WARNINGS = True
+
+OS_LIBS += CONFIG['REALTIME_LIBS']

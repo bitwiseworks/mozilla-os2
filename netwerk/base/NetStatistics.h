@@ -43,16 +43,16 @@ GetActiveNetworkInfo(nsCOMPtr<nsINetworkInfo> &aNetworkInfo)
   return NS_OK;
 }
 
-class SaveNetworkStatsEvent : public nsRunnable {
+class SaveNetworkStatsEvent : public Runnable {
 public:
   SaveNetworkStatsEvent(uint32_t aAppId,
-                        bool aIsInBrowser,
+                        bool aIsInIsolatedMozBrowser,
                         nsMainThreadPtrHandle<nsINetworkInfo> &aActiveNetworkInfo,
                         uint64_t aCountRecv,
                         uint64_t aCountSent,
                         bool aIsAccumulative)
     : mAppId(aAppId),
-      mIsInBrowser(aIsInBrowser),
+      mIsInIsolatedMozBrowser(aIsInIsolatedMozBrowser),
       mActiveNetworkInfo(aActiveNetworkInfo),
       mCountRecv(aCountRecv),
       mCountSent(aCountSent),
@@ -62,7 +62,7 @@ public:
     MOZ_ASSERT(mActiveNetworkInfo);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -75,7 +75,7 @@ public:
 
     // save the network stats through NetworkStatsServiceProxy
     mNetworkStatsServiceProxy->SaveAppStats(mAppId,
-                                            mIsInBrowser,
+                                            mIsInIsolatedMozBrowser,
                                             mActiveNetworkInfo,
                                             PR_Now() / 1000,
                                             mCountRecv,
@@ -87,7 +87,7 @@ public:
   }
 private:
   uint32_t mAppId;
-  bool     mIsInBrowser;
+  bool     mIsInIsolatedMozBrowser;
   nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
   uint64_t mCountRecv;
   uint64_t mCountSent;

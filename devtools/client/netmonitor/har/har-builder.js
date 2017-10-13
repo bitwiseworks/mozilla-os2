@@ -3,19 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Cu, Ci, Cc } = require("chrome");
-const { defer, all, resolve } = require("promise");
-const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+const { defer, all } = require("promise");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const Services = require("Services");
+const appInfo = Services.appinfo;
+const { CurlUtils } = require("devtools/client/shared/curl");
+const { getFormDataSections } = require("devtools/client/netmonitor/request-utils");
 
-loader.lazyImporter(this, "ViewHelpers", "resource://devtools/client/shared/widgets/ViewHelpers.jsm");
 loader.lazyRequireGetter(this, "NetworkHelper", "devtools/shared/webconsole/network-helper");
 
-loader.lazyGetter(this, "appInfo", () => {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULAppInfo);
-});
-
 loader.lazyGetter(this, "L10N", () => {
-  return new ViewHelpers.L10N("chrome://devtools/locale/har.properties");
+  return new LocalizationHelper("devtools/client/locales/har.properties");
 });
 
 const HAR_VERSION = "1.1";
@@ -39,10 +37,10 @@ const HAR_VERSION = "1.1";
  * - includeResponseBodies {Boolean}: Set to true to include HTTP response
  *   bodies in the result data structure.
  */
-var HarBuilder = function(options) {
+var HarBuilder = function (options) {
   this._options = options;
   this._pageMap = [];
-}
+};
 
 HarBuilder.prototype = {
   // Public API
@@ -55,7 +53,7 @@ HarBuilder.prototype = {
    * @returns {Promise} A promise that resolves to the HAR object when
    * the entire build process is done.
    */
-  build: function() {
+  build: function () {
     this.promises = [];
 
     // Build basic structure for data.
@@ -63,7 +61,7 @@ HarBuilder.prototype = {
 
     // Build entries.
     let items = this._options.items;
-    for (let i=0; i<items.length; i++) {
+    for (let i = 0; i < items.length; i++) {
       let file = items[i].attachment;
       log.entries.push(this.buildEntry(log, file));
     }
@@ -78,7 +76,7 @@ HarBuilder.prototype = {
 
   // Helpers
 
-  buildLog: function() {
+  buildLog: function () {
     return {
       version: HAR_VERSION,
       creator: {
@@ -91,10 +89,10 @@ HarBuilder.prototype = {
       },
       pages: [],
       entries: [],
-    }
+    };
   },
 
-  buildPage: function(file) {
+  buildPage: function (file) {
     let page = {};
 
     // Page start time is set when the first request is processed
@@ -106,7 +104,7 @@ HarBuilder.prototype = {
     return page;
   },
 
-  getPage: function(log, file) {
+  getPage: function (log, file) {
     let id = this._options.id;
     let page = this._pageMap[id];
     if (page) {
@@ -119,7 +117,7 @@ HarBuilder.prototype = {
     return page;
   },
 
-  buildEntry: function(log, file) {
+  buildEntry: function (log, file) {
     let page = this.getPage(log, file);
 
     let entry = {};
@@ -149,7 +147,7 @@ HarBuilder.prototype = {
     return entry;
   },
 
-  buildPageTimings: function(page, file) {
+  buildPageTimings: function (page, file) {
     // Event timing info isn't available
     let timings = {
       onContentLoad: -1,
@@ -159,7 +157,7 @@ HarBuilder.prototype = {
     return timings;
   },
 
-  buildRequest: function(file) {
+  buildRequest: function (file) {
     let request = {
       bodySize: 0
     };
@@ -169,6 +167,7 @@ HarBuilder.prototype = {
     request.httpVersion = file.httpVersion || "";
 
     request.headers = this.buildHeaders(file.requestHeaders);
+    request.headers = this.appendHeadersPostData(request.headers, file);
     request.cookies = this.buildCookies(file.requestCookies);
 
     request.queryString = NetworkHelper.parseQueryString(
@@ -195,7 +194,7 @@ HarBuilder.prototype = {
    *
    * @param {Object} input Request or response header object.
    */
-  buildHeaders: function(input) {
+  buildHeaders: function (input) {
     if (!input) {
       return [];
     }
@@ -203,7 +202,22 @@ HarBuilder.prototype = {
     return this.buildNameValuePairs(input.headers);
   },
 
-  buildCookies: function(input) {
+  appendHeadersPostData: function (input = [], file) {
+    if (!file.requestPostData) {
+      return input;
+    }
+
+    this.fetchData(file.requestPostData.postData.text).then(value => {
+      let multipartHeaders = CurlUtils.getHeadersFromMultipartText(value);
+      for (let header of multipartHeaders) {
+        input.push(header);
+      }
+    });
+
+    return input;
+  },
+
+  buildCookies: function (input) {
     if (!input) {
       return [];
     }
@@ -211,7 +225,7 @@ HarBuilder.prototype = {
     return this.buildNameValuePairs(input.cookies);
   },
 
-  buildNameValuePairs: function(entries) {
+  buildNameValuePairs: function (entries) {
     let result = [];
 
     // HAR requires headers array to be presented, so always
@@ -228,12 +242,12 @@ HarBuilder.prototype = {
           value: value
         });
       });
-    })
+    });
 
     return result;
   },
 
-  buildPostData: function(file) {
+  buildPostData: function (file) {
     let postData = {
       mimeType: findValue(file.requestHeaders.headers, "content-type"),
       params: [],
@@ -250,38 +264,42 @@ HarBuilder.prototype = {
     }
 
     // Load request body from the backend.
-    this.fetchData(file.requestPostData.postData.text).then(value => {
-      postData.text = value;
+    this.fetchData(file.requestPostData.postData.text).then(postDataText => {
+      postData.text = postDataText;
 
       // If we are dealing with URL encoded body, parse parameters.
-      if (isURLEncodedFile(file, value)) {
+      let { headers } = file.requestHeaders;
+      if (CurlUtils.isUrlEncodedRequest({ headers, postDataText })) {
         postData.mimeType = "application/x-www-form-urlencoded";
 
         // Extract form parameters and produce nice HAR array.
-        this._options.view._getFormDataSections(file.requestHeaders,
+        getFormDataSections(
+          file.requestHeaders,
           file.requestHeadersFromUploadStream,
-          file.requestPostData).then(formDataSections => {
-            formDataSections.forEach(section => {
-              let paramsArray = NetworkHelper.parseQueryString(section);
-              if (paramsArray) {
-                postData.params = [...postData.params, ...paramsArray];
-              }
-            });
+          file.requestPostData,
+          this._options.getString
+        ).then(formDataSections => {
+          formDataSections.forEach(section => {
+            let paramsArray = NetworkHelper.parseQueryString(section);
+            if (paramsArray) {
+              postData.params = [...postData.params, ...paramsArray];
+            }
           });
+        });
       }
     });
 
     return postData;
   },
 
-  buildResponse: function(file) {
+  buildResponse: function (file) {
     let response = {
       status: 0
     };
 
     // Arbitrary value if it's aborted to make sure status has a number
     if (file.status) {
-      response.status = parseInt(file.status);
+      response.status = parseInt(file.status, 10);
     }
 
     let responseHeaders = file.responseHeaders;
@@ -311,7 +329,7 @@ HarBuilder.prototype = {
     return response;
   },
 
-  buildContent: function(file) {
+  buildContent: function (file) {
     let content = {
       mimeType: file.mimeType,
       size: -1
@@ -336,7 +354,7 @@ HarBuilder.prototype = {
 
     if (responseContent) {
       let text = responseContent.content.text;
-      let promise = this.fetchData(text).then(value => {
+      this.fetchData(text).then(value => {
         content.text = value;
       });
     }
@@ -344,7 +362,7 @@ HarBuilder.prototype = {
     return content;
   },
 
-  buildCache: function(file) {
+  buildCache: function (file) {
     let cache = {};
 
     if (!file.fromCache) {
@@ -363,7 +381,7 @@ HarBuilder.prototype = {
     return cache;
   },
 
-  buildCacheEntry: function(cacheEntry) {
+  buildCacheEntry: function (cacheEntry) {
     let cache = {};
 
     cache.expires = findValue(cacheEntry, "Expires");
@@ -374,7 +392,7 @@ HarBuilder.prototype = {
     return cache;
   },
 
-  getBlockingEndTime: function(file) {
+  getBlockingEndTime: function (file) {
     if (file.resolveStarted && file.connectStarted) {
       return file.resolvingTime;
     }
@@ -393,7 +411,7 @@ HarBuilder.prototype = {
 
   // RDP Helpers
 
-  fetchData: function(string) {
+  fetchData: function (string) {
     let promise = this._options.getString(string).then(value => {
       return value;
     });
@@ -404,30 +422,9 @@ HarBuilder.prototype = {
 
     return promise;
   }
-}
+};
 
 // Helpers
-
-/**
- * Returns true if specified request body is URL encoded.
- */
-function isURLEncodedFile(file, text) {
-  let contentType = "content-type: application/x-www-form-urlencoded"
-  if (text && text.toLowerCase().indexOf(contentType) != -1) {
-    return true;
-  }
-
-  // The header value doesn't have to be always exactly
-  // "application/x-www-form-urlencoded",
-  // there can be even charset specified. So, use indexOf rather than just
-  // "==".
-  let value = findValue(file.requestHeaders.headers, "content-type");
-  if (value && value.indexOf("application/x-www-form-urlencoded") == 0) {
-    return true;
-  }
-
-  return false;
-}
 
 /**
  * Find specified value within an array of name-value pairs
@@ -469,12 +466,12 @@ function dateToJSON(date) {
     return s;
   }
 
-  let result = date.getFullYear() + '-' +
-    f(date.getMonth() + 1) + '-' +
-    f(date.getDate()) + 'T' +
-    f(date.getHours()) + ':' +
-    f(date.getMinutes()) + ':' +
-    f(date.getSeconds()) + '.' +
+  let result = date.getFullYear() + "-" +
+    f(date.getMonth() + 1) + "-" +
+    f(date.getDate()) + "T" +
+    f(date.getHours()) + ":" +
+    f(date.getMinutes()) + ":" +
+    f(date.getSeconds()) + "." +
     f(date.getMilliseconds(), 3);
 
   let offset = date.getTimezoneOffset();

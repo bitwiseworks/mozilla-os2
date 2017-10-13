@@ -367,12 +367,13 @@ class TypeUnion(Node):
         self.components.append(Decl(type, name))
 
 class Typedef(Node):
-    def __init__(self, fromtype, totypename):
+    def __init__(self, fromtype, totypename, templateargs=[]):
         assert isinstance(totypename, str)
         
         Node.__init__(self)
         self.fromtype = fromtype
         self.totypename = totypename
+        self.templateargs = templateargs
 
     def __cmp__(self, o):
         return cmp(self.totypename, o.totypename)
@@ -755,6 +756,15 @@ class StmtFor(Block):
         self.init = init
         self.cond = cond
         self.update = update
+
+class StmtRangedFor(Block):
+    def __init__(self, var, iteree):
+        assert isinstance(var, ExprVar)
+        assert iteree
+
+        Block.__init__(self)
+        self.var = var
+        self.iteree = iteree
 
 class StmtSwitch(Block):
     def __init__(self, expr):

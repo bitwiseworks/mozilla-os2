@@ -11,9 +11,6 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
-  disableServiceWorkerEvents(
-    'https://example.com/page/1'
-  );
   run_next_test();
 }
 
@@ -33,7 +30,6 @@ add_task(function* test_register_request_queue() {
 
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -45,20 +41,21 @@ add_task(function* test_register_request_queue() {
     }
   });
 
-  let firstRegister = PushNotificationService.register(
-    'https://example.com/page/1',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
-  let secondRegister = PushNotificationService.register(
-    'https://example.com/page/1',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
+  let firstRegister = PushService.register({
+    scope: 'https://example.com/page/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
+  let secondRegister = PushService.register({
+    scope: 'https://example.com/page/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
 
-  yield waitForPromise(Promise.all([
+  yield Promise.all([
     rejects(firstRegister, 'Should time out the first request'),
     rejects(secondRegister, 'Should time out the second request')
-  ]), DEFAULT_TIMEOUT, 'Queued requests did not time out');
+  ]);
 
-  yield waitForPromise(helloPromise, DEFAULT_TIMEOUT,
-    'Timed out waiting for reconnect');
+  yield helloPromise;
 });

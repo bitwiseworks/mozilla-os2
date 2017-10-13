@@ -8,7 +8,6 @@
 #define nsIConstraintValidition_h___
 
 #include "nsISupports.h"
-#include "nsAutoPtr.h"
 #include "nsString.h"
 
 class nsIDOMValidityState;
@@ -56,7 +55,7 @@ public:
     VALIDITY_STATE_TYPE_MISMATCH    = 0x1 <<  1,
     VALIDITY_STATE_PATTERN_MISMATCH = 0x1 <<  2,
     VALIDITY_STATE_TOO_LONG         = 0x1 <<  3,
-  //VALIDITY_STATE_TOO_SHORT        = 0x1 <<  4,
+    VALIDITY_STATE_TOO_SHORT        = 0x1 <<  4,
     VALIDITY_STATE_RANGE_UNDERFLOW  = 0x1 <<  5,
     VALIDITY_STATE_RANGE_OVERFLOW   = 0x1 <<  6,
     VALIDITY_STATE_STEP_MISMATCH    = 0x1 <<  7,
@@ -64,8 +63,8 @@ public:
     VALIDITY_STATE_CUSTOM_ERROR     = 0x1 <<  9,
   };
 
-  void SetValidityState(ValidityStateType mState,
-                        bool mValue);
+  void SetValidityState(ValidityStateType aState,
+                        bool aValue);
 
   // Web IDL binding methods
   bool WillValidate() const {
@@ -73,6 +72,7 @@ public:
   }
   mozilla::dom::ValidityState* Validity();
   bool CheckValidity();
+  bool ReportValidity();
 
 protected:
 
@@ -83,9 +83,10 @@ protected:
   nsresult CheckValidity(bool* aValidity);
   void     SetCustomValidity(const nsAString& aError);
 
-  bool GetValidityState(ValidityStateType mState) const {
-         return mValidityBitField & mState;
-       }
+  bool GetValidityState(ValidityStateType aState) const
+  {
+    return mValidityBitField & aState;
+  }
 
   void SetBarredFromConstraintValidation(bool aBarred);
 

@@ -5,9 +5,9 @@
 function genericChecker() {
   let kind = "background";
   let path = window.location.pathname;
-  if (path.indexOf("popup") != -1) {
+  if (path.includes("/popup.html")) {
     kind = "popup";
-  } else if (path.indexOf("page") != -1) {
+  } else if (path.includes("/page.html")) {
     kind = "page";
   }
 
@@ -34,7 +34,7 @@ function genericChecker() {
       browser.tabs.query({
         windowId: args[0],
       }, tabs => {
-        let tab = tabs.find(tab => tab.url.indexOf("page.html") != -1);
+        let tab = tabs.find(tab => tab.url.includes("/page.html"));
         browser.tabs.remove(tab.id, () => {
           browser.test.sendMessage("closed");
         });
@@ -90,7 +90,7 @@ add_task(function* () {
 
   yield Promise.all([extension.startup(), extension.awaitMessage("background-ready")]);
 
-  let {WindowManager} = Cu.import("resource://gre/modules/Extension.jsm", {});
+  let {Management: {global: {WindowManager}}} = Cu.import("resource://gre/modules/Extension.jsm", {});
 
   let winId1 = WindowManager.getId(win1);
   let winId2 = WindowManager.getId(win2);
@@ -110,33 +110,24 @@ add_task(function* () {
   yield checkWindow("background", winId2, "win2");
 
   function* triggerPopup(win, callback) {
-    let widgetId = makeWidgetId(extension.id) + "-browser-action";
-    let node = CustomizableUI.getWidget(widgetId).forWindow(win).node;
-
-    let evt = new CustomEvent("command", {
-      bubbles: true,
-      cancelable: true,
-    });
-    node.dispatchEvent(evt);
+    yield clickBrowserAction(extension, win);
+    yield awaitExtensionPanel(extension, win);
 
     yield extension.awaitMessage("popup-ready");
 
     yield callback();
 
-    let panel = node.querySelector("panel");
-    if (panel) {
-      panel.hidePopup();
-    }
+    closeBrowserAction(extension, win);
   }
 
   // Set focus to some other window.
   yield focusWindow(window);
 
-  yield triggerPopup(win1, function*() {
+  yield triggerPopup(win1, function* () {
     yield checkWindow("popup", winId1, "win1");
   });
 
-  yield triggerPopup(win2, function*() {
+  yield triggerPopup(win2, function* () {
     yield checkWindow("popup", winId2, "win2");
   });
 

@@ -17,9 +17,17 @@ class nsDisplayBackgroundImage;
 class nsCharClipDisplayItem;
 class nsDisplayItem;
 class nsDisplayListBuilder;
-class nsDisplaySVGEffects;
 class nsDisplayTableItem;
 class nsDisplayThemedBackground;
+class nsDisplaySVGEffects;
+class nsDisplayMask;
+class nsDisplayFilter;
+
+namespace mozilla {
+namespace gfx {
+struct Color;
+}
+}
 
 /**
  * This stores the geometry of an nsDisplayItem, and the area
@@ -33,16 +41,16 @@ class nsDisplayItemGeometry
 public:
   nsDisplayItemGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
   virtual ~nsDisplayItemGeometry();
-  
+
   /**
    * Compute the area required to be invalidated if this
    * display item is removed.
    */
   const nsRect& ComputeInvalidationRegion() { return mBounds; }
-  
+
   /**
    * Shifts all retained areas of the nsDisplayItemGeometry by the given offset.
-   * 
+   *
    * This is used to compensate for scrolling, since the destination buffer
    * can scroll without requiring a full repaint.
    *
@@ -78,9 +86,9 @@ public:
 bool ShouldSyncDecodeImages(nsDisplayListBuilder* aBuilder);
 
 /**
- * nsImageGeometryMixin is a mixin for geometry items that draw images. Geometry
- * items that include this mixin can track drawing results and use that
- * information to inform invalidation decisions.
+ * nsImageGeometryMixin is a mixin for geometry items that draw images.
+ * Geometry items that include this mixin can track drawing results and use
+ * that information to inform invalidation decisions.
  *
  * This mixin uses CRTP; its template parameter should be the type of the class
  * that is inheriting from it. See nsDisplayItemGenericImageGeometry for an
@@ -194,6 +202,7 @@ public:
   virtual void MoveBy(const nsPoint& aOffset) override;
 
   nsRect mPositioningArea;
+  nsRect mDestRect;
 };
 
 class nsDisplayThemedBackgroundGeometry : public nsDisplayItemGeometry
@@ -211,7 +220,7 @@ class nsDisplayBoxShadowInnerGeometry : public nsDisplayItemGeometry
 {
 public:
   nsDisplayBoxShadowInnerGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
-  
+
   virtual void MoveBy(const nsPoint& aOffset) override;
 
   nsRect mPaddingRect;
@@ -240,10 +249,29 @@ public:
   nscolor mColor;
 };
 
-class nsDisplaySVGEffectsGeometry : public nsDisplayItemGeometry
+class nsDisplaySolidColorRegionGeometry : public nsDisplayItemBoundsGeometry
 {
 public:
-  nsDisplaySVGEffectsGeometry(nsDisplaySVGEffects* aItem, nsDisplayListBuilder* aBuilder);
+  nsDisplaySolidColorRegionGeometry(nsDisplayItem* aItem,
+                                    nsDisplayListBuilder* aBuilder,
+                                    const nsRegion& aRegion,
+                                    mozilla::gfx::Color aColor)
+    : nsDisplayItemBoundsGeometry(aItem, aBuilder)
+    , mRegion(aRegion)
+    , mColor(aColor)
+  { }
+
+  virtual void MoveBy(const nsPoint& aOffset) override;
+
+  nsRegion mRegion;
+  mozilla::gfx::Color mColor;
+};
+
+class nsDisplaySVGEffectGeometry : public nsDisplayItemGeometry
+{
+public:
+  nsDisplaySVGEffectGeometry(nsDisplaySVGEffects* aItem,
+                             nsDisplayListBuilder* aBuilder);
 
   virtual void MoveBy(const nsPoint& aOffset) override;
 
@@ -252,10 +280,28 @@ public:
   nsPoint mFrameOffsetToReferenceFrame;
 };
 
+class nsDisplayMaskGeometry : public nsDisplaySVGEffectGeometry
+  , public nsImageGeometryMixin<nsDisplayMaskGeometry>
+{
+public:
+  nsDisplayMaskGeometry(nsDisplayMask* aItem, nsDisplayListBuilder* aBuilder);
+
+  nsTArray<nsRect> mDestRects;
+};
+
+class nsDisplayFilterGeometry : public nsDisplaySVGEffectGeometry
+  , public nsImageGeometryMixin<nsDisplayFilterGeometry>
+{
+public:
+  nsDisplayFilterGeometry(nsDisplayFilter* aItem,
+                          nsDisplayListBuilder* aBuilder);
+};
+
 class nsCharClipGeometry : public nsDisplayItemGenericGeometry
 {
 public:
-  nsCharClipGeometry(nsCharClipDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
+  nsCharClipGeometry(nsCharClipDisplayItem* aItem,
+                     nsDisplayListBuilder* aBuilder);
 
   nscoord mVisIStartEdge;
   nscoord mVisIEndEdge;

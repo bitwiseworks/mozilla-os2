@@ -103,6 +103,11 @@ this.MockFilePicker = {
     this.returnFiles = [file];
   },
 
+  useDirectory: function(aPath) {
+    var directory = new this.window.Directory(aPath);
+    this.returnFiles = [directory];
+  },
+
   isNsIFile: function(aFile) {
     let ret = false;
     try {
@@ -146,7 +151,9 @@ MockFilePickerInstance.prototype = {
 
     return null;
   },
-  get domfile()  {
+
+  // We don't support directories here.
+  get domFileOrDirectory()  {
     if (MockFilePicker.returnFiles.length >= 1) {
       // window.File does not implement nsIFile
       if (!MockFilePicker.isNsIFile(MockFilePicker.returnFiles[0])) {
@@ -184,7 +191,7 @@ MockFilePickerInstance.prototype = {
       }
     };
   },
-  get domfiles()  {
+  get domFileOrDirectoryEnumerator()  {
     let utils = this.parent.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
     return {

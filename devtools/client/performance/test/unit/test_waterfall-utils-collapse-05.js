@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests if the waterfall collapsing logic works properly
@@ -22,7 +23,7 @@ add_task(function test() {
 
   compare(rootMarkerNode, gExpectedOutput);
 
-  function compare (marker, expected) {
+  function compare(marker, expected) {
     for (let prop in expected) {
       if (prop === "submarkers") {
         for (let i = 0; i < expected.submarkers.length; i++) {

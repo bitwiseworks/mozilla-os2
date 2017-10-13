@@ -10,7 +10,7 @@
  * This file exports functions for hashing data down to a 32-bit value,
  * including:
  *
- *  - HashString    Hash a char* or uint16_t/wchar_t* of known or unknown
+ *  - HashString    Hash a char* or char16_t/wchar_t* of known or unknown
  *                  length.
  *
  *  - HashBytes     Hash a byte array of known length.
@@ -157,7 +157,7 @@ AddUintptrToHash<8>(uint32_t aHash, uintptr_t aValue)
  * convert to uint32_t, data pointers, and function pointers.
  */
 template<typename A>
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 AddToHash(uint32_t aHash, A aA)
 {
   /*
@@ -168,7 +168,7 @@ AddToHash(uint32_t aHash, A aA)
 }
 
 template<typename A>
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 AddToHash(uint32_t aHash, A* aA)
 {
   /*
@@ -182,14 +182,14 @@ AddToHash(uint32_t aHash, A* aA)
 }
 
 template<>
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 AddToHash(uint32_t aHash, uintptr_t aA)
 {
   return detail::AddUintptrToHash<sizeof(uintptr_t)>(aHash, aA);
 }
 
 template<typename A, typename... Args>
-MOZ_WARN_UNUSED_RESULT uint32_t
+MOZ_MUST_USE uint32_t
 AddToHash(uint32_t aHash, A aArg, Args... aArgs)
 {
   return AddToHash(AddToHash(aHash, aArg), aArgs...);
@@ -203,7 +203,7 @@ AddToHash(uint32_t aHash, A aArg, Args... aArgs)
  * that x has already been hashed.
  */
 template<typename... Args>
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashGeneric(Args... aArgs)
 {
   return AddToHash(0, aArgs...);
@@ -241,63 +241,49 @@ HashKnownLength(const T* aStr, size_t aLength)
  * If you have the string's length, you might as well call the overload which
  * includes the length.  It may be marginally faster.
  */
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const char* aStr)
 {
   return detail::HashUntilZero(reinterpret_cast<const unsigned char*>(aStr));
 }
 
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const char* aStr, size_t aLength)
 {
   return detail::HashKnownLength(reinterpret_cast<const unsigned char*>(aStr), aLength);
 }
 
-MOZ_WARN_UNUSED_RESULT
+MOZ_MUST_USE
 inline uint32_t
 HashString(const unsigned char* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
 }
 
-MOZ_WARN_UNUSED_RESULT inline uint32_t
-HashString(const uint16_t* aStr)
-{
-  return detail::HashUntilZero(aStr);
-}
-
-MOZ_WARN_UNUSED_RESULT inline uint32_t
-HashString(const uint16_t* aStr, size_t aLength)
-{
-  return detail::HashKnownLength(aStr, aLength);
-}
-
-#ifdef MOZ_CHAR16_IS_NOT_WCHAR
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const char16_t* aStr)
 {
   return detail::HashUntilZero(aStr);
 }
 
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const char16_t* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
 }
-#endif
 
 /*
- * On Windows, wchar_t (char16_t) is not the same as uint16_t, even though it's
+ * On Windows, wchar_t is not the same as char16_t, even though it's
  * the same width!
  */
 #ifdef WIN32
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const wchar_t* aStr)
 {
   return detail::HashUntilZero(aStr);
 }
 
-MOZ_WARN_UNUSED_RESULT inline uint32_t
+MOZ_MUST_USE inline uint32_t
 HashString(const wchar_t* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
@@ -310,7 +296,7 @@ HashString(const wchar_t* aStr, size_t aLength)
  * This hash walks word-by-word, rather than byte-by-byte, so you won't get the
  * same result out of HashBytes as you would out of HashString.
  */
-MOZ_WARN_UNUSED_RESULT extern MFBT_API uint32_t
+MOZ_MUST_USE extern MFBT_API uint32_t
 HashBytes(const void* bytes, size_t aLength);
 
 /**
@@ -337,7 +323,7 @@ class HashCodeScrambler
 
 public:
   /** Creates a new scrambler with the given 128-bit key. */
-  HashCodeScrambler(uint64_t aK0, uint64_t aK1) : mK0(aK0), mK1(aK1) {}
+  constexpr HashCodeScrambler(uint64_t aK0, uint64_t aK1) : mK0(aK0), mK1(aK1) {}
 
   /**
    * Scramble a hash code. Always produces the same result for the same

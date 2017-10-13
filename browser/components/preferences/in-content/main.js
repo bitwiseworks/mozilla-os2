@@ -5,11 +5,16 @@
 Components.utils.import("resource://gre/modules/Downloads.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
 Components.utils.import("resource://gre/modules/Task.jsm");
+Components.utils.import("resource:///modules/ShellService.jsm");
 Components.utils.import("resource:///modules/TransientPrefs.jsm");
-#ifdef E10S_TESTING_ONLY
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
-#endif
+
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
+
+if (AppConstants.E10S_TESTING_ONLY) {
+  XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
+                                    "resource://gre/modules/UpdateUtils.jsm");
+}
 
 var gMainPane = {
   /**
@@ -23,17 +28,17 @@ var gMainPane = {
               .addEventListener(aEventType, aCallback.bind(gMainPane));
     }
 
-#ifdef HAVE_SHELL_SERVICE
-    this.updateSetDefaultBrowser();
-#ifdef XP_WIN
-    // In Windows 8 we launch the control panel since it's the only
-    // way to get all file type association prefs. So we don't know
-    // when the user will select the default.  We refresh here periodically
-    // in case the default changes.  On other Windows OS's defaults can also
-    // be set while the prefs are open.
-    window.setInterval(this.updateSetDefaultBrowser, 1000);
-#endif
-#endif
+    if (AppConstants.HAVE_SHELL_SERVICE) {
+      this.updateSetDefaultBrowser();
+      if (AppConstants.platform == "win") {
+        // In Windows 8 we launch the control panel since it's the only
+        // way to get all file type association prefs. So we don't know
+        // when the user will select the default.  We refresh here periodically
+        // in case the default changes. On other Windows OS's defaults can also
+        // be set while the prefs are open.
+        window.setInterval(this.updateSetDefaultBrowser.bind(this), 1000);
+      }
+    }
 
     // set up the "use current page" label-changing listener
     this._updateUseCurrentButton();
@@ -41,16 +46,16 @@ var gMainPane = {
 
     this.updateBrowserStartupLastSession();
 
-#ifdef XP_WIN
-    // Functionality for "Show tabs in taskbar" on Windows 7 and up.
-    try {
-      let sysInfo = Cc["@mozilla.org/system-info;1"].
-                    getService(Ci.nsIPropertyBag2);
-      let ver = parseFloat(sysInfo.getProperty("version"));
-      let showTabsInTaskbar = document.getElementById("showTabsInTaskbar");
-      showTabsInTaskbar.hidden = ver < 6.1;
-    } catch (ex) {}
-#endif
+    if (AppConstants.platform == "win") {
+      // Functionality for "Show tabs in taskbar" on Windows 7 and up.
+      try {
+        let sysInfo = Cc["@mozilla.org/system-info;1"].
+                      getService(Ci.nsIPropertyBag2);
+        let ver = parseFloat(sysInfo.getProperty("version"));
+        let showTabsInTaskbar = document.getElementById("showTabsInTaskbar");
+        showTabsInTaskbar.hidden = ver < 6.1;
+      } catch (ex) {}
+    }
 
     // The "closing multiple tabs" and "opening multiple tabs might slow down
     // &brandShortName;" warnings provide options for not showing these
@@ -65,10 +70,10 @@ var gMainPane = {
                      gMainPane.updateBrowserStartupLastSession);
     setEventListener("browser.download.dir", "change",
                      gMainPane.displayDownloadDirPref);
-#ifdef HAVE_SHELL_SERVICE
-    setEventListener("setDefaultButton", "command",
-                     gMainPane.setDefaultBrowser);
-#endif
+    if (AppConstants.HAVE_SHELL_SERVICE) {
+      setEventListener("setDefaultButton", "command",
+                       gMainPane.setDefaultBrowser);
+    }
     setEventListener("useCurrent", "command",
                      gMainPane.setHomePageToCurrent);
     setEventListener("useBookmark", "command",
@@ -78,56 +83,37 @@ var gMainPane = {
     setEventListener("chooseFolder", "command",
                      gMainPane.chooseFolder);
 
-#ifdef E10S_TESTING_ONLY
-    setEventListener("e10sAutoStart", "command",
-                     gMainPane.enableE10SChange);
-    let e10sCheckbox = document.getElementById("e10sAutoStart");
-    e10sCheckbox.checked = Services.appinfo.browserTabsRemoteAutostart;
+    if (AppConstants.E10S_TESTING_ONLY) {
+      setEventListener("e10sAutoStart", "command",
+                       gMainPane.enableE10SChange);
+      let e10sCheckbox = document.getElementById("e10sAutoStart");
 
-    // If e10s is blocked for some reason unrelated to prefs, we want to disable
-    // the checkbox.
-    if (!Services.appinfo.browserTabsRemoteAutostart) {
-      let e10sBlockedReason = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
-      let appinfo = Services.appinfo.QueryInterface(Ci.nsIObserver);
-      appinfo.observe(e10sBlockedReason, "getE10SBlocked", "")
-      if (e10sBlockedReason.data) {
-        if (e10sBlockedReason.data == "Safe mode") {
-          // If the only reason we're disabled is because of safe mode, then
-          // we want to allow the user to un-toggle the pref.
-          // We're relying on the nsAppRunner code only specifying "Safe mode"
-          // as the reason if the pref is otherwise enabled, and there are no
-          // other reasons to block e10s.
-          // Update the checkbox to reflect the pref state.
-          e10sCheckbox.checked = true;
-        } else {
-          e10sCheckbox.disabled = true;
-          let updateChannel = UpdateUtils.UpdateChannel;
-          // only add this label on developer channels
-          if (updateChannel == "default" ||
-              updateChannel == "nightly" ||
-              updateChannel == "aurora") {
-            e10sCheckbox.label += " (disabled: " + e10sBlockedReason.data + ")";
-          }
-        }
+      let e10sPref = document.getElementById("browser.tabs.remote.autostart");
+      let e10sTempPref = document.getElementById("e10sTempPref");
+      let e10sForceEnable = document.getElementById("e10sForceEnable");
+
+      let preffedOn = e10sPref.value || e10sTempPref.value || e10sForceEnable.value;
+
+      if (preffedOn) {
+        // The checkbox is checked if e10s is preffed on and enabled.
+        e10sCheckbox.checked = Services.appinfo.browserTabsRemoteAutostart;
+
+        // but if it's force disabled, then the checkbox is disabled.
+        e10sCheckbox.disabled = !Services.appinfo.browserTabsRemoteAutostart;
       }
     }
 
-    // If E10S is blocked because of safe mode, we want the checkbox to be
-    // enabled
-#endif
+    if (AppConstants.MOZ_DEV_EDITION) {
+      let uAppData = OS.Constants.Path.userApplicationDataDir;
+      let ignoreSeparateProfile = OS.Path.join(uAppData, "ignore-dev-edition-profile");
 
-#ifdef MOZ_DEV_EDITION
-    Cu.import("resource://gre/modules/osfile.jsm");
-    let uAppData = OS.Constants.Path.userApplicationDataDir;
-    let ignoreSeparateProfile = OS.Path.join(uAppData, "ignore-dev-edition-profile");
+      setEventListener("separateProfileMode", "command", gMainPane.separateProfileModeChange);
+      let separateProfileModeCheckbox = document.getElementById("separateProfileMode");
+      setEventListener("getStarted", "click", gMainPane.onGetStarted);
 
-    setEventListener("separateProfileMode", "command", gMainPane.separateProfileModeChange);
-    let separateProfileModeCheckbox = document.getElementById("separateProfileMode");
-    setEventListener("getStarted", "click", gMainPane.onGetStarted);
-
-    OS.File.stat(ignoreSeparateProfile).then(() => separateProfileModeCheckbox.checked = false,
-                                             () => separateProfileModeCheckbox.checked = true);
-#endif
+      OS.File.stat(ignoreSeparateProfile).then(() => separateProfileModeCheckbox.checked = false,
+                                               () => separateProfileModeCheckbox.checked = true);
+    }
 
     // Notify observers that the UI is now ready
     Components.classes["@mozilla.org/observer-service;1"]
@@ -135,119 +121,104 @@ var gMainPane = {
               .notifyObservers(window, "main-pane-loaded", null);
   },
 
-#ifdef E10S_TESTING_ONLY
   enableE10SChange: function ()
   {
-    let e10sCheckbox = document.getElementById("e10sAutoStart");
-    let e10sPref = document.getElementById("browser.tabs.remote.autostart");
-    let e10sTempPref = document.getElementById("e10sTempPref");
+    if (AppConstants.E10S_TESTING_ONLY) {
+      let e10sCheckbox = document.getElementById("e10sAutoStart");
+      let e10sPref = document.getElementById("browser.tabs.remote.autostart");
+      let e10sTempPref = document.getElementById("e10sTempPref");
 
-    let prefsToChange;
-    if (e10sCheckbox.checked) {
-      // Enabling e10s autostart
-      prefsToChange = [e10sPref];
-    } else {
-      // Disabling e10s autostart
-      prefsToChange = [e10sPref];
-      if (e10sTempPref.value) {
-       prefsToChange.push(e10sTempPref);
+      let prefsToChange;
+      if (e10sCheckbox.checked) {
+        // Enabling e10s autostart
+        prefsToChange = [e10sPref];
+      } else {
+        // Disabling e10s autostart
+        prefsToChange = [e10sPref];
+        if (e10sTempPref.value) {
+         prefsToChange.push(e10sTempPref);
+        }
       }
-    }
 
-    const Cc = Components.classes, Ci = Components.interfaces;
-    let brandName = document.getElementById("bundleBrand").getString("brandShortName");
-    let bundle = document.getElementById("bundlePreferences");
-    let msg = bundle.getFormattedString(e10sCheckbox.checked ?
-                                        "featureEnableRequiresRestart" : "featureDisableRequiresRestart",
-                                        [brandName]);
-    let title = bundle.getFormattedString("shouldRestartTitle", [brandName]);
-    let shouldProceed = Services.prompt.confirm(window, title, msg)
-    if (shouldProceed) {
-      let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
-                         .createInstance(Ci.nsISupportsPRBool);
-      Services.obs.notifyObservers(cancelQuit, "quit-application-requested",
-                                   "restart");
-      shouldProceed = !cancelQuit.data;
-
-      if (shouldProceed) {
+      let buttonIndex = confirmRestartPrompt(e10sCheckbox.checked, 0,
+                                             true, false);
+      if (buttonIndex == CONFIRM_RESTART_PROMPT_RESTART_NOW) {
         for (let prefToChange of prefsToChange) {
           prefToChange.value = e10sCheckbox.checked;
         }
 
-        let tmp = {};
-        Components.utils.import("resource://gre/modules/UpdateUtils.jsm", tmp);
-        if (!e10sCheckbox.checked && tmp.UpdateUtils.UpdateChannel != "default") {
-          Services.prefs.setBoolPref("browser.requestE10sFeedback", true);
-          Services.prompt.alert(window, brandName, bundle.getString("e10sFeedbackAfterRestart"));
-        }
         Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestart);
       }
+
+      // Revert the checkbox in case we didn't quit
+      e10sCheckbox.checked = e10sPref.value || e10sTempPref.value;
     }
-
-    // Revert the checkbox in case we didn't quit
-    e10sCheckbox.checked = e10sPref.value || e10sTempPref.value;
   },
-#endif
 
-#ifdef MOZ_DEV_EDITION
   separateProfileModeChange: function ()
   {
-    function quitApp() {
-      Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestartNotSameProfile);
-    }
-    function revertCheckbox(error) {
-      separateProfileModeCheckbox.checked = !separateProfileModeCheckbox.checked;
-      if (error) {
-        Cu.reportError("Failed to toggle separate profile mode: " + error);
+    if (AppConstants.MOZ_DEV_EDITION) {
+      function quitApp() {
+        Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestartNotSameProfile);
       }
-    }
-
-    const Cc = Components.classes, Ci = Components.interfaces;
-    let separateProfileModeCheckbox = document.getElementById("separateProfileMode");
-    let brandName = document.getElementById("bundleBrand").getString("brandShortName");
-    let bundle = document.getElementById("bundlePreferences");
-    let msg = bundle.getFormattedString(separateProfileModeCheckbox.checked ?
-                                        "featureEnableRequiresRestart" : "featureDisableRequiresRestart",
-                                        [brandName]);
-    let title = bundle.getFormattedString("shouldRestartTitle", [brandName]);
-    let shouldProceed = Services.prompt.confirm(window, title, msg)
-    if (shouldProceed) {
-      let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
-                         .createInstance(Ci.nsISupportsPRBool);
-      Services.obs.notifyObservers(cancelQuit, "quit-application-requested",
-                                   "restart");
-      shouldProceed = !cancelQuit.data;
-
-      if (shouldProceed) {
-        Cu.import("resource://gre/modules/osfile.jsm");
+      function revertCheckbox(error) {
+        separateProfileModeCheckbox.checked = !separateProfileModeCheckbox.checked;
+        if (error) {
+          Cu.reportError("Failed to toggle separate profile mode: " + error);
+        }
+      }
+      function createOrRemoveSpecialDevEditionFile(onSuccess) {
         let uAppData = OS.Constants.Path.userApplicationDataDir;
         let ignoreSeparateProfile = OS.Path.join(uAppData, "ignore-dev-edition-profile");
 
         if (separateProfileModeCheckbox.checked) {
-          OS.File.remove(ignoreSeparateProfile).then(quitApp, revertCheckbox);
+          OS.File.remove(ignoreSeparateProfile).then(onSuccess, revertCheckbox);
         } else {
-          OS.File.writeAtomic(ignoreSeparateProfile, new Uint8Array()).then(quitApp, revertCheckbox);
+          OS.File.writeAtomic(ignoreSeparateProfile, new Uint8Array()).then(onSuccess, revertCheckbox);
         }
-        return;
+      }
+
+      let separateProfileModeCheckbox = document.getElementById("separateProfileMode");
+      let button_index = confirmRestartPrompt(separateProfileModeCheckbox.checked,
+                                              0, false, true);
+      switch (button_index) {
+        case CONFIRM_RESTART_PROMPT_CANCEL:
+          revertCheckbox();
+          return;
+        case CONFIRM_RESTART_PROMPT_RESTART_NOW:
+          const Cc = Components.classes, Ci = Components.interfaces;
+          let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
+                             .createInstance(Ci.nsISupportsPRBool);
+          Services.obs.notifyObservers(cancelQuit, "quit-application-requested",
+                                        "restart");
+          if (!cancelQuit.data) {
+            createOrRemoveSpecialDevEditionFile(quitApp);
+            return;
+          }
+
+          // Revert the checkbox in case we didn't quit
+          revertCheckbox();
+          return;
+        case CONFIRM_RESTART_PROMPT_RESTART_LATER:
+          createOrRemoveSpecialDevEditionFile();
+          return;
       }
     }
-
-    // Revert the checkbox in case we didn't quit
-    revertCheckbox();
   },
 
   onGetStarted: function (aEvent) {
-    const Cc = Components.classes, Ci = Components.interfaces;
-    let wm = Cc["@mozilla.org/appshell/window-mediator;1"]
-                .getService(Ci.nsIWindowMediator);
-    let win = wm.getMostRecentWindow("navigator:browser");
+    if (AppConstants.MOZ_DEV_EDITION) {
+      const Cc = Components.classes, Ci = Components.interfaces;
+      let wm = Cc["@mozilla.org/appshell/window-mediator;1"]
+                  .getService(Ci.nsIWindowMediator);
+      let win = wm.getMostRecentWindow("navigator:browser");
 
-    if (win) {
-      let accountsTab = win.gBrowser.addTab("about:accounts");
-      win.gBrowser.selectedTab = accountsTab;
+      if (win) {
+        let accountsTab = win.gBrowser.addTab("about:accounts?action=signin&entrypoint=dev-edition-setup");
+        win.gBrowser.selectedTab = accountsTab;
+      }
     }
   },
-#endif
 
   // HOME PAGE
 
@@ -274,10 +245,17 @@ var gMainPane = {
   {
     let homePref = document.getElementById("browser.startup.homepage");
 
-    // If the pref is set to about:home, set the value to "" to show the
-    // placeholder text (about:home title).
-    if (homePref.value.toLowerCase() == "about:home")
+    // If the pref is set to about:home or about:newtab, set the value to ""
+    // to show the placeholder text (about:home title) rather than
+    // exposing those URLs to users.
+    let defaultBranch = Services.prefs.getDefaultBranch("");
+    let defaultValue = defaultBranch.getComplexValue("browser.startup.homepage",
+                                                     Ci.nsIPrefLocalizedString).data;
+    let currentValue = homePref.value.toLowerCase();
+    if (currentValue == "about:home" ||
+        (currentValue == defaultValue && currentValue == "about:newtab")) {
       return "";
+    }
 
     // If the pref is actually "", show about:blank.  The actual home page
     // loading code treats them the same, and we don't want the placeholder text
@@ -325,9 +303,9 @@ var gMainPane = {
   setHomePageToBookmark: function ()
   {
     var rv = { urls: null, names: null };
-    var dialog = gSubDialog.open("chrome://browser/content/preferences/selectBookmark.xul",
-                                 "resizable=yes, modal=yes", rv,
-                                 this._setHomePageToBookmarkClosed.bind(this, rv));
+    gSubDialog.open("chrome://browser/content/preferences/selectBookmark.xul",
+                    "resizable=yes, modal=yes", rv,
+                    this._setHomePageToBookmarkClosed.bind(this, rv));
   },
 
   _setHomePageToBookmarkClosed: function(rv, aEvent) {
@@ -357,8 +335,8 @@ var gMainPane = {
       useCurrent.label = useCurrent.getAttribute("label1");
 
     // In this case, the button's disabled state is set by preferences.xml.
-    if (document.getElementById
-        ("pref.browser.homepage.disable_button.current_page").locked)
+    let prefName = "pref.browser.homepage.disable_button.current_page";
+    if (document.getElementById(prefName).locked)
       return;
 
     useCurrent.disabled = !tabs.length
@@ -443,8 +421,8 @@ var gMainPane = {
     var downloadFolder = document.getElementById("downloadFolder");
     var chooseFolder = document.getElementById("chooseFolder");
     var preference = document.getElementById("browser.download.useDownloadDir");
-    downloadFolder.disabled = !preference.value;
-    chooseFolder.disabled = !preference.value;
+    downloadFolder.disabled = !preference.value || preference.locked;
+    chooseFolder.disabled = !preference.value || preference.locked;
 
     // don't override the preference's value in UI
     return undefined;
@@ -686,10 +664,7 @@ var gMainPane = {
   writeLinkTarget: function() {
     var linkTargeting = document.getElementById("linkTargeting");
     return linkTargeting.checked ? 3 : 2;
-  }
-
-#ifdef HAVE_SHELL_SERVICE
-  ,
+  },
   /*
    * Preferences:
    *
@@ -704,15 +679,20 @@ var gMainPane = {
    */
   updateSetDefaultBrowser: function()
   {
-    let shellSvc = getShellService();
-    let defaultBrowserBox = document.getElementById("defaultBrowserBox");
-    if (!shellSvc) {
-      defaultBrowserBox.hidden = true;
-      return;
+    if (AppConstants.HAVE_SHELL_SERVICE) {
+      let shellSvc = getShellService();
+      let defaultBrowserBox = document.getElementById("defaultBrowserBox");
+      if (!shellSvc) {
+        defaultBrowserBox.hidden = true;
+        return;
+      }
+      let setDefaultPane = document.getElementById("setDefaultPane");
+      let isDefault = shellSvc.isDefaultBrowser(false, true);
+      setDefaultPane.selectedIndex = isDefault ? 1 : 0;
+      let alwaysCheck = document.getElementById("alwaysCheckDefault");
+      alwaysCheck.disabled = alwaysCheck.disabled ||
+                             isDefault && alwaysCheck.checked;
     }
-    let setDefaultPane = document.getElementById("setDefaultPane");
-    let selectedIndex = shellSvc.isDefaultBrowser(false, true) ? 1 : 0;
-    setDefaultPane.selectedIndex = selectedIndex;
   },
 
   /**
@@ -720,18 +700,22 @@ var gMainPane = {
    */
   setDefaultBrowser: function()
   {
-    let shellSvc = getShellService();
-    if (!shellSvc)
-      return;
-    try {
-      shellSvc.setDefaultBrowser(true, false);
-    } catch (ex) {
-      Cu.reportError(ex);
-      return;
+    if (AppConstants.HAVE_SHELL_SERVICE) {
+      let alwaysCheckPref = document.getElementById("browser.shell.checkDefaultBrowser");
+      alwaysCheckPref.value = true;
+
+      let shellSvc = getShellService();
+      if (!shellSvc)
+        return;
+      try {
+        shellSvc.setDefaultBrowser(true, false);
+      } catch (ex) {
+        Cu.reportError(ex);
+        return;
+      }
+
+      let selectedIndex = shellSvc.isDefaultBrowser(false, true) ? 1 : 0;
+      document.getElementById("setDefaultPane").selectedIndex = selectedIndex;
     }
-    let selectedIndex =
-      shellSvc.isDefaultBrowser(false, true) ? 1 : 0;
-    document.getElementById("setDefaultPane").selectedIndex = selectedIndex;
-  }
-#endif
+  },
 };

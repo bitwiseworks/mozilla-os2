@@ -62,15 +62,15 @@ const browserElementTestHelpers = {
   },
 
   setEnabledPref: function(value) {
-    this._setPref('dom.mozBrowserFramesEnabled', value);
+    this._setPrefs(['dom.mozBrowserFramesEnabled', value],
+                   ['network.disable.ipc.security', value]);
   },
 
-  setSelectionChangeEnabledPref: function(value) {
-    this._setPref('selectioncaret.enabled', value);
-  },
-
-  setAccessibleCaretEnabledPref: function(value) {
-    this._setPref('layout.accessiblecaret.enabled', value);
+  setupAccessibleCaretPref: function() {
+    this._setPref('layout.accessiblecaret.enabled', true);
+    // Disable hide carets for mouse input for select-all tests so that we can
+    // get mozbrowsercaretstatechanged events.
+    this._setPref('layout.accessiblecaret.hide_carets_for_mouse_input', false);
   },
 
   getOOPByDefaultPref: function() {
@@ -113,6 +113,7 @@ const browserElementTestHelpers = {
 
   // Some basically-empty pages from different domains you can load.
   'emptyPage1': 'http://example.com' + _getPath() + '/file_empty.html',
+  'fileEmptyPage1': 'file_empty.html',
   'emptyPage2': 'http://example.org' + _getPath() + '/file_empty.html',
   'emptyPage3': 'http://test1.example.org' + _getPath() + '/file_empty.html',
   'focusPage': 'http://example.org' + _getPath() + '/file_focus.html',

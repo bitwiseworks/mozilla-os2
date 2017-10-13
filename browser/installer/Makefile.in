@@ -10,6 +10,7 @@ include $(topsrcdir)/config/rules.mk
 MOZ_PKG_REMOVALS = $(srcdir)/removed-files.in
 
 MOZ_PKG_MANIFEST = $(srcdir)/package-manifest.in
+MOZ_PKG_DUPEFLAGS = -f $(srcdir)/allowed-dupes.mn
 
 # Some files have been already bundled with xulrunner
 ifndef MOZ_MULET
@@ -18,29 +19,39 @@ else
 DEFINES += -DMOZ_MULET
 endif
 
+# When packaging an artifact build not all xpt files expected by the
+# packager will be present.
+ifdef MOZ_ARTIFACT_BUILDS
+MOZ_PKG_FATAL_WARNINGS =
+endif
+
 DEFINES += -DMOZ_APP_NAME=$(MOZ_APP_NAME) -DPREF_DIR=$(PREF_DIR)
 
 ifdef MOZ_DEBUG
 DEFINES += -DMOZ_DEBUG=1
 endif
 
-ifdef MOZ_WIDGET_GTK
+ifneq (,$(filter gtk%,$(MOZ_WIDGET_TOOLKIT)))
 DEFINES += -DMOZ_GTK=1
-ifdef MOZ_ENABLE_GTK3
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk3)
 DEFINES += -DMOZ_GTK3=1
 endif
 endif
 
-ifdef MOZ_NATIVE_NSPR
-DEFINES += -DMOZ_NATIVE_NSPR=1
+ifdef MOZ_SYSTEM_NSPR
+DEFINES += -DMOZ_SYSTEM_NSPR=1
 endif
 
-ifdef MOZ_NATIVE_NSS
-DEFINES += -DMOZ_NATIVE_NSS=1
+ifdef MOZ_SYSTEM_NSS
+DEFINES += -DMOZ_SYSTEM_NSS=1
 endif
 
 ifdef NSS_DISABLE_DBM
 DEFINES += -DNSS_DISABLE_DBM=1
+endif
+
+ifdef MOZ_ARTIFACT_BUILDS
+DEFINES += -DMOZ_ARTIFACT_BUILDS=1
 endif
 
 DEFINES += -DJAREXT=
@@ -58,17 +69,14 @@ endif
 DEFINES += -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME)
 
 # Set MSVC dlls version to package, if any.
-ifdef WIN32_REDIST_DIR
 ifdef MOZ_NO_DEBUG_RTL
+ifdef WIN32_REDIST_DIR
 DEFINES += -DMOZ_PACKAGE_MSVC_DLLS=1
 DEFINES += -DMSVC_C_RUNTIME_DLL=$(MSVC_C_RUNTIME_DLL)
 DEFINES += -DMSVC_CXX_RUNTIME_DLL=$(MSVC_CXX_RUNTIME_DLL)
-ifdef MSVC_APPCRT_DLL
-DEFINES += -DMSVC_APPCRT_DLL=$(MSVC_APPCRT_DLL)
 endif
-ifdef MSVC_DESKTOPCRT_DLL
-DEFINES += -DMSVC_DESKTOPCRT_DLL=$(MSVC_DESKTOPCRT_DLL)
-endif
+ifdef WIN_UCRT_REDIST_DIR
+DEFINES += -DMOZ_PACKAGE_WIN_UCRT_DLLS=1
 endif
 endif
 
@@ -121,13 +129,14 @@ endif
 DEFINES += -DLPROJ_ROOT=$(LPROJ_ROOT)
 
 DEFINES += -DMOZ_ICU_VERSION=$(MOZ_ICU_VERSION)
-ifdef MOZ_NATIVE_ICU
-DEFINES += -DMOZ_NATIVE_ICU
+ifdef MOZ_SYSTEM_ICU
+DEFINES += -DMOZ_SYSTEM_ICU
 endif
-ifdef MOZ_SHARED_ICU
-DEFINES += -DMOZ_SHARED_ICU
+ifdef MOZ_ICU_DATA_ARCHIVE
+DEFINES += -DMOZ_ICU_DATA_ARCHIVE
 endif
 DEFINES += -DMOZ_ICU_DBG_SUFFIX=$(MOZ_ICU_DBG_SUFFIX)
+DEFINES += -DICU_DATA_FILE=$(ICU_DATA_FILE)
 ifdef CLANG_CXX
 DEFINES += -DCLANG_CXX
 endif
@@ -143,8 +152,12 @@ endif
 endif
 
 
+# Builds using the hybrid FasterMake/RecursiveMake backend will
+# fail to produce a langpack. See bug 1255096.
 libs::
+ifeq (,$(filter FasterMake+RecursiveMake,$(BUILD_BACKENDS)))
 	$(MAKE) -C $(DEPTH)/browser/locales langpack
+endif
 
 ifeq (WINNT,$(OS_ARCH))
 PKGCOMP_FIND_OPTS =

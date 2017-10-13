@@ -135,18 +135,6 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-void
-AccessibleWrap::InvalidateChildren()
-{
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-
-  [GetNativeObject() invalidateChildren];
-
-  Accessible::InvalidateChildren();
-
-  NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
 bool
 AccessibleWrap::InsertChildAt(uint32_t aIdx, Accessible* aAccessible)
 {
@@ -166,52 +154,6 @@ AccessibleWrap::RemoveChild(Accessible* aAccessible)
     [mNativeObject invalidateChildren];
 
   return removed;
-}
-
-// if we for some reason have no native accessible, we should be skipped over (and traversed)
-// when fetching all unignored children, etc.  when counting unignored children, we will not be counted.
-bool
-AccessibleWrap::IsIgnored()
-{
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
-
-  mozAccessible* nativeObject = GetNativeObject();
-  return (!nativeObject) || [nativeObject accessibilityIsIgnored];
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(false);
-}
-
-void
-AccessibleWrap::GetUnignoredChildren(nsTArray<Accessible*>* aChildrenArray)
-{
-  // we're flat; there are no children.
-  if (nsAccUtils::MustPrune(this))
-    return;
-
-  uint32_t childCount = ChildCount();
-  for (uint32_t childIdx = 0; childIdx < childCount; childIdx++) {
-    AccessibleWrap* childAcc =
-      static_cast<AccessibleWrap*>(GetChildAt(childIdx));
-
-    // If element is ignored, then add its children as substitutes.
-    if (childAcc->IsIgnored()) {
-      childAcc->GetUnignoredChildren(aChildrenArray);
-      continue;
-    }
-
-    aChildrenArray->AppendElement(childAcc);
-  }
-}
-
-Accessible*
-AccessibleWrap::GetUnignoredParent() const
-{
-  // Go up the chain to find a parent that is not ignored.
-  AccessibleWrap* parentWrap = static_cast<AccessibleWrap*>(Parent());
-  while (parentWrap && parentWrap->IsIgnored())
-    parentWrap = static_cast<AccessibleWrap*>(parentWrap->Parent());
-
-  return parentWrap;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

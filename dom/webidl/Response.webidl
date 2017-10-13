@@ -17,6 +17,7 @@ interface Response {
   readonly attribute ResponseType type;
 
   readonly attribute USVString url;
+  readonly attribute boolean redirected;
   readonly attribute unsigned short status;
   readonly attribute boolean ok;
   readonly attribute ByteString statusText;
@@ -24,13 +25,14 @@ interface Response {
 
   [Throws,
    NewObject] Response clone();
+
+  [ChromeOnly, NewObject, Throws] Response cloneUnfiltered();
 };
 Response implements Body;
 
 dictionary ResponseInit {
   unsigned short status = 200;
-  // WebIDL spec doesn't allow default values for ByteString.
-  ByteString statusText;
+  ByteString statusText = "OK";
   HeadersInit headers;
 };
 

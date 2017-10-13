@@ -1,6 +1,7 @@
 #include "nsISupports.idl"
 
-interface nsIDOMWindow;
+interface mozIDOMWindow;
+interface nsIPrincipal;
 
 [scriptable, uuid(9cf3b48e-361d-486a-8917-55cf8d00bb41)]
 interface nsIWorkerDebuggerListener : nsISupports
@@ -13,7 +14,7 @@ interface nsIWorkerDebuggerListener : nsISupports
   void onMessage(in DOMString message);
 };
 
-[scriptable, builtinclass, uuid(2b8d801c-973d-425b-a6d5-1a2505dd8b78)]
+[scriptable, builtinclass, uuid(22f93aa3-8a05-46be-87e0-fa93bf8a8eff)]
 interface nsIWorkerDebugger : nsISupports
 {
   const unsigned long TYPE_DEDICATED = 0;
@@ -32,12 +33,15 @@ interface nsIWorkerDebugger : nsISupports
 
   readonly attribute DOMString url;
 
-  readonly attribute nsIDOMWindow window;
+  readonly attribute mozIDOMWindow window;
 
-  [implicit_jscontext]
+  readonly attribute nsIPrincipal principal;
+
+  readonly attribute unsigned long serviceWorkerID;
+
   void initialize(in DOMString url);
 
-  [implicit_jscontext, binaryname(PostMessageMoz)]
+  [binaryname(PostMessageMoz)]
   void postMessage(in DOMString message);
 
   void addListener(in nsIWorkerDebuggerListener listener);

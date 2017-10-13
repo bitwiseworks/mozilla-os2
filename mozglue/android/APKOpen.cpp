@@ -35,13 +35,14 @@
 
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
+#include "XREChildData.h"
 
 /* Android headers don't define RUSAGE_THREAD */
 #ifndef RUSAGE_THREAD
 #define RUSAGE_THREAD 1
 #endif
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
 /* Official builds have the debuggable flag set to false, which disables
  * the backtrace dumper from bionic. However, as it is useful for native
  * crashes happening before the crash reporter is registered, re-enable
@@ -82,7 +83,8 @@ enum StartupEvent {
 
 using namespace mozilla;
 
-static struct mapping_info * lib_mapping = nullptr;
+static const int MAX_MAPPING_INFO = 32;
+static mapping_info lib_mapping[MAX_MAPPING_INFO];
 
 NS_EXPORT const struct mapping_info *
 getLibraryMapping()
@@ -109,6 +111,7 @@ JNI_Throw(JNIEnv* jenv, const char* classname, const char* msg)
 
 namespace {
     JavaVM* sJavaVM;
+    pthread_t sJavaUiThread;
 }
 
 void
@@ -151,9 +154,17 @@ abortThroughJava(const char* msg)
     env->PopLocalFrame(nullptr);
 }
 
-#define JNI_STUBS
-#include "jni-stubs.inc"
-#undef JNI_STUBS
+NS_EXPORT pthread_t
+getJavaUiThread()
+{
+    return sJavaUiThread;
+}
+
+extern "C" NS_EXPORT void MOZ_JNICALL
+Java_org_mozilla_gecko_GeckoThread_registerUiThread(JNIEnv*, jclass)
+{
+    sJavaUiThread = pthread_self();
+}
 
 static void * xul_handle = nullptr;
 #ifndef MOZ_FOLD_LIBS
@@ -175,8 +186,6 @@ xul_dlsym(const char *symbolName, T *value)
 
 static int mapping_count = 0;
 
-#define MAX_MAPPING_INFO 32
-
 extern "C" void
 report_mapping(char *name, void *base, uint32_t len, uint32_t offset)
 {
@@ -188,6 +197,21 @@ report_mapping(char *name, void *base, uint32_t len, uint32_t offset)
   info->base = (uintptr_t)base;
   info->len = len;
   info->offset = offset;
+}
+
+extern "C" void
+delete_mapping(const char *name)
+{
+  for (int pos = 0; pos < mapping_count; ++pos) {
+    struct mapping_info *info = &lib_mapping[pos];
+    if (!strcmp(info->name, name)) {
+      struct mapping_info *last = &lib_mapping[mapping_count - 1];
+      free(info->name);
+      *info = *last;
+      --mapping_count;
+      break;
+    }
+  }
 }
 
 static void*
@@ -216,10 +240,6 @@ loadGeckoLibs(const char *apkName)
     __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Couldn't get a handle to libxul!");
     return FAILURE;
   }
-
-#define JNI_BINDINGS
-#include "jni-stubs.inc"
-#undef JNI_BINDINGS
 
   void (*XRE_StartupTimelineRecord)(int, TimeStamp);
   xul_dlsym("XRE_StartupTimelineRecord", &XRE_StartupTimelineRecord);
@@ -259,9 +279,6 @@ loadSQLiteLibs(const char *apkName)
   if (loadNSSLibs(apkName) != SUCCESS)
     return FAILURE;
 #else
-  if (!lib_mapping) {
-    lib_mapping = (struct mapping_info *)calloc(MAX_MAPPING_INFO, sizeof(*lib_mapping));
-  }
 
   sqlite_handle = dlopenAPKLibrary(apkName, "libmozsqlite3.so");
   if (!sqlite_handle) {
@@ -279,10 +296,6 @@ loadNSSLibs(const char *apkName)
 {
   if (nss_handle && nspr_handle && plc_handle)
     return SUCCESS;
-
-  if (!lib_mapping) {
-    lib_mapping = (struct mapping_info *)calloc(MAX_MAPPING_INFO, sizeof(*lib_mapping));
-  }
 
   nss_handle = dlopenAPKLibrary(apkName, "libnss3.so");
 
@@ -310,6 +323,31 @@ loadNSSLibs(const char *apkName)
 #endif
 
   return setup_nss_functions(nss_handle, nspr_handle, plc_handle);
+}
+
+extern "C" NS_EXPORT void MOZ_JNICALL
+Java_org_mozilla_gecko_mozglue_GeckoLoader_extractGeckoLibsNative(
+    JNIEnv *jenv, jclass jGeckoAppShellClass, jstring jApkName)
+{
+  MOZ_ALWAYS_TRUE(!jenv->GetJavaVM(&sJavaVM));
+
+  const char* apkName = jenv->GetStringUTFChars(jApkName, nullptr);
+  if (apkName == nullptr) {
+    return;
+  }
+
+  // Extract and cache native lib to allow for efficient startup from cache.
+  void* handle = dlopenAPKLibrary(apkName, "libxul.so");
+  if (handle) {
+    __android_log_print(ANDROID_LOG_INFO, "GeckoLibLoad",
+                        "Extracted and cached libxul.so.");
+    // We have extracted and cached the lib, we can close it now.
+    __wrap_dlclose(handle);
+  } else {
+    JNI_Throw(jenv, "java/lang/Exception", "Error extracting gecko libraries");
+  }
+
+  jenv->ReleaseStringUTFChars(jApkName, apkName);
 }
 
 extern "C" NS_EXPORT void MOZ_JNICALL
@@ -421,6 +459,7 @@ ChildProcessInit(int argc, char* argv[])
 
   fXRE_SetProcessType(argv[--argc]);
 
-  return fXRE_InitChildProcess(argc, argv, nullptr);
+  XREChildData childData;
+  return fXRE_InitChildProcess(argc, argv, &childData);
 }
 

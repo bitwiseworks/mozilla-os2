@@ -1,7 +1,10 @@
- /* Any copyright is dedicated to the Public Domain.
-  * http://creativecommons.org/publicdomain/zero/1.0/ */
-/* Tests that errors about invalid HPKP security headers are logged
- *  to the web console */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
+// Tests that errors about invalid HPKP security headers are logged to the web
+// console.
 
 "use strict";
 
@@ -10,11 +13,11 @@ const TEST_URI = "data:text/html;charset=utf-8,Web Console HPKP invalid " +
 const SJS_URL = "https://example.com/browser/devtools/client/webconsole/" +
                 "test/test_hpkp-invalid-headers.sjs";
 const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
-                       "Public_Key_Pinning";
+                       "Public_Key_Pinning" + DOCS_GA_PARAMS;
 const NON_BUILTIN_ROOT_PREF = "security.cert_pinning.process_headers_from_" +
                               "non_builtin_roots";
 
-var test = asyncTest(function* () {
+add_task(function* () {
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref(NON_BUILTIN_ROOT_PREF);
   });
@@ -34,42 +37,42 @@ var test = asyncTest(function* () {
     url: SJS_URL + "?noMaxAge",
     name: "No max-age error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that did not include " +
-          "a 'max-age' directive."
+          "a \u2018max-age\u2019 directive."
   }, hud);
 
   yield* checkForMessage({
     url: SJS_URL + "?invalidIncludeSubDomains",
     name: "Invalid includeSubDomains error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that included an " +
-          "invalid 'includeSubDomains' directive."
+          "invalid \u2018includeSubDomains\u2019 directive."
   }, hud);
 
   yield* checkForMessage({
     url: SJS_URL + "?invalidMaxAge",
     name: "Invalid max-age error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that included an " +
-          "invalid 'max-age' directive."
+          "invalid \u2018max-age\u2019 directive."
   }, hud);
 
   yield* checkForMessage({
     url: SJS_URL + "?multipleIncludeSubDomains",
     name: "Multiple includeSubDomains error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that included " +
-          "multiple 'includeSubDomains' directives."
+          "multiple \u2018includeSubDomains\u2019 directives."
   }, hud);
 
   yield* checkForMessage({
     url: SJS_URL + "?multipleMaxAge",
     name: "Multiple max-age error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that included " +
-          "multiple 'max-age' directives."
+          "multiple \u2018max-age\u2019 directives."
   }, hud);
 
   yield* checkForMessage({
     url: SJS_URL + "?multipleReportURIs",
     name: "Multiple report-uri error displayed successfully",
     text: "Public-Key-Pins: The site specified a header that included " +
-          "multiple 'report-uri' directives."
+          "multiple \u2018report-uri\u2019 directives."
   }, hud);
 
   // The root used for mochitests is not built-in, so set the relevant pref to
@@ -97,7 +100,7 @@ var test = asyncTest(function* () {
 function* checkForMessage(curTest, hud) {
   hud.jsterm.clearOutput();
 
-  content.location = curTest.url;
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, curTest.url);
 
   let results = yield waitForMessages({
     webconsole: hud,

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # Copyright 2013 Mozilla Foundation and Mozilla contributors
 #
@@ -37,6 +37,7 @@ EXPORTS += [
     'GonkGPSGeolocationProvider.h',
     'nsVolume.h',
     'nsVolumeService.h',
+    'SystemProperty.h',
 ]
 UNIFIED_SOURCES += [
     'AudioChannelManager.cpp',
@@ -56,6 +57,7 @@ UNIFIED_SOURCES += [
     'nsVolumeService.cpp',
     'nsVolumeStat.cpp',
     'OpenFileFinder.cpp',
+    'SystemProperty.cpp',
     'SystemWorkerManager.cpp',
     'TimeZoneSettingObserver.cpp',
     'Volume.cpp',
@@ -87,44 +89,9 @@ EXTRA_JS_MODULES += [
     'systemlibs.js',
 ]
 
-if CONFIG['MOZ_B2G_RIL']:
-    EXPORTS += [
-         'mozstumbler/MozStumbler.h',
-    ]
-    UNIFIED_SOURCES += [
-          'mozstumbler/MozStumbler.cpp',
-          'mozstumbler/StumblerLogging.cpp',
-          'mozstumbler/UploadStumbleRunnable.cpp',
-          'mozstumbler/WriteStumbleOnThread.cpp'
-    ]
-    XPIDL_SOURCES += [
-        'nsIDataCallInterfaceService.idl',
-        'nsIDataCallManager.idl',
-        'nsIGonkDataCallInterfaceService.idl',
-        'nsIRadioInterfaceLayer.idl',
-    ]
-    EXTRA_COMPONENTS += [
-        'DataCallManager.js',
-        'DataCallManager.manifest',
-        'RILSystemMessengerHelper.js',
-        'RILSystemMessengerHelper.manifest',
-    ]
-    EXTRA_JS_MODULES += [
-        'ril_consts.js',
-        'ril_worker.js',
-        'ril_worker_buf_object.js',
-        'ril_worker_telephony_request_queue.js',
-        'RILSystemMessenger.jsm',
-    ]
-    if not CONFIG['DISABLE_MOZ_RIL_GEOLOC']:
-        EXTRA_COMPONENTS += [
-            'DataCallInterfaceService.js',
-            'DataCallInterfaceService.manifest',
-            'RadioInterfaceLayer.js',
-            'RadioInterfaceLayer.manifest',
-        ]
-
 include('/ipc/chromium/chromium-config.mozbuild')
+
+DEFINES['HAVE_ANDROID_OS'] = True
 
 LOCAL_INCLUDES += [
     '/dom/base',
@@ -134,3 +101,7 @@ LOCAL_INCLUDES += [
 ]
 
 FINAL_LIBRARY = 'xul'
+
+FINAL_TARGET_FILES.modules.workers += [
+    'worker_buf.js',
+]

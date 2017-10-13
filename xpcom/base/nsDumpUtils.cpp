@@ -12,7 +12,7 @@
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #ifdef XP_UNIX // {
 #include "mozilla/Preferences.h"
@@ -74,9 +74,7 @@ FdWatcher::Init()
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   os->AddObserver(this, "xpcom-shutdown", /* ownsWeak = */ false);
 
-  XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &FdWatcher::StartWatching));
+  XRE_GetIOMessageLoop()->PostTask(NewRunnableMethod(this, &FdWatcher::StartWatching));
 }
 
 // Implementations may call this function multiple times if they ensure that
@@ -466,9 +464,9 @@ nsDumpUtils::OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
       return rv;
     }
 
-    // It's OK if this fails; that probably just means that the directory already
-    // exists.
-    (*aFile)->Create(nsIFile::DIRECTORY_TYPE, 0777);
+    // It's OK if this fails; that probably just means that the directory
+    // already exists.
+    Unused << (*aFile)->Create(nsIFile::DIRECTORY_TYPE, 0777);
 
     nsAutoCString dirPath;
     rv = (*aFile)->GetNativePath(dirPath);
@@ -490,11 +488,11 @@ nsDumpUtils::OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
 
   if (aMode == CREATE_UNIQUE) {
     rv = file->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0666);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
   } else {
-    file->Create(nsIFile::NORMAL_FILE_TYPE, 0666);
+    rv = file->Create(nsIFile::NORMAL_FILE_TYPE, 0666);
+  }
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
 #ifdef ANDROID

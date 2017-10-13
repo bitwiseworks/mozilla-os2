@@ -10,7 +10,9 @@ const IGNORE = ["getPreferredIconURL", "escapeAddonURI",
                 "addAddonListener", "removeAddonListener",
                 "addInstallListener", "removeInstallListener",
                 "addManagerListener", "removeManagerListener",
-                "mapURIToAddonID", "shutdown"];
+                "mapURIToAddonID", "shutdown", "init",
+                "stateToString", "errorToString", "getUpgradeListener",
+                "addUpgradeListener", "removeUpgradeListener"];
 
 const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "AddonScreenshot", "AddonType", "startup", "shutdown",
@@ -19,7 +21,8 @@ const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "recordTimestamp", "recordSimpleMeasure",
                         "recordException", "getSimpleMeasures", "simpleTimer",
                         "setTelemetryDetails", "getTelemetryDetails",
-                        "callNoUpdateListeners", "backgroundUpdateTimerHandler"];
+                        "callNoUpdateListeners", "backgroundUpdateTimerHandler",
+                        "hasUpgradeListener", "getUpgradeListener"];
 
 function test_functions() {
   for (let prop in AddonManager) {

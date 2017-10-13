@@ -12,15 +12,6 @@
 #include "nsTHashtable.h"
 #include "nsDebug.h"
 
-// These type is returned by |EnumFunction| and controls the behavior of
-// Enumerate(). The PLD/PL_D prefix is because it originated in PLDHashTable,
-// but that class no longer uses it.
-enum PLDHashOperator
-{
-  PL_DHASH_NEXT = 0,          // enumerator says continue
-  PL_DHASH_REMOVE = 2         // enumerator says remove
-};
-
 template<class KeyClass, class DataType, class UserDataType>
 class nsBaseHashtable; // forward declaration
 
@@ -105,21 +96,38 @@ public:
   }
 
   /**
-   * For pointer types, get the value, returning nullptr if the entry is not
-   * present in the table.
+   * Get the value, returning a zero-initialized POD or a default-initialized
+   * object if the entry is not present in the table.
    *
    * @param aKey the key to retrieve
-   * @return The found value, or nullptr if no entry was found with the given key.
-   * @note If nullptr values are stored in the table, it is not possible to
-   *       distinguish between a nullptr value and a missing entry.
+   * @return The found value, or UserDataType{} if no entry was found with the
+   *         given key.
+   * @note If zero/default-initialized values are stored in the table, it is
+   *       not possible to distinguish between such a value and a missing entry.
    */
   UserDataType Get(KeyType aKey) const
   {
     EntryType* ent = this->GetEntry(aKey);
     if (!ent) {
-      return 0;
+      return UserDataType{};
     }
 
+    return ent->mData;
+  }
+
+  /**
+   * Add key to the table if not already present, and return a reference to its
+   * value.  If key is not already in the table then the value is default
+   * constructed.
+   */
+  DataType& GetOrInsert(const KeyType& aKey)
+  {
+    EntryType* ent = this->GetEntry(aKey);
+    if (ent) {
+      return ent->mData;
+    }
+
+    ent = this->PutEntry(aKey);
     return ent->mData;
   }
 
@@ -136,10 +144,10 @@ public:
     }
   }
 
-  MOZ_WARN_UNUSED_RESULT bool Put(KeyType aKey, const UserDataType& aData,
-                                  const fallible_t&)
+  MOZ_MUST_USE bool Put(KeyType aKey, const UserDataType& aData,
+                        const fallible_t&)
   {
-    EntryType* ent = this->PutEntry(aKey);
+    EntryType* ent = this->PutEntry(aKey, mozilla::fallible);
     if (!ent) {
       return false;
     }
@@ -154,41 +162,6 @@ public:
    * @param aKey the key to remove from the hashtable
    */
   void Remove(KeyType aKey) { this->RemoveEntry(aKey); }
-
-  /**
-   * function type provided by the application for enumeration.
-   * @param aKey the key being enumerated
-   * @param aData Reference to data being enumerated, may be altered. e.g. for
-   *        nsInterfaceHashtable this is an nsCOMPtr reference...
-   * @parm aUserArg passed unchanged from Enumerate
-   * @return bitflag combination of
-   *   @link PLDHashOperator::PL_DHASH_REMOVE @endlink or
-   *   @link PLDHashOperator::PL_DHASH_NEXT PL_DHASH_NEXT @endlink
-   */
-  typedef PLDHashOperator (*EnumFunction)(KeyType aKey,
-                                          DataType& aData,
-                                          void* aUserArg);
-
-  /**
-   * enumerate entries in the hashtable, allowing changes.
-   * WARNING: this function is deprecated. Please use Iterator and/or
-   * MutatingIterator instead.
-   * @param aEnumFunc enumeration callback
-   * @param aUserArg passed unchanged to the EnumFunction
-   */
-  uint32_t Enumerate(EnumFunction aEnumFunc, void* aUserArg)
-  {
-    uint32_t n = 0;
-    for (auto iter = this->mTable.Iter(); !iter.Done(); iter.Next()) {
-      auto entry = static_cast<EntryType*>(iter.Get());
-      PLDHashOperator op = aEnumFunc(entry->GetKey(), entry->mData, aUserArg);
-      n++;
-      if (op & PL_DHASH_REMOVE) {
-        iter.Remove();
-      }
-    }
-    return n;
-  }
 
   // This is an iterator that also allows entry removal. Example usage:
   //

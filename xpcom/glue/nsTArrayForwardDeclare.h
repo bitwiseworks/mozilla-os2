@@ -28,12 +28,9 @@ template<class E>
 class FallibleTArray;
 
 template<class E, size_t N>
-class nsAutoTArray;
+class AutoTArray;
 
-template<class E, size_t N>
-class AutoFallibleTArray;
-
-#define InfallibleTArray nsTArray
-#define AutoInfallibleTArray nsAutoTArray
+template<class E>
+using InfallibleTArray = nsTArray<E>;
 
 #endif

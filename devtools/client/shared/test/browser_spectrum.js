@@ -2,46 +2,46 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that the spectrum color picker works correctly
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/spectrum-frame.xhtml";
 const {Spectrum} = require("devtools/client/shared/widgets/Spectrum");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  yield performTest();
-  gBrowser.removeCurrentTab();
-});
+const TEST_URI = `data:text/html,
+  <link rel="stylesheet" href="chrome://devtools/content/shared/widgets/spectrum.css" type="text/css"/>
+  <div id="spectrum-container" />`;
 
-function* performTest() {
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+add_task(function* () {
+  let [host,, doc] = yield createHost("bottom", TEST_URI);
 
-  yield testCreateAndDestroyShouldAppendAndRemoveElements(doc);
-  yield testPassingAColorAtInitShouldSetThatColor(doc);
-  yield testSettingAndGettingANewColor(doc);
-  yield testChangingColorShouldEmitEvents(doc);
-  yield testSettingColorShoudUpdateTheUI(doc);
+  let container = doc.getElementById("spectrum-container");
+
+  yield testCreateAndDestroyShouldAppendAndRemoveElements(container);
+  yield testPassingAColorAtInitShouldSetThatColor(container);
+  yield testSettingAndGettingANewColor(container);
+  yield testChangingColorShouldEmitEvents(container);
+  yield testSettingColorShoudUpdateTheUI(container);
 
   host.destroy();
-}
+});
 
-function testCreateAndDestroyShouldAppendAndRemoveElements(doc) {
-  let containerElement = doc.querySelector("#spectrum");
-  ok(containerElement, "We have the root node to append spectrum to");
-  is(containerElement.childElementCount, 0, "Root node is empty");
+function testCreateAndDestroyShouldAppendAndRemoveElements(container) {
+  ok(container, "We have the root node to append spectrum to");
+  is(container.childElementCount, 0, "Root node is empty");
 
-  let s = new Spectrum(containerElement, [255, 126, 255, 1]);
+  let s = new Spectrum(container, [255, 126, 255, 1]);
   s.show();
-  ok(containerElement.childElementCount > 0, "Spectrum has appended elements");
+  ok(container.childElementCount > 0, "Spectrum has appended elements");
 
   s.destroy();
-  is(containerElement.childElementCount, 0, "Destroying spectrum removed all nodes");
+  is(container.childElementCount, 0, "Destroying spectrum removed all nodes");
 }
 
-function testPassingAColorAtInitShouldSetThatColor(doc) {
+function testPassingAColorAtInitShouldSetThatColor(container) {
   let initRgba = [255, 126, 255, 1];
 
-  let s = new Spectrum(doc.querySelector("#spectrum"), initRgba);
+  let s = new Spectrum(container, initRgba);
   s.show();
 
   let setRgba = s.rgb;
@@ -54,8 +54,8 @@ function testPassingAColorAtInitShouldSetThatColor(doc) {
   s.destroy();
 }
 
-function testSettingAndGettingANewColor(doc) {
-  let s = new Spectrum(doc.querySelector("#spectrum"), [0, 0, 0, 1]);
+function testSettingAndGettingANewColor(container) {
+  let s = new Spectrum(container, [0, 0, 0, 1]);
   s.show();
 
   let colorToSet = [255, 255, 255, 1];
@@ -70,9 +70,9 @@ function testSettingAndGettingANewColor(doc) {
   s.destroy();
 }
 
-function testChangingColorShouldEmitEvents(doc) {
+function testChangingColorShouldEmitEvents(container) {
   return new Promise(resolve => {
-    let s = new Spectrum(doc.querySelector("#spectrum"), [255, 255, 255, 1]);
+    let s = new Spectrum(container, [255, 255, 255, 1]);
     s.show();
 
     s.once("changed", (event, rgba, color) => {
@@ -81,19 +81,19 @@ function testChangingColorShouldEmitEvents(doc) {
       is(rgba[1], 64, "New color is correct");
       is(rgba[2], 64, "New color is correct");
       is(rgba[3], 1, "New color is correct");
-      is("rgba(" + rgba[0] + ", " + rgba[1] + ", " + rgba[2] + ", " + rgba[3] + ")", color, "RGBA and css color correspond");
+      is(`rgba(${rgba.join(", ")})`, color, "RGBA and css color correspond");
 
       s.destroy();
       resolve();
     });
 
     // Simulate a drag move event by calling the handler directly.
-    s.onDraggerMove(s.dragger.offsetWidth/2, s.dragger.offsetHeight/2);
+    s.onDraggerMove(s.dragger.offsetWidth / 2, s.dragger.offsetHeight / 2);
   });
 }
 
-function testSettingColorShoudUpdateTheUI(doc) {
-  let s = new Spectrum(doc.querySelector("#spectrum"), [255, 255, 255, 1]);
+function testSettingColorShoudUpdateTheUI(container) {
+  let s = new Spectrum(container, [255, 255, 255, 1]);
   s.show();
   let dragHelperOriginalPos = [s.dragHelper.style.top, s.dragHelper.style.left];
   let alphaHelperOriginalPos = s.alphaSliderHelper.style.left;
@@ -107,7 +107,7 @@ function testSettingColorShoudUpdateTheUI(doc) {
 
   s.rgb = [240, 32, 124, 0];
   s.updateUI();
-  is(s.alphaSliderHelper.style.left, - (s.alphaSliderHelper.offsetWidth/2) + "px",
+  is(s.alphaSliderHelper.style.left, -(s.alphaSliderHelper.offsetWidth / 2) + "px",
     "Alpha range UI has been updated again");
 
   s.destroy();

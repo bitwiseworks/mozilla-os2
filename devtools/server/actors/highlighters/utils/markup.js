@@ -7,11 +7,12 @@
 const { Cc, Ci, Cu } = require("chrome");
 const { getCurrentZoom,
   getRootBindingParent } = require("devtools/shared/layout/utils");
+const { on, emit } = require("sdk/event/core");
 
 const lazyContainer = {};
 
 loader.lazyRequireGetter(lazyContainer, "CssLogic",
-  "devtools/shared/styleinspector/css-logic", true);
+  "devtools/server/css-logic", true);
 exports.getComputedStyle = (node) =>
   lazyContainer.CssLogic.getComputedStyle(node);
 
@@ -36,6 +37,62 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const STYLESHEET_URI = "resource://devtools/server/actors/" +
                        "highlighters.css";
+// How high is the infobar (px).
+const INFOBAR_HEIGHT = 34;
+// What's the size of the infobar arrow (px).
+const INFOBAR_ARROW_SIZE = 9;
+
+const _tokens = Symbol("classList/tokens");
+
+/**
+ * Shims the element's `classList` for anonymous content elements; used
+ * internally by `CanvasFrameAnonymousContentHelper.getElement()` method.
+ */
+function ClassList(className) {
+  let trimmed = (className || "").trim();
+  this[_tokens] = trimmed ? trimmed.split(/\s+/) : [];
+}
+
+ClassList.prototype = {
+  item(index) {
+    return this[_tokens][index];
+  },
+  contains(token) {
+    return this[_tokens].includes(token);
+  },
+  add(token) {
+    if (!this.contains(token)) {
+      this[_tokens].push(token);
+    }
+    emit(this, "update");
+  },
+  remove(token) {
+    let index = this[_tokens].indexOf(token);
+
+    if (index > -1) {
+      this[_tokens].splice(index, 1);
+    }
+    emit(this, "update");
+  },
+  toggle(token) {
+    if (this.contains(token)) {
+      this.remove(token);
+    } else {
+      this.add(token);
+    }
+  },
+  get length() {
+    return this[_tokens].length;
+  },
+  [Symbol.iterator]: function* () {
+    for (let i = 0; i < this.tokens.length; i++) {
+      yield this[_tokens][i];
+    }
+  },
+  toString() {
+    return this[_tokens].join(" ");
+  }
+};
 
 /**
  * Is this content window a XUL window?
@@ -64,18 +121,25 @@ function installHelperSheet(win, source, type = "agent") {
 }
 exports.installHelperSheet = installHelperSheet;
 
-function isNodeValid(node) {
-  // Is it null or dead?
+/**
+ * Returns true if a DOM node is "valid", where "valid" means that the node isn't a dead
+ * object wrapper, is still attached to a document, and is of a given type.
+ * @param {DOMNode} node
+ * @param {Number} nodeType Optional, defaults to ELEMENT_NODE
+ * @return {Boolean}
+ */
+function isNodeValid(node, nodeType = Ci.nsIDOMNode.ELEMENT_NODE) {
+  // Is it still alive?
   if (!node || Cu.isDeadWrapper(node)) {
     return false;
   }
 
-  // Is it an element node
-  if (node.nodeType !== node.ELEMENT_NODE) {
+  // Is it of the right type?
+  if (node.nodeType !== nodeType) {
     return false;
   }
 
-  // Is the document inaccessible?
+  // Is its document accessible?
   let doc = node.ownerDocument;
   if (!doc || !doc.defaultView) {
     return false;
@@ -178,7 +242,12 @@ function CanvasFrameAnonymousContentHelper(highlighterEnv, nodeBuilder) {
   this.anonymousContentGlobal = Cu.getGlobalForObject(
                                 this.anonymousContentDocument);
 
-  this._insert();
+  // Only try to create the highlighter when the document is loaded,
+  // otherwise, wait for the navigate event to fire.
+  let doc = this.highlighterEnv.document;
+  if (doc.documentElement && doc.readyState != "uninitialized") {
+    this._insert();
+  }
 
   this._onNavigate = this._onNavigate.bind(this);
   this.highlighterEnv.on("navigate", this._onNavigate);
@@ -187,7 +256,7 @@ function CanvasFrameAnonymousContentHelper(highlighterEnv, nodeBuilder) {
 }
 
 CanvasFrameAnonymousContentHelper.prototype = {
-  destroy: function() {
+  destroy: function () {
     try {
       let doc = this.anonymousContentDocument;
       doc.removeAnonymousContent(this._content);
@@ -203,26 +272,15 @@ CanvasFrameAnonymousContentHelper.prototype = {
     this._removeAllListeners();
   },
 
-  _insert: function() {
-    // Insert the content node only if the page isn't in a XUL window, and if
-    // the document still exists.
-    if (!this.highlighterEnv.document.documentElement ||
-        isXUL(this.highlighterEnv.window)) {
-      return;
-    }
+  _insert: function () {
     let doc = this.highlighterEnv.document;
-
-    // On B2G, for example, when connecting to keyboard just after startup,
-    // we connect to a hidden document, which doesn't accept
-    // insertAnonymousContent call yet.
-    if (doc.hidden) {
-      // In such scenario, just wait for the document to be visible
-      // before injecting anonymous content.
-      let onVisibilityChange = () => {
-        doc.removeEventListener("visibilitychange", onVisibilityChange);
-        this._insert();
-      };
-      doc.addEventListener("visibilitychange", onVisibilityChange);
+    // Insert the content node only if the document:
+    // * is loaded (navigate event will fire once it is),
+    // * still exists,
+    // * isn't in XUL.
+    if (doc.readyState == "uninitialized" ||
+        !doc.documentElement ||
+        isXUL(this.highlighterEnv.window)) {
       return;
     }
 
@@ -233,10 +291,16 @@ CanvasFrameAnonymousContentHelper.prototype = {
     installHelperSheet(this.highlighterEnv.window,
       "@import url('" + STYLESHEET_URI + "');");
     let node = this.nodeBuilder();
+
+    // It was stated that hidden documents don't accept
+    // `insertAnonymousContent` calls yet. That doesn't seems the case anymore,
+    // at least on desktop. Therefore, removing the code that was dealing with
+    // that scenario, fixes when we're adding anonymous content in a tab that
+    // is not the active one (see bug 1260043 and bug 1260044)
     this._content = doc.insertAnonymousContent(node);
   },
 
-  _onNavigate: function(e, {isTopLevel}) {
+  _onNavigate: function (e, {isTopLevel}) {
     if (isTopLevel) {
       this._removeAllListeners();
       this._insert();
@@ -244,36 +308,44 @@ CanvasFrameAnonymousContentHelper.prototype = {
     }
   },
 
-  getTextContentForElement: function(id) {
+  getTextContentForElement: function (id) {
     if (!this.content) {
       return null;
     }
     return this.content.getTextContentForElement(id);
   },
 
-  setTextContentForElement: function(id, text) {
+  setTextContentForElement: function (id, text) {
     if (this.content) {
       this.content.setTextContentForElement(id, text);
     }
   },
 
-  setAttributeForElement: function(id, name, value) {
+  setAttributeForElement: function (id, name, value) {
     if (this.content) {
       this.content.setAttributeForElement(id, name, value);
     }
   },
 
-  getAttributeForElement: function(id, name) {
+  getAttributeForElement: function (id, name) {
     if (!this.content) {
       return null;
     }
     return this.content.getAttributeForElement(id, name);
   },
 
-  removeAttributeForElement: function(id, name) {
+  removeAttributeForElement: function (id, name) {
     if (this.content) {
       this.content.removeAttributeForElement(id, name);
     }
+  },
+
+  hasAttributeForElement: function (id, name) {
+    return typeof this.getAttributeForElement(id, name) === "string";
+  },
+
+  getCanvasContext: function (id, type = "2d") {
+    return this.content ? this.content.getCanvasContext(id, type) : null;
   },
 
   /**
@@ -312,7 +384,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
    * @param {String} type
    * @param {Function} handler
    */
-  addEventListenerForElement: function(id, type, handler) {
+  addEventListenerForElement: function (id, type, handler) {
     if (typeof id !== "string") {
       throw new Error("Expected a string ID in addEventListenerForElement but" +
         " got: " + id);
@@ -336,7 +408,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
    * @param {String} id
    * @param {String} type
    */
-  removeEventListenerForElement: function(id, type) {
+  removeEventListenerForElement: function (id, type) {
     let listeners = this.listeners.get(type);
     if (!listeners) {
       return;
@@ -350,7 +422,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
     }
   },
 
-  handleEvent: function(event) {
+  handleEvent: function (event) {
     let listeners = this.listeners.get(event.type);
     if (!listeners) {
       return;
@@ -387,7 +459,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
     }
   },
 
-  _removeAllListeners: function() {
+  _removeAllListeners: function () {
     if (this.highlighterEnv) {
       let target = this.highlighterEnv.pageListenerTarget;
       for (let [type] of this.listeners) {
@@ -397,20 +469,28 @@ CanvasFrameAnonymousContentHelper.prototype = {
     this.listeners.clear();
   },
 
-  getElement: function(id) {
-    let self = this;
+  getElement: function (id) {
+    let classList = new ClassList(this.getAttributeForElement(id, "class"));
+
+    on(classList, "update", () => {
+      this.setAttributeForElement(id, "class", classList.toString());
+    });
+
     return {
-      getTextContent: () => self.getTextContentForElement(id),
-      setTextContent: text => self.setTextContentForElement(id, text),
-      setAttribute: (name, value) => self.setAttributeForElement(id, name, value),
-      getAttribute: name => self.getAttributeForElement(id, name),
-      removeAttribute: name => self.removeAttributeForElement(id, name),
+      getTextContent: () => this.getTextContentForElement(id),
+      setTextContent: text => this.setTextContentForElement(id, text),
+      setAttribute: (name, val) => this.setAttributeForElement(id, name, val),
+      getAttribute: name => this.getAttributeForElement(id, name),
+      removeAttribute: name => this.removeAttributeForElement(id, name),
+      hasAttribute: name => this.hasAttributeForElement(id, name),
+      getCanvasContext: type => this.getCanvasContext(id, type),
       addEventListener: (type, handler) => {
-        return self.addEventListenerForElement(id, type, handler);
+        return this.addEventListenerForElement(id, type, handler);
       },
       removeEventListener: (type, handler) => {
-        return self.removeEventListenerForElement(id, type, handler);
-      }
+        return this.removeEventListenerForElement(id, type, handler);
+      },
+      classList
     };
   },
 
@@ -442,7 +522,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
    * should be used to read the current zoom value.
    * @param {String} id The ID of the root element inserted with this API.
    */
-  scaleRootElement: function(node, id) {
+  scaleRootElement: function (node, id) {
     let zoom = getCurrentZoom(node);
     let value = "position:absolute;width:100%;height:100%;";
 
@@ -456,3 +536,74 @@ CanvasFrameAnonymousContentHelper.prototype = {
   }
 };
 exports.CanvasFrameAnonymousContentHelper = CanvasFrameAnonymousContentHelper;
+
+/**
+ * Move the infobar to the right place in the highlighter. This helper method is utilized
+ * in both css-grid.js and box-model.js to help position the infobar in an appropriate
+ * space over the highlighted node element or grid area. The infobar is used to display
+ * relevant information about the highlighted item (ex, node or grid name and dimensions).
+ *
+ * This method will first try to position the infobar to top or bottom of the container
+ * such that it has enough space for the height of the infobar. Afterwards, it will try
+ * to horizontally center align with the container element if possible.
+ *
+ * @param  {DOMNode} container
+ *         The container element which will be used to position the infobar.
+ * @param  {Object} bounds
+ *         The content bounds of the container element.
+ * @param  {Window} win
+ *         The window object.
+ */
+function moveInfobar(container, bounds, win) {
+  let winHeight = win.innerHeight * getCurrentZoom(win);
+  let winWidth = win.innerWidth * getCurrentZoom(win);
+  let winScrollY = win.scrollY;
+
+  // Ensure that containerBottom and containerTop are at least zero to avoid
+  // showing tooltips outside the viewport.
+  let containerBottom = Math.max(0, bounds.bottom) + INFOBAR_ARROW_SIZE;
+  let containerTop = Math.min(winHeight, bounds.top);
+
+  // Can the bar be above the node?
+  let top;
+  if (containerTop < INFOBAR_HEIGHT) {
+    // No. Can we move the bar under the node?
+    if (containerBottom + INFOBAR_HEIGHT > winHeight) {
+      // No. Let's move it inside. Can we show it at the top of the element?
+      if (containerTop < winScrollY) {
+        // No. Window is scrolled past the top of the element.
+        top = 0;
+      } else {
+        // Yes. Show it at the top of the element
+        top = containerTop;
+      }
+      container.setAttribute("position", "overlap");
+    } else {
+      // Yes. Let's move it under the node.
+      top = containerBottom;
+      container.setAttribute("position", "bottom");
+    }
+  } else {
+    // Yes. Let's move it on top of the node.
+    top = containerTop - INFOBAR_HEIGHT;
+    container.setAttribute("position", "top");
+  }
+
+  // Align the bar with the box's center if possible.
+  let left = bounds.right - bounds.width / 2;
+  // Make sure the while infobar is visible.
+  let buffer = 100;
+  if (left < buffer) {
+    left = buffer;
+    container.setAttribute("hide-arrow", "true");
+  } else if (left > winWidth - buffer) {
+    left = winWidth - buffer;
+    container.setAttribute("hide-arrow", "true");
+  } else {
+    container.removeAttribute("hide-arrow");
+  }
+
+  let style = "top:" + top + "px;left:" + left + "px;";
+  container.setAttribute("style", style);
+}
+exports.moveInfobar = moveInfobar;

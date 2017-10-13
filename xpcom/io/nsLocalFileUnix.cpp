@@ -10,6 +10,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Sprintf.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -20,14 +21,12 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <locale.h>
-#if defined(VMS)
-#include <fabdef.h>
-#endif
 
 #if defined(HAVE_SYS_QUOTA_H) && defined(HAVE_LINUX_QUOTA_H)
 #define USE_LINUX_QUOTACTL
 #include <sys/mount.h>
 #include <sys/quota.h>
+#include <sys/sysmacros.h>
 #ifndef BLOCK_SIZE
 #define BLOCK_SIZE 1024 /* kernel block size */
 #endif
@@ -64,7 +63,7 @@ static nsresult MacErrorMapper(OSErr inErr);
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
 #include "nsIMIMEService.h"
 #include <linux/magic.h>
 #endif
@@ -1007,11 +1006,7 @@ nsLocalFile::MoveToNative(nsIFile* aNewParent, const nsACString& aNewName)
 
   // try for atomic rename, falling back to copy/delete
   if (rename(mPath.get(), newPathName.get()) < 0) {
-#ifdef VMS
-    if (errno == EXDEV || errno == ENXIO) {
-#else
     if (errno == EXDEV) {
-#endif
       rv = CopyToNative(aNewParent, aNewName);
       if (NS_SUCCEEDED(rv)) {
         rv = Remove(true);
@@ -1231,14 +1226,6 @@ nsLocalFile::GetFileSize(int64_t* aFileSize)
   *aFileSize = 0;
   ENSURE_STAT_CACHE();
 
-#if defined(VMS)
-  /* Only two record formats can report correct file content size */
-  if ((mCachedStat.st_fab_rfm != FAB$C_STMLF) &&
-      (mCachedStat.st_fab_rfm != FAB$C_STMCR)) {
-    return NS_ERROR_FAILURE;
-  }
-#endif
-
   if (!S_ISDIR(mCachedStat.st_mode)) {
     *aFileSize = (int64_t)mCachedStat.st_size;
   }
@@ -1311,7 +1298,7 @@ GetDeviceName(int aDeviceMajor, int aDeviceMinor, nsACString& aDeviceName)
   char mountinfoLine[kMountInfoLineLength];
   char deviceNum[kMountInfoLineLength];
 
-  snprintf(deviceNum, kMountInfoLineLength, "%d:%d", aDeviceMajor, aDeviceMinor);
+  SprintfLiteral(deviceNum, "%d:%d", aDeviceMajor, aDeviceMinor);
 
   FILE* f = fopen("/proc/self/mountinfo", "rt");
   if (!f) {
@@ -1451,10 +1438,8 @@ nsLocalFile::GetParent(nsIFile** aParent)
 
   // <brendan, after jband> I promise to play nice
   char* buffer = mPath.BeginWriting();
-  char* slashp = buffer;
-
   // find the last significant slash in buffer
-  slashp = strrchr(buffer, '/');
+  char* slashp = strrchr(buffer, '/');
   NS_ASSERTION(slashp, "non-canonical path?");
   if (!slashp) {
     return NS_ERROR_FILE_INVALID_PATH;
@@ -2038,7 +2023,7 @@ nsLocalFile::Launch()
   }
 
   nsAutoCString fileUri = NS_LITERAL_CSTRING("file://") + mPath;
-  return widget::GeckoAppShell::OpenUriExternal(
+  return java::GeckoAppShell::OpenUriExternal(
     NS_ConvertUTF8toUTF16(fileUri),
     NS_ConvertUTF8toUTF16(type),
     EmptyString(),
@@ -2177,11 +2162,7 @@ nsLocalFile::RenameToNative(nsIFile* aNewParentDir, const nsACString& aNewName)
 
   // try for atomic rename
   if (rename(mPath.get(), newPathName.get()) < 0) {
-#ifdef VMS
-    if (errno == EXDEV || errno == ENXIO) {
-#else
     if (errno == EXDEV) {
-#endif
       rv = NS_ERROR_FILE_ACCESS_DENIED;
     } else {
       rv = NSRESULT_FOR_ERRNO();

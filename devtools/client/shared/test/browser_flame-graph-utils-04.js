@@ -1,13 +1,14 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests if (idle) nodes are added when necessary in the flame graph data.
 
-var {FlameGraphUtils} = require("devtools/client/shared/widgets/FlameGraph");
-var {PALLETTE_SIZE} = require("devtools/client/shared/widgets/FlameGraph");
-var {FrameNode} = require("devtools/client/performance/modules/logic/tree-model");
+const {FlameGraphUtils} = require("devtools/client/shared/widgets/FlameGraph");
+const {PALLETTE_SIZE} = require("devtools/client/shared/widgets/FlameGraph");
 
-add_task(function*() {
+add_task(function* () {
   yield addTab("about:blank");
   yield performTest();
   gBrowser.removeCurrentTab();
@@ -17,7 +18,7 @@ function* performTest() {
   let out = FlameGraphUtils.createFlameGraphDataFromThread(TEST_DATA, {
     flattenRecursion: true,
     contentOnly: true,
-    showIdleBlocks: '\m/'
+    showIdleBlocks: "\m/"
   });
 
   ok(out, "Some data was outputted properly");

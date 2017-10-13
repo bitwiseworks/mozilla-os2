@@ -1,10 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Test splitBy from node-attribute-parser.js
 
-var Cu = Components.utils;
-var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
 const {splitBy} = require("devtools/client/shared/node-attribute-parser");
 
 const TEST_DATA = [{
@@ -61,7 +62,7 @@ function run_test() {
     do_print("Checking that the number of parsed tokens is correct");
     do_check_eq(tokens.length, expected.length);
 
-    for (let i = 0; i < tokens.length; i ++) {
+    for (let i = 0; i < tokens.length; i++) {
       do_print("Checking the data in token " + i);
       do_check_eq(tokens[i].value, expected[i].value);
       if (expected[i].type) {

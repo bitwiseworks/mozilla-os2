@@ -5239,6 +5239,18 @@ RilObject.prototype[UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS] = function UNSOLICIT
   try {
     message =
       this.context.GsmPDUHelper.readCbMessage(this.context.Buf.readInt32());
+
+    // "Data-Download" message is expected to be handled by the modem.
+    // Ignore it here to prevent any garbage messages to be displayed.
+    // See 9.4.1.2.2 Message Identifier of TS 32.041 for the range of
+    // Message-identifier of the Data-Download CB messages.
+    if (message.messageId >= 0x1000 && message.messageId <= 0x10FF) {
+      if (DEBUG) {
+        this.context.debug("Ignore a Data-Download message, messageId: " +
+                           message.messageId);
+      }
+      return;
+    }
   } catch (e) {
     if (DEBUG) {
       this.context.debug("Failed to parse Cell Broadcast message: " + e);
@@ -5248,6 +5260,22 @@ RilObject.prototype[UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS] = function UNSOLICIT
 
   message = this._processReceivedSmsCbPage(message);
   if (!message) {
+    return;
+  }
+
+  // Bug 1235697, failed to deactivate CBS in some modem.
+  // Workaround it according to the settings.
+  // Note: ETWS/CMAS/PWS can be received even disabled.
+  //       It will be displayed according to the setting in application layer.
+  if (this.cellBroadcastDisabled && (
+      !(message.messageId >= 0x1100 && message.messageId <= 0x1107) && // ETWS
+      !(message.messageId >= 0x1112 && message.messageId <= 0x112F) && // CMAS
+      !(message.messageId >= 0x1130 && message.messageId <= 0x18FF) // PWS
+    )) {
+    if (DEBUG) {
+      this.context.debug("Ignore a CB message when disabled, messageId: " +
+                         message.messageId);
+    }
     return;
   }
 
@@ -10419,8 +10447,7 @@ StkProactiveCmdHelperObject.prototype = {
   },
 
   searchForTag: function(tag, ctlvs) {
-    let iter = Iterator(ctlvs);
-    for (let [index, ctlv] in iter) {
+    for (let ctlv of ctlvs) {
       if ((ctlv.tag & ~COMPREHENSIONTLV_FLAG_CR) == tag) {
         return ctlv;
       }
@@ -11027,7 +11054,7 @@ BerTlvHelperObject.prototype = {
   },
 
   searchForNextTag: function(tag, iter) {
-    for (let [index, tlv] in iter) {
+    for (let tlv of iter) {
       if (tlv.tag === tag) {
         return tlv;
       }
@@ -11378,7 +11405,7 @@ ICCIOHelperObject.prototype = {
 
     let berTlv = BerTlvHelper.decode(octetLen);
     // See TS 102 221 Table 11.4 for the content order of getResponse.
-    let iter = Iterator(berTlv.value);
+    let iter = berTlv.value.values();
     let tlv = BerTlvHelper.searchForNextTag(BER_FCP_FILE_DESCRIPTOR_TAG,
                                             iter);
     if (!tlv ||

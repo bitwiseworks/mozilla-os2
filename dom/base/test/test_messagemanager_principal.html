@@ -34,8 +34,8 @@
         sendAsyncMessage(message.name, "principal.origin: " +
                          ("origin" in message.principal ? "OK" : "KO"));
 
-        sendAsyncMessage(message.name, "principal.isInBrowserElement: " +
-                         ("isInBrowserElement" in message.principal ? "OK" : "KO"));
+        sendAsyncMessage(message.name, "principal.isInIsolatedMozBrowserElement: " +
+                         ("isInIsolatedMozBrowserElement" in message.principal ? "OK" : "KO"));
 
         sendAsyncMessage(message.name, "DONE");
       });
@@ -85,6 +85,7 @@
       SpecialPowers.pushPrefEnv({
         "set": [
           ["dom.mozBrowserFramesEnabled", true],
+          ["network.disable.ipc.security", true],
           ["browser.pagethumbnails.capturing_disabled", true]
         ]
       }, runTests);

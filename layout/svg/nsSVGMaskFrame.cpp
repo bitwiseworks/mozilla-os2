@@ -205,7 +205,8 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
                                       nsIFrame* aMaskedFrame,
                                       const gfxMatrix &aMatrix,
                                       float aOpacity,
-                                      Matrix* aMaskTransform)
+                                      Matrix* aMaskTransform,
+                                      uint8_t aMaskOp)
 {
   // If the flag is set when we get here, it means this mask frame
   // has already been used painting the current mask, and the document
@@ -216,19 +217,7 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   }
   AutoMaskReferencer maskRef(this);
 
-  SVGMaskElement *maskElem = static_cast<SVGMaskElement*>(mContent);
-
-  uint16_t units =
-    maskElem->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
-  gfxRect bbox;
-  if (units == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
-    bbox = nsSVGUtils::GetBBox(aMaskedFrame);
-  }
-
-  // Bounds in the user space of aMaskedFrame
-  gfxRect maskArea = nsSVGUtils::GetRelativeRect(units,
-                       &maskElem->mLengthAttributes[SVGMaskElement::ATTR_X],
-                       bbox, aMaskedFrame);
+  gfxRect maskArea = GetMaskArea(aMaskedFrame);
 
   // Get the clip extents in device space:
   // Minimizing the mask surface extents (using both the current clip extents
@@ -252,18 +241,18 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   RefPtr<DrawTarget> maskDT =
     Factory::CreateDrawTarget(BackendType::CAIRO, maskSurfaceSize,
                               SurfaceFormat::B8G8R8A8);
-  if (!maskDT) {
+  if (!maskDT || !maskDT->IsValid()) {
     return nullptr;
   }
 
   gfxMatrix maskSurfaceMatrix =
     aContext->CurrentMatrix() * gfxMatrix::Translation(-maskSurfaceRect.TopLeft());
 
-  RefPtr<gfxContext> tmpCtx = new gfxContext(maskDT);
+  RefPtr<gfxContext> tmpCtx = gfxContext::CreateOrNull(maskDT);
+  MOZ_ASSERT(tmpCtx); // already checked the draw target above
   tmpCtx->SetMatrix(maskSurfaceMatrix);
 
   mMatrixForChildren = GetMaskTransform(aMaskedFrame) * aMatrix;
-
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
     // The CTM of each frame referencing us can be different
@@ -274,9 +263,9 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
     gfxMatrix m = mMatrixForChildren;
     if (kid->GetContent()->IsSVGElement()) {
       m = static_cast<nsSVGElement*>(kid->GetContent())->
-            PrependLocalTransformsTo(m);
+            PrependLocalTransformsTo(m, eUserSpaceToParent);
     }
-    nsSVGUtils::PaintFrameWithEffects(kid, *tmpCtx, m);
+    Unused << nsSVGUtils::PaintFrameWithEffects(kid, *tmpCtx, m);
   }
 
   RefPtr<SourceSurface> maskSnapshot = maskDT->Snapshot();
@@ -290,23 +279,25 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   }
 
   // Create alpha channel mask for output
-  RefPtr<DrawTarget> destMaskDT =
-    Factory::CreateDrawTarget(BackendType::CAIRO, maskSurfaceSize,
-                              SurfaceFormat::A8);
-  if (!destMaskDT) {
+  RefPtr<DataSourceSurface> destMaskSurface =
+    Factory::CreateDataSourceSurface(maskSurfaceSize, SurfaceFormat::A8);
+  if (!destMaskSurface) {
     return nullptr;
   }
-  RefPtr<SourceSurface> destMaskSnapshot = destMaskDT->Snapshot();
-  if (!destMaskSnapshot) {
-    return nullptr;
-  }
-  RefPtr<DataSourceSurface> destMaskSurface = destMaskSnapshot->GetDataSurface();
   DataSourceSurface::MappedSurface destMap;
-  if (!destMaskSurface->Map(DataSourceSurface::MapType::READ_WRITE, &destMap)) {
+  if (!destMaskSurface->Map(DataSourceSurface::MapType::WRITE, &destMap)) {
     return nullptr;
   }
 
-  if (StyleSVGReset()->mMaskType == NS_STYLE_MASK_TYPE_LUMINANCE) {
+  uint8_t maskType;
+  if (aMaskOp == NS_STYLE_MASK_MODE_MATCH_SOURCE) {
+    maskType = StyleSVGReset()->mMaskType;
+  } else {
+    maskType = aMaskOp == NS_STYLE_MASK_MODE_LUMINANCE ?
+                 NS_STYLE_MASK_TYPE_LUMINANCE : NS_STYLE_MASK_TYPE_ALPHA;
+  }
+
+  if (maskType == NS_STYLE_MASK_TYPE_LUMINANCE) {
     if (StyleSVG()->mColorInterpolation ==
         NS_STYLE_COLOR_INTERPOLATION_LINEARRGB) {
       ComputeLinearRGBLuminanceMask(map.mData, map.mStride,
@@ -335,6 +326,26 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   return destMaskSurface.forget();
 }
 
+gfxRect
+nsSVGMaskFrame::GetMaskArea(nsIFrame* aMaskedFrame)
+{
+  SVGMaskElement *maskElem = static_cast<SVGMaskElement*>(mContent);
+
+  uint16_t units =
+    maskElem->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
+  gfxRect bbox;
+  if (units == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
+    bbox = nsSVGUtils::GetBBox(aMaskedFrame);
+  }
+
+  // Bounds in the user space of aMaskedFrame
+  gfxRect maskArea = nsSVGUtils::GetRelativeRect(units,
+                       &maskElem->mLengthAttributes[SVGMaskElement::ATTR_X],
+                       bbox, aMaskedFrame);
+
+  return maskArea;
+}
+
 nsresult
 nsSVGMaskFrame::AttributeChanged(int32_t  aNameSpaceID,
                                  nsIAtom* aAttribute,
@@ -350,8 +361,8 @@ nsSVGMaskFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
 
-  return nsSVGMaskFrameBase::AttributeChanged(aNameSpaceID,
-                                              aAttribute, aModType);
+  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
+                                               aAttribute, aModType);
 }
 
 #ifdef DEBUG
@@ -363,7 +374,7 @@ nsSVGMaskFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::mask),
                "Content is not an SVG mask");
 
-  nsSVGMaskFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 

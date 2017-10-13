@@ -7,6 +7,7 @@
 #ifndef vm_SavedStacks_h
 #define vm_SavedStacks_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/FastBernoulliTrial.h"
 
 #include "jscntxt.h"
@@ -149,7 +150,6 @@ namespace js {
 
 class SavedStacks {
     friend class SavedFrame;
-    friend JSObject* SavedStacksMetadataCallback(JSContext* cx, JSObject* target);
     friend bool JS::ubi::ConstructSavedFrameStackSlow(JSContext* cx,
                                                       JS::ubi::StackFrame& ubiFrame,
                                                       MutableHandleObject outSavedFrameStack);
@@ -157,30 +157,45 @@ class SavedStacks {
   public:
     SavedStacks()
       : frames(),
+        bernoulliSeeded(false),
         bernoulli(1.0, 0x59fdad7f6b4cc573, 0x91adf38db96a9354),
         creatingSavedFrame(false)
     { }
 
-    bool     init();
-    bool     initialized() const { return frames.initialized(); }
-    bool     saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsigned maxFrameCount = 0);
-    bool     copyAsyncStack(JSContext* cx, HandleObject asyncStack, HandleString asyncCause,
-                            MutableHandleSavedFrame adoptedStack, unsigned maxFrameCount = 0);
-    void     sweep(JSRuntime* rt);
-    void     trace(JSTracer* trc);
+    MOZ_MUST_USE bool init();
+    bool initialized() const { return frames.initialized(); }
+    MOZ_MUST_USE bool saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame,
+                                       JS::StackCapture&& capture = JS::StackCapture(JS::AllFrames()));
+    MOZ_MUST_USE bool copyAsyncStack(JSContext* cx, HandleObject asyncStack,
+                                     HandleString asyncCause,
+                                     MutableHandleSavedFrame adoptedStack,
+                                     uint32_t maxFrameCount = 0);
+    void sweep();
+    void trace(JSTracer* trc);
     uint32_t count();
-    void     clear();
-    void     chooseSamplingProbability(JSCompartment*);
+    void clear();
+    void chooseSamplingProbability(JSCompartment*);
 
     // Set the sampling random number generator's state to |state0| and
     // |state1|. One or the other must be non-zero. See the comments for
     // mozilla::non_crypto::XorShift128PlusRNG::setState for details.
-    void     setRNGState(uint64_t state0, uint64_t state1) { bernoulli.setRandomState(state0, state1); }
+    void setRNGState(uint64_t state0, uint64_t state1) { bernoulli.setRandomState(state0, state1); }
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
+    // An alloction metadata builder that marks cells with the JavaScript stack
+    // at which they were allocated.
+    struct MetadataBuilder : public AllocationMetadataBuilder {
+        MetadataBuilder() : AllocationMetadataBuilder() { }
+        virtual JSObject* build(JSContext *cx, HandleObject obj,
+                                AutoEnterOOMUnsafeRegion& oomUnsafe) const override;
+    };
+
+    static const MetadataBuilder metadataBuilder;
+
   private:
     SavedFrame::Set frames;
+    bool bernoulliSeeded;
     mozilla::FastBernoulliTrial bernoulli;
     bool creatingSavedFrame;
 
@@ -204,12 +219,13 @@ class SavedStacks {
         }
     };
 
-    bool        insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFrame frame,
-                             unsigned maxFrameCount = 0);
-    bool        adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
-                                HandleString asyncCause,
-                                MutableHandleSavedFrame adoptedStack,
-                                unsigned maxFrameCount);
+    MOZ_MUST_USE bool insertFrames(JSContext* cx, FrameIter& iter,
+                                   MutableHandleSavedFrame frame,
+                                   JS::StackCapture&& capture);
+    MOZ_MUST_USE bool adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
+                                      HandleString asyncCause,
+                                      MutableHandleSavedFrame adoptedStack,
+                                      uint32_t maxFrameCount);
     SavedFrame* getOrCreateSavedFrame(JSContext* cx, SavedFrame::HandleLookup lookup);
     SavedFrame* createFrameFromLookup(JSContext* cx, SavedFrame::HandleLookup lookup);
 
@@ -218,63 +234,60 @@ class SavedStacks {
     struct PCKey {
         PCKey(JSScript* script, jsbytecode* pc) : script(script), pc(pc) { }
 
-        PreBarrieredScript script;
-        jsbytecode*        pc;
+        HeapPtr<JSScript*> script;
+        jsbytecode* pc;
+
+        void trace(JSTracer* trc) { /* PCKey is weak. */ }
+        bool needsSweep() { return IsAboutToBeFinalized(&script); }
     };
 
+  public:
     struct LocationValue {
         LocationValue() : source(nullptr), line(0), column(0) { }
         LocationValue(JSAtom* source, size_t line, uint32_t column)
-            : source(source),
-              line(line),
-              column(column)
+            : source(source), line(line), column(column)
         { }
 
         void trace(JSTracer* trc) {
-            if (source)
-                TraceEdge(trc, &source, "SavedStacks::LocationValue::source");
+            TraceNullableEdge(trc, &source, "SavedStacks::LocationValue::source");
         }
 
-        PreBarrieredAtom source;
-        size_t           line;
-        uint32_t         column;
-    };
-
-    class MOZ_STACK_CLASS AutoLocationValueRooter : public JS::CustomAutoRooter
-    {
-      public:
-        explicit AutoLocationValueRooter(JSContext* cx)
-            : JS::CustomAutoRooter(cx),
-              value() {}
-
-        inline LocationValue* operator->() { return &value; }
-        void set(LocationValue& loc) { value = loc; }
-        LocationValue& get() { return value; }
-
-      private:
-        virtual void trace(JSTracer* trc) {
-            value.trace(trc);
+        bool needsSweep() {
+            // LocationValue is always held strongly, but in a weak map.
+            // Assert that it has been marked already, but allow it to be
+            // ejected from the map when the key dies.
+            MOZ_ASSERT(source);
+            MOZ_ASSERT(!IsAboutToBeFinalized(&source));
+            return true;
         }
 
-        SavedStacks::LocationValue value;
+        HeapPtr<JSAtom*> source;
+        size_t line;
+        uint32_t column;
     };
 
-    class MOZ_STACK_CLASS MutableHandleLocationValue
-    {
-      public:
-        inline MOZ_IMPLICIT MutableHandleLocationValue(AutoLocationValueRooter* location)
-            : location(location) {}
-
-        inline LocationValue* operator->() { return &location->get(); }
-        void set(LocationValue& loc) { location->set(loc); }
-
+    template <typename Outer>
+    struct LocationValueOperations {
+        JSAtom* source() const { return loc().source; }
+        size_t line() const { return loc().line; }
+        uint32_t column() const { return loc().column; }
       private:
-        AutoLocationValueRooter* location;
+        const LocationValue& loc() const { return static_cast<const Outer*>(this)->get(); }
     };
 
+    template <typename Outer>
+    struct MutableLocationValueOperations : public LocationValueOperations<Outer> {
+        void setSource(JSAtom* v) { loc().source = v; }
+        void setLine(size_t v) { loc().line = v; }
+        void setColumn(uint32_t v) { loc().column = v; }
+      private:
+        LocationValue& loc() { return static_cast<Outer*>(this)->get(); }
+    };
+
+  private:
     struct PCLocationHasher : public DefaultHasher<PCKey> {
-        typedef PointerHasher<JSScript*, 3>   ScriptPtrHasher;
-        typedef PointerHasher<jsbytecode*, 3> BytecodePtrHasher;
+        using ScriptPtrHasher = DefaultHasher<JSScript*>;
+        using BytecodePtrHasher = DefaultHasher<jsbytecode*>;
 
         static HashNumber hash(const PCKey& key) {
             return mozilla::AddToHash(ScriptPtrHasher::hash(key.script),
@@ -282,19 +295,37 @@ class SavedStacks {
         }
 
         static bool match(const PCKey& l, const PCKey& k) {
-            return l.script == k.script && l.pc == k.pc;
+            return ScriptPtrHasher::match(l.script, k.script) &&
+                   BytecodePtrHasher::match(l.pc, k.pc);
         }
     };
 
-    typedef HashMap<PCKey, LocationValue, PCLocationHasher, SystemAllocPolicy> PCLocationMap;
-
+    // We eagerly Atomize the script source stored in LocationValue because
+    // wasm does not always have a JSScript and the source might not be
+    // available when we need it later. However, since the JSScript does not
+    // actually hold this atom, we have to trace it strongly to keep it alive.
+    // Thus, it takes two GC passes to fully clean up this table: the first GC
+    // removes the dead script; the second will clear out the source atom since
+    // it is no longer held by the table.
+    using PCLocationMap = GCHashMap<PCKey, LocationValue, PCLocationHasher, SystemAllocPolicy>;
     PCLocationMap pcLocationMap;
 
-    void sweepPCLocationMap();
-    bool getLocation(JSContext* cx, const FrameIter& iter, MutableHandleLocationValue locationp);
+    MOZ_MUST_USE bool getLocation(JSContext* cx, const FrameIter& iter,
+                                  MutableHandle<LocationValue> locationp);
 };
 
-JSObject* SavedStacksMetadataCallback(JSContext* cx, JSObject* target);
+template <>
+class RootedBase<SavedStacks::LocationValue>
+  : public SavedStacks::MutableLocationValueOperations<JS::Rooted<SavedStacks::LocationValue>>
+{};
+
+template <>
+class MutableHandleBase<SavedStacks::LocationValue>
+  : public SavedStacks::MutableLocationValueOperations<JS::MutableHandle<SavedStacks::LocationValue>>
+{};
+
+UTF8CharsZ
+BuildUTF8StackString(JSContext* cx, HandleObject stack);
 
 } /* namespace js */
 

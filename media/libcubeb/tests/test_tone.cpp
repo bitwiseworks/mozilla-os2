@@ -34,13 +34,13 @@ struct cb_user_data {
   long position;
 };
 
-long data_cb(cubeb_stream *stream, void *user, void *buffer, long nframes)
+long data_cb(cubeb_stream *stream, void *user, const void* /*inputbuffer*/, void *outputbuffer, long nframes)
 {
   struct cb_user_data *u = (struct cb_user_data *)user;
 #if (defined(_WIN32) || defined(__WIN32__))
-  float *b = (float *)buffer;
+  float *b = (float *)outputbuffer;
 #else
-  short *b = (short *)buffer;
+  short *b = (short *)outputbuffer;
 #endif
   float t1, t2;
   int i;
@@ -98,7 +98,7 @@ void state_cb(cubeb_stream *stream, void *user, cubeb_state state)
   return;
 }
 
-int main(int argc, char *argv[])
+int main(int /*argc*/, char * /*argv*/[])
 {
 #ifdef CUBEB_GECKO_BUILD
   ScopedXPCOM xpcom("test_tone");
@@ -127,8 +127,8 @@ int main(int argc, char *argv[])
   }
   user_data->position = 0;
 
-  r = cubeb_stream_init(ctx, &stream, "Cubeb tone (mono)", params,
-                        250, data_cb, state_cb, user_data);
+  r = cubeb_stream_init(ctx, &stream, "Cubeb tone (mono)", NULL, NULL, NULL, &params,
+                        4096, data_cb, state_cb, user_data);
   if (r != CUBEB_OK) {
     fprintf(stderr, "Error initializing cubeb stream\n");
     return r;

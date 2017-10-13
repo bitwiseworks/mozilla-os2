@@ -7,6 +7,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/LoadContext.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/dom/ScriptSettings.h" // for AutoJSAPI
 #include "nsContentUtils.h"
 #include "xpcpublic.h"
@@ -34,7 +35,7 @@ nsILoadContext::GetOriginAttributes(mozilla::DocShellOriginAttributes& aAttrs)
   aAttrs = attrs;
   return true;
 }
-  
+
 namespace mozilla {
 
 NS_IMPL_ISUPPORTS(LoadContext, nsILoadContext, nsIInterfaceRequestor)
@@ -44,24 +45,19 @@ LoadContext::LoadContext(nsIPrincipal* aPrincipal,
   : mTopFrameElement(nullptr)
   , mNestedFrameId(0)
   , mIsContent(true)
-  , mUsePrivateBrowsing(false)
   , mUseRemoteTabs(false)
 #ifdef DEBUG
   , mIsNotNull(true)
 #endif
 {
   PrincipalOriginAttributes poa = BasePrincipal::Cast(aPrincipal)->OriginAttributesRef();
-  mOriginAttributes = DocShellOriginAttributes(poa.mAppId, poa.mInBrowser);
-
+  mOriginAttributes.InheritFromDocToChildDocShell(poa);
   if (!aOptionalBase) {
     return;
   }
 
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aOptionalBase->GetIsContent(&mIsContent)));
-  MOZ_ALWAYS_TRUE(
-    NS_SUCCEEDED(aOptionalBase->GetUsePrivateBrowsing(&mUsePrivateBrowsing)));
-  MOZ_ALWAYS_TRUE(
-    NS_SUCCEEDED(aOptionalBase->GetUseRemoteTabs(&mUseRemoteTabs)));
+  MOZ_ALWAYS_SUCCEEDS(aOptionalBase->GetIsContent(&mIsContent));
+  MOZ_ALWAYS_SUCCEEDS(aOptionalBase->GetUseRemoteTabs(&mUseRemoteTabs));
 }
 
 //-----------------------------------------------------------------------------
@@ -69,7 +65,7 @@ LoadContext::LoadContext(nsIPrincipal* aPrincipal,
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-LoadContext::GetAssociatedWindow(nsIDOMWindow**)
+LoadContext::GetAssociatedWindow(mozIDOMWindowProxy**)
 {
   MOZ_ASSERT(mIsNotNull);
 
@@ -78,7 +74,7 @@ LoadContext::GetAssociatedWindow(nsIDOMWindow**)
 }
 
 NS_IMETHODIMP
-LoadContext::GetTopWindow(nsIDOMWindow**)
+LoadContext::GetTopWindow(mozIDOMWindowProxy**)
 {
   MOZ_ASSERT(mIsNotNull);
 
@@ -103,15 +99,6 @@ LoadContext::GetNestedFrameId(uint64_t* aId)
 }
 
 NS_IMETHODIMP
-LoadContext::IsAppOfType(uint32_t, bool*)
-{
-  MOZ_ASSERT(mIsNotNull);
-
-  // don't expect we need this in parent (Thunderbird/SeaMonkey specific?)
-  return NS_ERROR_UNEXPECTED;
-}
-
-NS_IMETHODIMP
 LoadContext::GetIsContent(bool* aIsContent)
 {
   MOZ_ASSERT(mIsNotNull);
@@ -129,7 +116,7 @@ LoadContext::GetUsePrivateBrowsing(bool* aUsePrivateBrowsing)
 
   NS_ENSURE_ARG_POINTER(aUsePrivateBrowsing);
 
-  *aUsePrivateBrowsing = mUsePrivateBrowsing;
+  *aUsePrivateBrowsing = mOriginAttributes.mPrivateBrowsingId > 0;
   return NS_OK;
 }
 
@@ -172,13 +159,13 @@ LoadContext::SetRemoteTabs(bool aUseRemoteTabs)
 }
 
 NS_IMETHODIMP
-LoadContext::GetIsInBrowserElement(bool* aIsInBrowserElement)
+LoadContext::GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElement)
 {
   MOZ_ASSERT(mIsNotNull);
 
-  NS_ENSURE_ARG_POINTER(aIsInBrowserElement);
+  NS_ENSURE_ARG_POINTER(aIsInIsolatedMozBrowserElement);
 
-  *aIsInBrowserElement = mOriginAttributes.mInBrowser;
+  *aIsInIsolatedMozBrowserElement = mOriginAttributes.mInIsolatedMozBrowser;
   return NS_OK;
 }
 
@@ -201,6 +188,23 @@ LoadContext::GetOriginAttributes(JS::MutableHandleValue aAttrs)
 
   bool ok = ToJSValue(cx, mOriginAttributes, aAttrs);
   NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadContext::IsTrackingProtectionOn(bool* aIsTrackingProtectionOn)
+{
+  MOZ_ASSERT(mIsNotNull);
+
+  if (Preferences::GetBool("privacy.trackingprotection.enabled", false)) {
+    *aIsTrackingProtectionOn = true;
+  } else if ((mOriginAttributes.mPrivateBrowsingId > 0) &&
+             Preferences::GetBool("privacy.trackingprotection.pbmode.enabled", false)) {
+    *aIsTrackingProtectionOn = true;
+  } else {
+    *aIsTrackingProtectionOn = false;
+  }
+
   return NS_OK;
 }
 

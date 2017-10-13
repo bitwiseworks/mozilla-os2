@@ -7,7 +7,7 @@
 #ifndef nsXBLPrototypeResources_h__
 #define nsXBLPrototypeResources_h__
 
-#include "nsAutoPtr.h"
+#include "mozilla/StyleSheet.h"
 #include "nsICSSLoaderObserver.h"
 
 class nsCSSRuleProcessor;
@@ -41,13 +41,13 @@ public:
 
   void ClearLoader();
 
-  void AppendStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void RemoveStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void InsertStyleSheetAt(size_t aIndex, mozilla::CSSStyleSheet* aSheet);
-  mozilla::CSSStyleSheet* StyleSheetAt(size_t aIndex) const;
+  void AppendStyleSheet(mozilla::StyleSheet* aSheet);
+  void RemoveStyleSheet(mozilla::StyleSheet* aSheet);
+  void InsertStyleSheetAt(size_t aIndex, mozilla::StyleSheet* aSheet);
+  mozilla::StyleSheet* StyleSheetAt(size_t aIndex) const;
   size_t SheetCount() const;
   bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<mozilla::CSSStyleSheet*>& aResult) const;
+  void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheet*>& aResult) const;
 
   /**
    * Recreates mRuleProcessor to represent the current list of style sheets
@@ -63,7 +63,7 @@ private:
   RefPtr<nsXBLResourceLoader> mLoader;
 
   // A list of loaded stylesheets for this binding.
-  nsTArray<RefPtr<mozilla::CSSStyleSheet>> mStyleSheetList;
+  nsTArray<RefPtr<mozilla::StyleSheet>> mStyleSheetList;
 
   // The list of stylesheets converted to a rule processor.
   RefPtr<nsCSSRuleProcessor> mRuleProcessor;

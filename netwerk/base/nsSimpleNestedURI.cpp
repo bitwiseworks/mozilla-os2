@@ -13,6 +13,9 @@
 
 #include "mozilla/ipc/URIUtils.h"
 
+namespace mozilla {
+namespace net {
+
 NS_IMPL_ISUPPORTS_INHERITED(nsSimpleNestedURI, nsSimpleURI, nsINestedURI)
 
 nsSimpleNestedURI::nsSimpleNestedURI(nsIURI* innerURI)
@@ -146,20 +149,27 @@ nsSimpleNestedURI::EqualsInternal(nsIURI* other,
 }
 
 /* virtual */ nsSimpleURI*
-nsSimpleNestedURI::StartClone(nsSimpleURI::RefHandlingEnum refHandlingMode)
+nsSimpleNestedURI::StartClone(nsSimpleURI::RefHandlingEnum refHandlingMode,
+                              const nsACString& newRef)
 {
     NS_ENSURE_TRUE(mInnerURI, nullptr);
     
     nsCOMPtr<nsIURI> innerClone;
-    nsresult rv = refHandlingMode == eHonorRef ?
-        mInnerURI->Clone(getter_AddRefs(innerClone)) :
-        mInnerURI->CloneIgnoringRef(getter_AddRefs(innerClone));
+    nsresult rv;
+    if (refHandlingMode == eHonorRef) {
+        rv = mInnerURI->Clone(getter_AddRefs(innerClone));
+    } else if (refHandlingMode == eReplaceRef) {
+        rv = mInnerURI->CloneWithNewRef(newRef, getter_AddRefs(innerClone));
+    } else {
+        rv = mInnerURI->CloneIgnoringRef(getter_AddRefs(innerClone));
+    }
 
     if (NS_FAILED(rv)) {
         return nullptr;
     }
 
     nsSimpleNestedURI* url = new nsSimpleNestedURI(innerClone);
+    SetRefOnClone(url, refHandlingMode, newRef);
     url->SetMutable(false);
 
     return url;
@@ -175,3 +185,6 @@ nsSimpleNestedURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
     *aClassIDNoAlloc = kSimpleNestedURICID;
     return NS_OK;
 }
+
+} // namespace net
+} // namespace mozilla

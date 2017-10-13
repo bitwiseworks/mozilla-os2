@@ -34,18 +34,9 @@ WindowsLocationProvider::MLSUpdate::Update(nsIDOMGeoPosition *aPosition)
   if (!coords) {
     return NS_ERROR_FAILURE;
   }
-
   Telemetry::Accumulate(Telemetry::GEOLOCATION_WIN8_SOURCE_IS_MLS, true);
-
   return mCallback->Update(aPosition);
 }
-
-NS_IMETHODIMP
-WindowsLocationProvider::MLSUpdate::LocationUpdatePending()
-{
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 WindowsLocationProvider::MLSUpdate::NotifyError(uint16_t aError)
 {
@@ -54,7 +45,6 @@ WindowsLocationProvider::MLSUpdate::NotifyError(uint16_t aError)
   }
   return mCallback->NotifyError(aError);
 }
-
 
 class LocationEvent final : public ILocationEvents
 {
@@ -183,7 +173,7 @@ LocationEvent::OnLocationChanged(REFIID aReportType,
 
   RefPtr<nsGeoPosition> position =
     new nsGeoPosition(latitude, longitude, alt, herror, verror, 0.0, 0.0,
-                      PR_Now());
+                      PR_Now() / PR_USEC_PER_MSEC);
   mCallback->Update(position);
 
   Telemetry::Accumulate(Telemetry::GEOLOCATION_WIN8_SOURCE_IS_MLS, false);

@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { Cu } = require("chrome");
-const { AddonManager } = Cu.import("resource://gre/modules/AddonManager.jsm");
-const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
+"use strict";
+
+const { AddonManager } = require("resource://gre/modules/AddonManager.jsm");
+const { Task } = require("devtools/shared/task");
 loader.lazyRequireGetter(this, "ConnectionManager", "devtools/shared/client/connection-manager", true);
 loader.lazyRequireGetter(this, "AddonSimulatorProcess", "devtools/client/webide/modules/simulator-process", true);
 loader.lazyRequireGetter(this, "OldAddonSimulatorProcess", "devtools/client/webide/modules/simulator-process", true);
@@ -12,6 +13,7 @@ loader.lazyRequireGetter(this, "CustomSimulatorProcess", "devtools/client/webide
 const asyncStorage = require("devtools/shared/async-storage");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
+const Services = require("Services");
 
 const SimulatorRegExp = new RegExp(Services.prefs.getCharPref("devtools.webide.simulatorAddonRegExp"));
 const LocaleCompare = (a, b) => {
@@ -33,7 +35,7 @@ var Simulators = {
       return this._loadingPromise;
     }
 
-    this._loadingPromise = Task.spawn(function*() {
+    this._loadingPromise = Task.spawn(function* () {
       let jobs = [];
 
       let value = yield asyncStorage.getItem("simulators");
@@ -44,13 +46,13 @@ var Simulators = {
 
           // If the simulator had a reference to an addon, fix it.
           if (options.addonID) {
-            let job = promise.defer();
+            let deferred = promise.defer();
             AddonManager.getAddonByID(options.addonID, addon => {
               simulator.addon = addon;
               delete simulator.options.addonID;
-              job.resolve();
+              deferred.resolve();
             });
-            jobs.push(job);
+            jobs.push(deferred.promise);
           }
         });
       }
@@ -69,7 +71,7 @@ var Simulators = {
    *
    * @return Promise.
    */
-  _addUnusedAddons: Task.async(function*() {
+  _addUnusedAddons: Task.async(function* () {
     let jobs = [];
 
     let addons = yield Simulators.findSimulatorAddons();
@@ -85,7 +87,7 @@ var Simulators = {
    *
    * @return Promise.
    */
-  _save: Task.async(function*() {
+  _save: Task.async(function* () {
     yield this._load();
 
     let value = Simulators._simulators.map(simulator => {
@@ -104,7 +106,7 @@ var Simulators = {
    *
    * @return Promised simulator list.
    */
-  findSimulators: Task.async(function*() {
+  findSimulators: Task.async(function* () {
     yield this._load();
     return Simulators._simulators;
   }),
@@ -232,7 +234,7 @@ var Simulators = {
   },
 
   emitUpdated() {
-    this.emit("updated");
+    this.emit("updated", { length: this._simulators.length });
     this._simulators.sort(LocaleCompare);
     this._save();
   },

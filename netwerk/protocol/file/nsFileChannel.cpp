@@ -33,7 +33,7 @@ using namespace mozilla::net;
 
 //-----------------------------------------------------------------------------
 
-class nsFileCopyEvent : public nsRunnable {
+class nsFileCopyEvent : public Runnable {
 public:
   nsFileCopyEvent(nsIOutputStream *dest, nsIInputStream *source, int64_t len)
     : mDest(dest)
@@ -63,7 +63,7 @@ public:
     mInterruptStatus = status;
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     DoCopy();
     return NS_OK;
   }
@@ -129,9 +129,7 @@ nsFileCopyEvent::DoCopy()
 
     // Release the callback on the target thread to avoid destroying stuff on
     // the wrong thread.
-    nsIRunnable *doomed = nullptr;
-    mCallback.swap(doomed);
-    NS_ProxyRelease(mCallbackTarget, doomed);
+    NS_ProxyRelease(mCallbackTarget, mCallback.forget());
   }
 }
 
@@ -183,10 +181,10 @@ public:
     return mCopyEvent != nullptr;
   }
 
-  NS_IMETHODIMP ReadSegments(nsWriteSegmentFun fun, void *closure,
-                             uint32_t count, uint32_t *result) override;
-  NS_IMETHODIMP AsyncWait(nsIInputStreamCallback *callback, uint32_t flags,
-                          uint32_t count, nsIEventTarget *target) override;
+  NS_IMETHOD ReadSegments(nsWriteSegmentFun fun, void *closure,
+                          uint32_t count, uint32_t *result) override;
+  NS_IMETHOD AsyncWait(nsIInputStreamCallback *callback, uint32_t flags,
+                       uint32_t count, nsIEventTarget *target) override;
 
 private:
   virtual ~nsFileUploadContentStream() {}
@@ -234,7 +232,7 @@ nsFileUploadContentStream::AsyncWait(nsIInputStreamCallback *callback,
 
   if (IsNonBlocking()) {
     nsCOMPtr<nsIRunnable> callback =
-      NS_NewRunnableMethod(this, &nsFileUploadContentStream::OnCopyComplete);
+      NewRunnableMethod(this, &nsFileUploadContentStream::OnCopyComplete);
     mCopyEvent->Dispatch(callback, mSink, target);
   }
 
@@ -358,7 +356,7 @@ nsFileChannel::OpenContentStream(bool async, nsIInputStream **result,
     rv = NS_NewChannel(getter_AddRefs(newChannel),
                        newURI,
                        nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                        nsIContentPolicy::TYPE_OTHER);
 
     if (NS_FAILED(rv))

@@ -31,16 +31,19 @@ namespace layers {
 class AsyncCanvasRenderer;
 class CanvasLayer;
 class Image;
+class Layer;
 class LayerManager;
+class SharedSurfaceTextureClient;
 } // namespace layers
 namespace gfx {
 class SourceSurface;
+class VRLayerChild;
 } // namespace gfx
 
 namespace dom {
+class BlobCallback;
 class CanvasCaptureMediaStream;
 class File;
-class FileCallback;
 class HTMLCanvasPrintState;
 class OffscreenCanvas;
 class PrintCallback;
@@ -120,6 +123,7 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
 
   typedef layers::AsyncCanvasRenderer AsyncCanvasRenderer;
   typedef layers::CanvasLayer CanvasLayer;
+  typedef layers::Layer Layer;
   typedef layers::LayerManager LayerManager;
 
 public:
@@ -149,7 +153,7 @@ public:
       return;
     }
 
-    SetUnsignedIntAttr(nsGkAtoms::height, aHeight, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::height, aHeight, DEFAULT_CANVAS_HEIGHT, aRv);
   }
   uint32_t Width()
   {
@@ -162,7 +166,7 @@ public:
       return;
     }
 
-    SetUnsignedIntAttr(nsGkAtoms::width, aWidth, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::width, aWidth, DEFAULT_CANVAS_WIDTH, aRv);
   }
 
   virtual already_AddRefed<nsISupports>
@@ -178,7 +182,7 @@ public:
   }
 
   void ToBlob(JSContext* aCx,
-              FileCallback& aCallback,
+              BlobCallback& aCallback,
               const nsAString& aType,
               JS::Handle<JS::Value> aParams,
               ErrorResult& aRv);
@@ -264,13 +268,19 @@ public:
    * caller's responsibility to keep them alive. Once a registered
    * FrameCaptureListener is destroyed it will be automatically deregistered.
    */
-  void RegisterFrameCaptureListener(FrameCaptureListener* aListener);
+  nsresult RegisterFrameCaptureListener(FrameCaptureListener* aListener);
 
   /*
    * Returns true when there is at least one registered FrameCaptureListener
    * that has requested a frame capture.
    */
   bool IsFrameCaptureRequested() const;
+
+  /*
+   * Processes destroyed FrameCaptureListeners and removes them if necessary.
+   * Should there be none left, the FrameRefreshObserver will be unregistered.
+   */
+  void ProcessDestroyedFrameListeners();
 
   /*
    * Called by the RefreshDriver hook when a frame has been captured.
@@ -308,9 +318,9 @@ public:
    * Helpers called by various users of Canvas
    */
 
-  already_AddRefed<CanvasLayer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
-                                               CanvasLayer *aOldLayer,
-                                               LayerManager *aManager);
+  already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
+                                         Layer *aOldLayer,
+                                         LayerManager *aManager);
   // Should return true if the canvas layer should always be marked inactive.
   // We should return true here if we can't do accelerated compositing with
   // a non-BasicCanvasLayer.
@@ -339,6 +349,10 @@ public:
 
   static void SetAttrFromAsyncCanvasRenderer(AsyncCanvasRenderer *aRenderer);
   static void InvalidateFromAsyncCanvasRenderer(AsyncCanvasRenderer *aRenderer);
+
+  void StartVRPresentation();
+  void StopVRPresentation();
+  already_AddRefed<layers::SharedSurfaceTextureClient> GetVRFrame();
 
 protected:
   virtual ~HTMLCanvasElement();
@@ -373,6 +387,7 @@ protected:
   RefPtr<AsyncCanvasRenderer> mAsyncCanvasRenderer;
   RefPtr<OffscreenCanvas> mOffscreenCanvas;
   RefPtr<HTMLCanvasElementObserver> mContextObserver;
+  bool mVRPresentationActive;
 
 public:
   // Record whether this canvas should be write-only or not.

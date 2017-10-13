@@ -11,6 +11,7 @@
 #include <glib.h>
 #include <glib-object.h>
 
+#include "AccessibleOrProxy.h"
 #include "AccessibleWrap.h"
 
 namespace mozilla {
@@ -64,9 +65,15 @@ typedef struct _MaiAtkSocketClass
   AtkSocketClass parent_class;
 } MaiAtkSocketClass;
 
+// This is a pointer to the atk_table_cell_get_type function if we are using
+// a version of atk that defines that.
+extern "C" GType (*gAtkTableCellGetTypeFunc)();
+
 mozilla::a11y::AccessibleWrap* GetAccessibleWrap(AtkObject* aAtkObj);
 mozilla::a11y::ProxyAccessible* GetProxy(AtkObject* aAtkObj);
+mozilla::a11y::AccessibleOrProxy GetInternalObj(AtkObject* aObj);
 AtkObject* GetWrapperFor(mozilla::a11y::ProxyAccessible* aProxy);
+AtkObject* GetWrapperFor(mozilla::a11y::AccessibleOrProxy aObj);
 
 extern int atkMajorVersion, atkMinorVersion;
 
@@ -95,7 +102,7 @@ struct MaiAtkObject
    * The AccessibleWrap whose properties and features are exported
    * via this object instance.
    */
-  uintptr_t accWrap;
+  mozilla::a11y::AccessibleOrProxy accWrap;
 
   /*
    * Get the AtkHyperlink for this atk object.
@@ -117,6 +124,12 @@ struct MaiAtkObject
    */
   void FireTextChangeEvent(const nsString& aStr, int32_t aStart, uint32_t aLen,
                            bool aIsInsert, bool aIsFromUser);
+
+  /**
+   * Notify ATK of a shown or hidden subtree rooted at aObject whose parent is
+   * aParent
+   */
+  void FireAtkShowHideEvent(AtkObject* aParent, bool aIsAdded, bool aFromUser);
 
 private:
   /*

@@ -1,13 +1,11 @@
-// |reftest| skip-if(!xulRuntime.shell)
+// |reftest| skip-if(!xulRuntime.shell) -- needs detachArrayBuffer
 
-for (var neuterArg of ['change-data', 'same-data']) {
-    var buf = new ArrayBuffer([1,2]);
-    var bufView = new DataView(buf);
+var buf = new ArrayBuffer([1,2]);
+var bufView = new DataView(buf);
 
-    neuter(buf, neuterArg);
+detachArrayBuffer(buf);
 
-    assertThrowsInstanceOf(()=>bufView.getInt8(0), TypeError);
-}
+assertThrowsInstanceOf(() => bufView.getInt8(0), TypeError);
 
 if (typeof reportCompare === 'function')
-    reportCompare(0,0,"OK");
+    reportCompare(0, 0, "OK");

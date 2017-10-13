@@ -193,19 +193,40 @@ with extension `.worker.js` that imports `testharness.js`. The test can
 then use all the usual APIs, and can be run from the path to the
 JavaScript file with the `.js` removed.
 
-For example, one could write a test for the `Blob` constructor by
-creating a `FileAPI/Blob-constructor.worker.js` as follows:
+For example, one could write a test for the `FileReaderSync` API by
+creating a `FileAPI/FileReaderSync.worker.js` as follows:
 
     importScripts("/resources/testharness.js");
+    test(function () {
+      var blob = new Blob(["Hello"]);
+      var fr = new FileReaderSync();
+      assert_equals(fr.readAsText(blob), "Hello");
+    }, "FileReaderSync#readAsText.");
+    done();
+
+This test could then be run from `FileAPI/FileReaderSync.worker`.
+
+### Multi-global tests
+
+Tests for features that exist in multiple global scopes can be written in a way
+that they are automatically run in a window scope as well as a dedicated worker
+scope.
+In this case, the test is a JavaScript file with extension `.any.js`.
+The test can then use all the usual APIs, and can be run from the path to the
+JavaScript file with the `.js` replaced by `.worker` or `.html`.
+
+For example, one could write a test for the `Blob` constructor by
+creating a `FileAPI/Blob-constructor.any.js` as follows:
+
     test(function () {
       var blob = new Blob();
       assert_equals(blob.size, 0);
       assert_equals(blob.type, "");
       assert_false(blob.isClosed);
     }, "The Blob constructor.");
-    done();
 
-This test could then be run from `FileAPI/Blob-constructor.worker`.
+This test could then be run from `FileAPI/Blob-constructor.any.worker` as well
+as `FileAPI/Blob-constructor.any.html`.
 
 ### Tests Involving Multiple Origins
 
@@ -224,33 +245,25 @@ information in one of two ways:
 In order for the latter to work, a file must either have a name of the
 form `{name}.sub.{ext}` e.g. `example-test.sub.html` or be referenced
 through a URL containing `pipe=sub` in the query string
-e.g. `example-test.html?pipe=sub`. The substitution syntax uses {% raw %} `{{
-}}` {% endraw %} to delimit items for substitution. For example to substitute in
+e.g. `example-test.html?pipe=sub`. The substitution syntax uses `{{ }}`
+to delimit items for substitution. For example to substitute in
 the host name on which the tests are running, one would write:
 
-{% raw %}
     {{host}}
-{% endraw %}
 
 As well as the host, one can get full domains, including subdomains
 using the `domains` dictionary. For example:
 
-{% raw %}
     {{domains[www]}}
-{% endraw %}
 
 would be replaced by the fully qualified domain name of the `www`
 subdomain. Ports are also available on a per-protocol basis e.g.
 
-{% raw %}
     {{ports[ws][0]}}
-{% endraw %}
 
 is replaced with the first (and only) websockets port, whilst
 
-{% raw %}
     {{ports[http][1]}}
-{% endraw %}
 
 is replaced with the second HTTP port.
 
@@ -258,9 +271,7 @@ The request URL itself can be used as part of the substitution using
 the `location` dictionary, which has entries matching the
 `window.location` API. For example
 
-{% raw %}
     {{location[host]}}
-{% endraw %}
 
 is replaced by `hostname:port` for the current request.
 

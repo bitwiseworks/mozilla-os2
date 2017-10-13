@@ -49,14 +49,14 @@
 #include "nsIWritablePropertyBag2.h"
 #include "nsITimedChannel.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIScriptSecurityManager.h"
 
 #include "nsISimpleEnumerator.h"
 #include "nsStringAPI.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/Logging.h"
+#include "NetwerkTestLogging.h"
 
 using namespace mozilla;
 
@@ -164,7 +164,7 @@ void PrintTimingInformation(nsITimedChannel* channel) {
 
 class HeaderVisitor : public nsIHttpHeaderVisitor
 {
-  virtual ~HeaderVisitor() {}
+  virtual ~HeaderVisitor() = default;
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIHTTPHEADERVISITOR
@@ -210,9 +210,7 @@ URLLoadInfo::URLLoadInfo(const char *aUrl) : mURLString(aUrl)
   mConnectTime = mTotalTime = PR_Now();
 }
 
-URLLoadInfo::~URLLoadInfo()
-{
-}
+URLLoadInfo::~URLLoadInfo() = default;
 
 
 NS_IMPL_ISUPPORTS0(URLLoadInfo)
@@ -236,9 +234,7 @@ TestChannelEventSink::TestChannelEventSink()
 {
 }
 
-TestChannelEventSink::~TestChannelEventSink()
-{
-}
+TestChannelEventSink::~TestChannelEventSink() = default;
 
 
 NS_IMPL_ISUPPORTS(TestChannelEventSink, nsIChannelEventSink)
@@ -276,9 +272,7 @@ TestAuthPrompt::TestAuthPrompt()
 {
 }
 
-TestAuthPrompt::~TestAuthPrompt()
-{
-}
+TestAuthPrompt::~TestAuthPrompt() = default;
 
 NS_IMETHODIMP
 TestAuthPrompt::Prompt(const char16_t *dialogTitle,
@@ -357,19 +351,24 @@ class InputTestConsumer : public nsIStreamListener
 
 public:
 
-  InputTestConsumer();
+  explicit InputTestConsumer(URLLoadInfo* aURLLoadInfo);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
+private:
+  URLLoadInfo* mURLLoadInfo;
 };
 
-InputTestConsumer::InputTestConsumer()
+InputTestConsumer::InputTestConsumer(URLLoadInfo* aURLLoadInfo)
+: mURLLoadInfo(aURLLoadInfo)
 {
+  NS_IF_ADDREF(mURLLoadInfo);
 }
 
 InputTestConsumer::~InputTestConsumer()
 {
+  NS_RELEASE(mURLLoadInfo);
 }
 
 NS_IMPL_ISUPPORTS(InputTestConsumer, nsIStreamListener, nsIRequestObserver)
@@ -379,12 +378,13 @@ InputTestConsumer::OnStartRequest(nsIRequest *request, nsISupports* context)
 {
   LOG(("InputTestConsumer::OnStartRequest\n"));
 
-  URLLoadInfo* info = (URLLoadInfo*)context;
-  if (info)
-    info->mConnectTime = PR_Now() - info->mConnectTime;
+  NS_ASSERTION(!context, "context needs to be null when calling asyncOpen2");
+
+  if (mURLLoadInfo)
+    mURLLoadInfo->mConnectTime = PR_Now() - mURLLoadInfo->mConnectTime;
 
   if (gVerbose) {
-    LOG(("\nStarted loading: %s\n", info ? info->Name() : "UNKNOWN URL"));
+    LOG(("\nStarted loading: %s\n", mURLLoadInfo ? mURLLoadInfo->Name() : "UNKNOWN URL"));
   }
 
   nsAutoCString value;
@@ -426,9 +426,7 @@ InputTestConsumer::OnStartRequest(nsIRequest *request, nsISupports* context)
                                     NS_GET_IID(nsIURI),
                                     getter_AddRefs(foo));
       if (foo) {
-          nsAutoCString spec;
-          foo->GetSpec(spec);
-          LOG(("\ttest.foo: %s\n", spec.get()));
+          LOG(("\ttest.foo: %s\n", foo->GetSpecOrDefault().get()));
       }
   }
 
@@ -442,7 +440,7 @@ InputTestConsumer::OnStartRequest(nsIRequest *request, nsISupports* context)
   }
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(request));
   if (httpChannel) {
-    HeaderVisitor *visitor = new HeaderVisitor();
+    auto *visitor = new HeaderVisitor();
     if (!visitor)
       return NS_ERROR_OUT_OF_MEMORY;
     NS_ADDREF(visitor);
@@ -479,10 +477,11 @@ InputTestConsumer::OnDataAvailable(nsIRequest *request,
                                    uint64_t aSourceOffset,
                                    uint32_t aLength)
 {
+  NS_ASSERTION(!context, "context needs to be null when calling asyncOpen2");
+
   char buf[1025];
   uint32_t amt, size;
   nsresult rv;
-  URLLoadInfo* info = (URLLoadInfo*)context;
 
   while (aLength) {
     size = std::min<uint32_t>(aLength, sizeof(buf));
@@ -497,8 +496,8 @@ InputTestConsumer::OnDataAvailable(nsIRequest *request,
       buf[amt] = '\0';
       puts(buf);
     }
-    if (info) {
-      info->mBytesRead += amt;
+    if (mURLLoadInfo) {
+      mURLLoadInfo->mBytesRead += amt;
     }
 
     aLength -= amt;
@@ -512,15 +511,13 @@ InputTestConsumer::OnStopRequest(nsIRequest *request, nsISupports* context,
 {
   LOG(("InputTestConsumer::OnStopRequest [status=%x]\n", aStatus));
 
-  URLLoadInfo* info = (URLLoadInfo*)context;
-
-  if (info) {
+  if (mURLLoadInfo) {
     uint32_t httpStatus;
     bool bHTTPURL = false;
 
-    info->mTotalTime = PR_Now() - info->mTotalTime;
+    mURLLoadInfo->mTotalTime = PR_Now() - mURLLoadInfo->mTotalTime;
 
-    double readTime = ((info->mTotalTime-info->mConnectTime)/1000.0)/1000.0;
+    double readTime = ((mURLLoadInfo->mTotalTime-mURLLoadInfo->mConnectTime)/1000.0)/1000.0;
 
     nsCOMPtr<nsIHttpChannel> pHTTPCon(do_QueryInterface(request));
     if (pHTTPCon) {
@@ -528,7 +525,7 @@ InputTestConsumer::OnStopRequest(nsIRequest *request, nsISupports* context,
         bHTTPURL = true;
     }
 
-    LOG(("\nFinished loading: %s  Status Code: %x\n", info->Name(), aStatus));
+    LOG(("\nFinished loading: %s  Status Code: %x\n", mURLLoadInfo->Name(), aStatus));
     if (bHTTPURL) {
       LOG(("\tHTTP Status: %u\n", httpStatus));
     }
@@ -536,12 +533,12 @@ InputTestConsumer::OnStopRequest(nsIRequest *request, nsISupports* context,
         NS_ERROR_UNKNOWN_PROXY_HOST == aStatus) {
       LOG(("\tDNS lookup failed.\n"));
     }
-    LOG(("\tTime to connect: %.3f seconds\n", (info->mConnectTime/1000.0)/1000.0));
+    LOG(("\tTime to connect: %.3f seconds\n", (mURLLoadInfo->mConnectTime/1000.0)/1000.0));
     LOG(("\tTime to read: %.3f seconds.\n", readTime));
-    LOG(("\tRead: %lld bytes.\n", info->mBytesRead));
-    if (info->mBytesRead == int64_t(0)) {
+    LOG(("\tRead: %lld bytes.\n", mURLLoadInfo->mBytesRead));
+    if (mURLLoadInfo->mBytesRead == int64_t(0)) {
     } else if (readTime > 0.0) {
-      LOG(("\tThroughput: %.0f bps.\n", (double)(info->mBytesRead*int64_t(8))/readTime));
+      LOG(("\tThroughput: %.0f bps.\n", (double)(mURLLoadInfo->mBytesRead*int64_t(8))/readTime));
     } else {
       LOG(("\tThroughput: REAL FAST!!\n"));
     }
@@ -564,7 +561,7 @@ InputTestConsumer::OnStopRequest(nsIRequest *request, nsISupports* context,
 
 class NotificationCallbacks final : public nsIInterfaceRequestor {
 
-    ~NotificationCallbacks() {}
+    ~NotificationCallbacks() = default;
 
 public:
     NS_DECL_ISUPPORTS
@@ -621,7 +618,7 @@ nsresult StartLoadingURL(const char* aUrlString)
         }
         nsCOMPtr<nsIChannel> pChannel;
 
-        NotificationCallbacks* callbacks = new NotificationCallbacks();
+        auto* callbacks = new NotificationCallbacks();
         if (!callbacks) {
             LOG(("Failed to create a new consumer!"));
             return NS_ERROR_OUT_OF_MEMORY;;
@@ -639,7 +636,7 @@ nsresult StartLoadingURL(const char* aUrlString)
         rv = NS_NewChannel(getter_AddRefs(pChannel),
                            pURL,
                            systemPrincipal,
-                           nsILoadInfo::SEC_NORMAL,
+                           nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                            nsIContentPolicy::TYPE_OTHER,
                            nullptr,  // loadGroup
                            callbacks,
@@ -679,22 +676,19 @@ nsresult StartLoadingURL(const char* aUrlString)
                                             false);
             if (NS_FAILED(rv)) return rv;
         }            
-        InputTestConsumer* listener;
+        auto* info = new URLLoadInfo(aUrlString);
+        if (!info) {
+            NS_ERROR("Failed to create a load info!");
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
 
-        listener = new InputTestConsumer;
+        auto* listener = new InputTestConsumer(info);
         NS_IF_ADDREF(listener);
         if (!listener) {
             NS_ERROR("Failed to create a new stream listener!");
             return NS_ERROR_OUT_OF_MEMORY;;
         }
 
-        URLLoadInfo* info;
-        info = new URLLoadInfo(aUrlString);
-        NS_IF_ADDREF(info);
-        if (!info) {
-            NS_ERROR("Failed to create a load info!");
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
 
         if (gResume) {
             nsCOMPtr<nsIResumableChannel> res = do_QueryInterface(pChannel);
@@ -708,8 +702,7 @@ nsresult StartLoadingURL(const char* aUrlString)
             LOG(("* resuming at %llu bytes, with entity id |%s|\n", gStartAt, id.get()));
             res->ResumeAt(gStartAt, id);
         }
-        rv = pChannel->AsyncOpen(listener,  // IStreamListener consumer
-                                 info);
+        rv = pChannel->AsyncOpen2(listener);
 
         if (NS_SUCCEEDED(rv)) {
             gKeepRunning++;
@@ -718,7 +711,6 @@ nsresult StartLoadingURL(const char* aUrlString)
             LOG(("ERROR: AsyncOpen failed [rv=%x]\n", rv));
         }
         NS_RELEASE(listener);
-        NS_RELEASE(info);
     }
 
     return rv;
@@ -807,7 +799,7 @@ nsresult LoadURLsFromFile(char *aFileName)
 nsresult LoadURLFromConsole()
 {
     char buffer[1024];
-    printf("Enter URL (\"q\" to start): ");
+    printf(R"(Enter URL ("q" to start): )");
     Unused << scanf("%s", buffer);
     if (buffer[0]=='q') 
         gAskUserForInput = false;

@@ -28,7 +28,7 @@ var gTabsListener = {
     }
 
     var tab = aEvent.target;
-    is(tab.ownerDocument.defaultView, window,
+    is(tab.ownerGlobal, window,
        "Tab has been opened in current browser window");
   },
 
@@ -62,13 +62,13 @@ var gTabsListener = {
           gBrowser.removeCurrentTab();
 
         // Test finished.  This will move to the next one.
-        waitForFocus(gCurrentTest.finish, gBrowser.ownerDocument.defaultView);
+        waitForFocus(gCurrentTest.finish, gBrowser.ownerGlobal);
       });
     }
   }
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // Open bookmark in a new tab.
 
 gTests.push({
@@ -101,7 +101,7 @@ gTests.push({
   }
 });
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // Open a folder in tabs.
 
 gTests.push({
@@ -143,7 +143,7 @@ gTests.push({
   }
 });
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // Open a query in tabs.
 
 gTests.push({
@@ -201,7 +201,7 @@ gTests.push({
   }
 });
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 function test() {
   waitForExplicitFinish();
@@ -259,7 +259,7 @@ function runNextTest() {
     // Restore history.
     try {
       gPrefService.clearUserPref(ENABLE_HISTORY_PREF);
-    } catch(ex) {}
+    } catch (ex) {}
 
     finish();
   }

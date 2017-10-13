@@ -8,7 +8,10 @@
 include protocol PHttpChannel;
 include protocol PFTPChannel;
 include protocol PRtspChannel;
+include protocol PSendStream;
+include BlobTypes;
 include URIParams;
+include IPCStream;
 include InputStreamParams;
 include PBackgroundSharedTypes;
 
@@ -27,24 +30,31 @@ namespace net {
 
 struct LoadInfoArgs
 {
-  PrincipalInfo    requestingPrincipalInfo;
-  PrincipalInfo    triggeringPrincipalInfo;
-  uint32_t         securityFlags;
-  uint32_t         contentPolicyType;
-  uint32_t         tainting;
-  bool             upgradeInsecureRequests;
-  uint64_t         innerWindowID;
-  uint64_t         outerWindowID;
-  uint64_t         parentOuterWindowID;
-  bool             enforceSecurity;
-  bool             initialSecurityCheckDone;
-  bool             isInThirdPartyContext;
+  OptionalPrincipalInfo requestingPrincipalInfo;
+  PrincipalInfo         triggeringPrincipalInfo;
+  OptionalPrincipalInfo principalToInheritInfo;
+  uint32_t              securityFlags;
+  uint32_t              contentPolicyType;
+  uint32_t              tainting;
+  bool                  upgradeInsecureRequests;
+  bool                  verifySignedContent;
+  bool                  enforceSRI;
+  bool                  forceInheritPrincipalDropped;
+  uint64_t              innerWindowID;
+  uint64_t              outerWindowID;
+  uint64_t              parentOuterWindowID;
+  uint64_t              frameOuterWindowID;
+  bool                  enforceSecurity;
+  bool                  initialSecurityCheckDone;
+  bool                  isInThirdPartyContext;
   NeckoOriginAttributes originAttributes;
-  PrincipalInfo[]  redirectChainIncludingInternalRedirects;
-  PrincipalInfo[]  redirectChain;
-  nsCString[]      corsUnsafeHeaders;
-  bool             forcePreflight;
-  bool             isPreflight;
+  PrincipalInfo[]       redirectChainIncludingInternalRedirects;
+  PrincipalInfo[]       redirectChain;
+  nsCString[]           corsUnsafeHeaders;
+  bool                  forcePreflight;
+  bool                  isPreflight;
+  bool                  forceHSTSPriming;
+  bool                  mixedContentWouldBlock;
 };
 
 /**
@@ -92,7 +102,7 @@ struct HttpChannelOpenArgs
   uint32_t                    loadFlags;
   RequestHeaderTuples         requestHeaders;
   nsCString                   requestMethod;
-  OptionalInputStreamParams   uploadStream;
+  OptionalIPCStream           uploadStream;
   bool                        uploadStreamHasHeaders;
   uint16_t                    priority;
   uint32_t                    classOfService;
@@ -107,20 +117,26 @@ struct HttpChannelOpenArgs
   nsCString                   appCacheClientID;
   bool                        allowSpdy;
   bool                        allowAltSvc;
-  OptionalFileDescriptorSet   fds;
+  bool                        beConservative;
   OptionalLoadInfoArgs        loadInfo;
   OptionalHttpResponseHead    synthesizedResponseHead;
   nsCString                   synthesizedSecurityInfoSerialization;
   uint32_t                    cacheKey;
-  nsCString                   schedulingContextID;
+  nsCString                   requestContextID;
   OptionalCorsPreflightArgs   preflightArgs;
   uint32_t                    initialRwin;
+  bool                        blockAuthPrompt;
   bool                        suspendAfterSynthesizeResponse;
+  bool                        allowStaleCacheContent;
+  nsCString                   contentTypeHint;
+  nsCString                   channelId;
+  uint64_t                    contentWindowId;
+  nsCString                   preferredAlternativeType;
 };
 
 struct HttpChannelConnectArgs
 {
-  uint32_t channelId;
+  uint32_t registrarId;
   bool shouldIntercept;
 };
 

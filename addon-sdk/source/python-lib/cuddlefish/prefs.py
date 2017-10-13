@@ -37,9 +37,6 @@ DEFAULT_COMMON_PREFS = {
     # shut up some warnings on `about:` page
     'app.releaseNotesURL': 'http://localhost/app-dummy/',
     'app.vendorURL': 'http://localhost/app-dummy/',
-
-    # Don't prompt about e10s
-    'browser.displayedE10SPrompt.1': 5
 }
 
 DEFAULT_NO_CONNECTIONS_PREFS = {
@@ -53,11 +50,12 @@ DEFAULT_NO_CONNECTIONS_PREFS = {
     'media.gmp-manager.cert.requireBuiltIn' : False,
     'media.gmp-manager.url' : 'http://localhost/media-dummy/gmpmanager',
     'media.gmp-manager.url.override': 'http://localhost/dummy-gmp-manager.xml',
+    'media.gmp-manager.updateEnabled': False,
     'browser.aboutHomeSnippets.updateUrl': 'https://localhost/snippet-dummy',
     'browser.newtab.url' : 'about:blank',
     'browser.search.update': False,
     'browser.search.suggest.enabled' : False,
-    'browser.safebrowsing.enabled' : False,
+    'browser.safebrowsing.phishing.enabled' : False,
     'browser.safebrowsing.provider.google.updateURL': 'http://localhost/safebrowsing-dummy/update',
     'browser.safebrowsing.provider.google.gethashURL': 'http://localhost/safebrowsing-dummy/gethash',
     'browser.safebrowsing.malware.reportURL': 'http://localhost/safebrowsing-dummy/malwarereport',
@@ -112,7 +110,6 @@ DEFAULT_FIREFOX_PREFS = {
     'browser.startup.homepage' : 'about:blank',
     'startup.homepage_welcome_url' : 'about:blank',
     'devtools.browsertoolbox.panel': 'jsdebugger',
-    'devtools.errorconsole.enabled' : True,
     'devtools.chrome.enabled' : True,
 
     # From:
@@ -128,7 +125,7 @@ DEFAULT_FIREFOX_PREFS = {
 
 # When launching a temporary new Thunderbird profile, use these preferences.
 # Note that these were taken from:
-# http://mxr.mozilla.org/comm-central/source/mail/test/mozmill/runtest.py
+# http://dxr.mozilla.org/comm-central/source/mail/test/mozmill/runtest.py
 DEFAULT_THUNDERBIRD_PREFS = {
     # say no to slow script warnings
     'dom.max_chrome_script_run_time': 200,
@@ -210,9 +207,6 @@ DEFAULT_TEST_PREFS = {
     'security.default_personal_cert': 'Select Automatically',
     'network.http.prompt-temp-redirect': False,
     'security.warn_viewing_mixed': False,
-    # Set a future policy version to avoid the telemetry prompt.
-    'toolkit.telemetry.prompted': 999,
-    'toolkit.telemetry.notifiedOptOut': 999,
     'extensions.defaultProviders.enabled': True,
     'datareporting.policy.dataSubmissionPolicyBypassNotification': True,
     'layout.css.report_errors': True,
@@ -235,8 +229,6 @@ DEFAULT_TEST_PREFS = {
     'browser.newtabpage.introShown': True,
     # Disable useragent updates.
     'general.useragent.updates.enabled': False,
-    'dom.mozApps.debug': True,
-    'dom.apps.customization.enabled': True,
     'media.eme.enabled': True,
     'media.eme.apiVisible': True,
     # Don't forceably kill content processes after a timeout

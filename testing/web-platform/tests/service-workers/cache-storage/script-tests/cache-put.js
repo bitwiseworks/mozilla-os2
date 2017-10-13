@@ -250,15 +250,21 @@ cache_test(function(cache) {
       assert_true(
         response.bodyUsed,
         '[https://fetch.spec.whatwg.org/#concept-body-consume-body] ' +
-          'The text() method should set "body used" flag.');
-      return assert_promise_rejects(
-        cache.put(new Request(test_url), response),
-        new TypeError,
-        '[https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#cache-put] ' +
-        'Cache put should reject with TypeError when Response ' +
-        'body is already used.');
-      });
+          'The text() method should make the body disturbed.');
+      var request = new Request(test_url);
+      return cache.put(request, response).then(() => {
+          assert_unreached('cache.put should be rejected');
+        }, () => {});
+    });
   }, 'Cache.put with a used response body');
+
+cache_test(function(cache) {
+    var response = new Response(test_body);
+    return cache.put(new Request(test_url), response)
+      .then(function() {
+          assert_throws(new TypeError(), () => response.body.getReader());
+      });
+  }, 'getReader() after Cache.put');
 
 cache_test(function(cache) {
     return assert_promise_rejects(
@@ -277,5 +283,23 @@ cache_test(function(cache) {
       'Cache.put should reject Responses with an embedded VARY:* with a ' +
       'TypeError.');
   }, 'Cache.put with an embedded VARY:* Response');
+
+cache_test(function(cache) {
+    var url = 'foo.html';
+    var redirectURL = 'http://example.com/foo-bar.html';
+    var redirectResponse = Response.redirect(redirectURL);
+    assert_equals(redirectResponse.headers.get('Location'), redirectURL,
+                  'Response.redirect() should set Location header.');
+    return cache.put(url, redirectResponse.clone())
+      .then(function() {
+          return cache.match(url);
+        })
+      .then(function(response) {
+          assert_response_equals(response, redirectResponse,
+                                 'Redirect response is reproduced by the Cache API');
+          assert_equals(response.headers.get('Location'), redirectURL,
+                        'Location header is preserved by Cache API.');
+        });
+  }, 'Cache.put should store Response.redirect() correctly');
 
 done();

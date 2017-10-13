@@ -13,6 +13,8 @@
  * https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/NavigationTiming/Overview.html
  * https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html
  * http://dvcs.w3.org/hg/speech-api/raw-file/tip/speechapi.html
+ * https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
+ * https://w3c.github.io/requestidlecallback/
  */
 
 interface ApplicationCache;
@@ -23,7 +25,7 @@ interface nsIDOMCrypto;
 typedef any Transferable;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
-[PrimaryGlobal, NeedResolve]
+[PrimaryGlobal, LegacyUnenumerableNamedProperties, NeedResolve]
 /*sealed*/ interface Window : EventTarget {
   // the current browsing context
   [Unforgeable, Constant, StoreInSlot,
@@ -35,6 +37,8 @@ typedef any Transferable;
   [PutForwards=href, Unforgeable, Throws,
    CrossOriginReadable, CrossOriginWritable] readonly attribute Location? location;
   [Throws] readonly attribute History history;
+  [Func="CustomElementRegistry::IsCustomElementEnabled"]
+  readonly attribute CustomElementRegistry customElements;
   [Replaceable, Throws] readonly attribute BarProp locationbar;
   [Replaceable, Throws] readonly attribute BarProp menubar;
   [Replaceable, Throws] readonly attribute BarProp personalbar;
@@ -56,12 +60,9 @@ typedef any Transferable;
   [Throws, CrossOriginReadable] attribute any opener;
   //[Throws] readonly attribute WindowProxy parent;
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy? parent;
-  [Throws] readonly attribute Element? frameElement;
-  //[Throws] WindowProxy open(optional DOMString url = "about:blank", optional DOMString target = "_blank", [TreatNullAs=EmptyString] optional DOMString features = "", optional boolean replace = false);
+  [Throws, NeedsSubjectPrincipal] readonly attribute Element? frameElement;
+  //[Throws] WindowProxy? open(optional USVString url = "about:blank", optional DOMString target = "_blank", [TreatNullAs=EmptyString] optional DOMString features = "");
   [Throws, UnsafeInPrerendering] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", [TreatNullAs=EmptyString] optional DOMString features = "");
-  // We think the indexed getter is a bug in the spec, it actually needs to live
-  // on the WindowProxy
-  //getter WindowProxy (unsigned long index);
   getter object (DOMString name);
 
   // the user agent
@@ -69,44 +70,31 @@ typedef any Transferable;
 #ifdef HAVE_SIDEBAR
   [Replaceable, Throws] readonly attribute External external;
 #endif
-  [Throws] readonly attribute ApplicationCache applicationCache;
+  [Throws, Pref="browser.cache.offline.enable"] readonly attribute ApplicationCache applicationCache;
 
   // user prompts
-  [Throws, UnsafeInPrerendering] void alert();
-  [Throws, UnsafeInPrerendering] void alert(DOMString message);
-  [Throws, UnsafeInPrerendering] boolean confirm(optional DOMString message = "");
-  [Throws, UnsafeInPrerendering] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] void alert();
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] void alert(DOMString message);
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] boolean confirm(optional DOMString message = "");
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
   [Throws, UnsafeInPrerendering] void print();
   //[Throws] any showModalDialog(DOMString url, optional any argument);
-  [Throws, Func="nsGlobalWindow::IsShowModalDialogEnabled", UnsafeInPrerendering]
+  [Throws, Func="nsGlobalWindow::IsShowModalDialogEnabled", UnsafeInPrerendering, NeedsSubjectPrincipal]
   any showModalDialog(DOMString url, optional any argument, optional DOMString options = "");
 
-  [Throws, CrossOriginCallable] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
+  [Throws, CrossOriginCallable, NeedsSubjectPrincipal]
+  void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
   // also has obsolete members
 };
 Window implements GlobalEventHandlers;
 Window implements WindowEventHandlers;
 
-// http://www.whatwg.org/specs/web-apps/current-work/
-[NoInterfaceObject, Exposed=(Window,Worker)]
-interface WindowTimers {
-  [Throws] long setTimeout(Function handler, optional long timeout = 0, any... arguments);
-  [Throws] long setTimeout(DOMString handler, optional long timeout = 0, any... unused);
-  [Throws] void clearTimeout(optional long handle = 0);
-  [Throws] long setInterval(Function handler, optional long timeout, any... arguments);
-  [Throws] long setInterval(DOMString handler, optional long timeout, any... unused);
-  [Throws] void clearInterval(optional long handle = 0);
+// https://www.w3.org/TR/appmanifest/#onappinstalled-attribute
+partial interface Window {
+  [Pref="dom.manifest.onappinstalled"]
+  attribute EventHandler onappinstalled;
 };
-Window implements WindowTimers;
-
-// http://www.whatwg.org/specs/web-apps/current-work/
-[NoInterfaceObject, Exposed=(Window,Worker)]
-interface WindowBase64 {
-  [Throws] DOMString btoa(DOMString btoa);
-  [Throws] DOMString atob(DOMString atob);
-};
-Window implements WindowBase64;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject]
@@ -134,9 +122,6 @@ partial interface Window {
   //[Throws] Selection getSelection();
   [Throws] Selection? getSelection();
 };
-
-// https://dvcs.w3.org/hg/IndexedDB/raw-file/tip/Overview.html
-Window implements IDBEnvironment;
 
 // http://dev.w3.org/csswg/cssom/
 partial interface Window {
@@ -180,8 +165,8 @@ partial interface Window {
   // like a [Replaceable] attribute would, which needs the original JS value.
   //[Replaceable, Throws] readonly attribute double innerWidth;
   //[Replaceable, Throws] readonly attribute double innerHeight;
-  [Throws] attribute any innerWidth;
-  [Throws] attribute any innerHeight;
+  [Throws, NeedsCallerType] attribute any innerWidth;
+  [Throws, NeedsCallerType] attribute any innerHeight;
 
   // viewport scrolling
   void scroll(unrestricted double x, unrestricted double y);
@@ -214,10 +199,10 @@ partial interface Window {
   //[Replaceable, Throws] readonly attribute double screenY;
   //[Replaceable, Throws] readonly attribute double outerWidth;
   //[Replaceable, Throws] readonly attribute double outerHeight;
-  [Throws] attribute any screenX;
-  [Throws] attribute any screenY;
-  [Throws] attribute any outerWidth;
-  [Throws] attribute any outerHeight;
+  [Throws, NeedsCallerType] attribute any screenX;
+  [Throws, NeedsCallerType] attribute any screenY;
+  [Throws, NeedsCallerType] attribute any outerWidth;
+  [Throws, NeedsCallerType] attribute any outerHeight;
 };
 
 /**
@@ -246,6 +231,9 @@ partial interface Window {
 // https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html
 Window implements GlobalCrypto;
 
+// https://fidoalliance.org/specifications/download/
+Window implements GlobalU2F;
+
 #ifdef MOZ_WEBSPEECH
 // http://dvcs.w3.org/hg/speech-api/raw-file/tip/speechapi.html
 [NoInterfaceObject]
@@ -259,16 +247,13 @@ Window implements SpeechSynthesisGetter;
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject]
 interface WindowModal {
-  [Throws, Func="nsGlobalWindow::IsModalContentWindow"] readonly attribute any dialogArguments;
-  [Throws, Func="nsGlobalWindow::IsModalContentWindow"] attribute any returnValue;
+  [Throws, Func="nsGlobalWindow::IsModalContentWindow", NeedsSubjectPrincipal]
+  readonly attribute any dialogArguments;
+
+  [Throws, Func="nsGlobalWindow::IsModalContentWindow", NeedsSubjectPrincipal]
+  attribute any returnValue;
 };
 Window implements WindowModal;
-
-// https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#self-caches
-partial interface Window {
-[Throws, Func="mozilla::dom::cache::CacheStorage::PrefEnabled", SameObject]
-readonly attribute CacheStorage caches;
-};
 
 // Mozilla-specific stuff
 partial interface Window {
@@ -296,9 +281,12 @@ partial interface Window {
 
   [ChromeOnly, Throws] readonly attribute Element? realFrameElement;
 
-  [Throws] readonly attribute float               mozInnerScreenX;
-  [Throws] readonly attribute float               mozInnerScreenY;
-  [Replaceable, Throws] readonly attribute float  devicePixelRatio;
+  [Throws, NeedsCallerType]
+  readonly attribute float mozInnerScreenX;
+  [Throws, NeedsCallerType]
+  readonly attribute float mozInnerScreenY;
+  [Replaceable, Throws, NeedsCallerType]
+  readonly attribute float devicePixelRatio;
 
   /* The maximum offset that the window can be scrolled to
      (i.e., the document width/height minus the scrollport width/height) */
@@ -354,6 +342,7 @@ partial interface Window {
 
            attribute EventHandler ondevicemotion;
            attribute EventHandler ondeviceorientation;
+           attribute EventHandler onabsolutedeviceorientation;
            attribute EventHandler ondeviceproximity;
            attribute EventHandler onuserproximity;
            attribute EventHandler ondevicelight;
@@ -403,16 +392,11 @@ Window implements OnErrorEventHandlerForWindow;
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
 // https://compat.spec.whatwg.org/#windoworientation-interface
 partial interface Window {
+  [NeedsCallerType]
   readonly attribute short orientation;
            attribute EventHandler onorientationchange;
 };
 #endif
-
-// ConsoleAPI
-partial interface Window {
-  [Replaceable, GetterThrows]
-  readonly attribute Console console;
-};
 
 #ifdef HAVE_SIDEBAR
 // Mozilla extension
@@ -453,11 +437,11 @@ interface ChromeWindow {
   [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void                      setCursor(DOMString cursor);
 
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      maximize();
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      minimize();
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      restore();
 
   /**
@@ -491,6 +475,47 @@ interface ChromeWindow {
   void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
 };
 
+partial interface Window {
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplayconnect;
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplaydisconnect;
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplaypresentchange;
+};
+
+// For testing worklet only
+partial interface Window {
+  [Pref="dom.worklet.testing.enabled", Throws]
+  Worklet createWorklet();
+};
+
 Window implements ChromeWindow;
-Window implements GlobalFetch;
-Window implements ImageBitmapFactories;
+Window implements WindowOrWorkerGlobalScope;
+
+partial interface Window {
+  [Throws, Pref="dom.requestIdleCallback.enabled"]
+  unsigned long requestIdleCallback(IdleRequestCallback callback,
+                                    optional IdleRequestOptions options);
+  [Pref="dom.requestIdleCallback.enabled"]
+  void          cancelIdleCallback(unsigned long handle);
+};
+
+dictionary IdleRequestOptions {
+  unsigned long timeout;
+};
+
+callback IdleRequestCallback = void (IdleDeadline deadline);
+
+/**
+ * Similar to |isSecureContext|, but doesn't pay attention to whether the
+ * window's opener (if any) is a secure context or not.
+ *
+ * WARNING: Do not use this unless you are familiar with the issues that
+ * taking opener state into account is designed to address (or else you may
+ * introduce security issues).  If in doubt, use |isSecureContext|.  In
+ * particular do not use this to gate access to JavaScript APIs.
+ */
+partial interface Window {
+  [ChromeOnly] readonly attribute boolean isSecureContextIfOpenerIgnored;
+};

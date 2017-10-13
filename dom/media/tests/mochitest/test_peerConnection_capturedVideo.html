@@ -61,10 +61,7 @@ function startTest(media, token) {
       test.setMediaConstraints([{ video: hasVideo, audio: hasAudio }], []);
       test.chain.replace("PC_LOCAL_GUM", [
         function PC_LOCAL_CAPTUREVIDEO(test) {
-          var type = "";
-          if (hasAudio) { type += "audio"; }
-          if (hasVideo) { type += "video"; }
-          test.pcLocal.attachMedia(stream, type, "local");
+          test.pcLocal.attachLocalStream(stream);
           video.play();
         }
       ]);
@@ -76,8 +73,8 @@ function startTest(media, token) {
                         (e.code ? " (code=" + e.code + ")" : "") +
                         " in test for " + media.name +
                         (e.stack ? ":\n" + e.stack : "")))
+  .then(() => test && test.close())
   .then(() => {
-    if (test) { test.close(); }
     removeNodeAndSource(video);
     manager.finished(token);
   })

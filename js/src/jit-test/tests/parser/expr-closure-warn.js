@@ -1,10 +1,10 @@
 // Expression closure should be warned once and only once.
 
-var release = getBuildConfiguration().release;
+var release_or_beta = getBuildConfiguration().release_or_beta;
 
 function testWarn(code) {
-  if (release) {
-    // Warning for expression closure is non-release-only.
+  if (release_or_beta) {
+    // Warning for expression closure is non-release-only (not Release/Beta).
     testPass(code);
     return;
   }
@@ -15,7 +15,7 @@ function testWarn(code) {
   g.eval('eval(code)');
   var warning = getLastWarning();
   assertEq(warning !== null, true, "warning should be caught for " + code);
-  assertEq(warning.name, "None");
+  assertEq(warning.name, "Warning");
 
   clearLastWarning();
   g.eval('eval(code)');
@@ -28,7 +28,7 @@ function testWarn(code) {
   g.eval('Reflect.parse(code);');
   warning = getLastWarning();
   assertEq(warning !== null, true, "warning should be caught for " + code);
-  assertEq(warning.name, "None");
+  assertEq(warning.name, "Warning");
 
   clearLastWarning();
   g.eval('Reflect.parse(code);');

@@ -28,6 +28,7 @@ CaptureStreamTestHelper.prototype = {
   blackTransparent: { data: [0, 0, 0, 0], name: "blackTransparent" },
   green: { data: [0, 255, 0, 255], name: "green" },
   red: { data: [255, 0, 0, 255], name: "red" },
+  blue: { data: [0, 0, 255, 255], name: "blue"},
   grey: { data: [128, 128, 128, 255], name: "grey" },
 
   /* Default element size for createAndAppendElement() */
@@ -65,6 +66,10 @@ CaptureStreamTestHelper.prototype = {
     offsetY = offsetY || 0; // Set to 0 if not passed in.
     width = width || 0; // Set to 0 if not passed in.
     height = height || 0; // Set to 0 if not passed in.
+
+    // Avoids old values in case of a transparent image.
+    CaptureStreamTestHelper2D.prototype.clear.call(this, this.cout);
+
     var ctxout = this.cout.getContext('2d');
     if (width != 0 || height != 0) {
       ctxout.drawImage(video, 0, 0, width, height);
@@ -98,19 +103,26 @@ CaptureStreamTestHelper.prototype = {
   },
 
   /*
+   * Behaves like isPixelNot but ignores the alpha channel.
+   */
+  isOpaquePixelNot: function(px, refColor, threshold) {
+    px[3] = refColor.data[3];
+    return h.isPixelNot(px, refColor, threshold);
+  },
+
+  /*
    * Returns a promise that resolves when the provided function |test|
    * returns true.
    */
   waitForPixel: function (video, offsetX, offsetY, test, timeout, width, height) {
     return new Promise(resolve => {
       const startTime = video.currentTime;
-      CaptureStreamTestHelper2D.prototype.clear.call(this, this.cout);
       var ontimeupdate = () => {
         var pixelMatch = false;
         try {
             pixelMatch = test(this.getPixel(video, offsetX, offsetY, width, height));
-        } catch (NS_ERROR_NOT_AVAILABLE) {
-          info("Waiting for pixel but no video available");
+        } catch (e) {
+          info("Waiting for pixel but no video available: " + e + "\n" + e.stack);
         }
         if (!pixelMatch &&
             (!timeout || video.currentTime < startTime + (timeout / 1000.0))) {

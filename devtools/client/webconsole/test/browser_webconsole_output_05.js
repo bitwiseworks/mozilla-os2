@@ -1,15 +1,14 @@
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test the webconsole output for various types of objects.
 
 "use strict";
 
 const TEST_URI = "data:text/html;charset=utf8,test for console output - 05";
-const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis",
-  Ci.nsIPrefLocalizedString).data;
+const {ELLIPSIS} = require("devtools/shared/l10n");
 
 // March, 1960: The first implementation of Lisp. From Wikipedia:
 //
@@ -146,16 +145,26 @@ var inputTests = [
     input: "new Object({1: 'this\\nis\\nsupposed\\nto\\nbe\\na\\nvery" +
            "\\nlong\\nstring\\n,shown\\non\\na\\nsingle\\nline', " +
            "2: 'a shorter string', 3: 100})",
-    output: 'Object { 1: "this is supposed to be a very long ' + ELLIPSIS +
-            '", 2: "a shorter string", 3: 100 }',
+    output: '[ <1 empty slot>, "this is supposed to be a very long ' + ELLIPSIS +
+            '", "a shorter string", 100 ]',
     printOutput: "[object Object]",
-    inspectable: false,
+    inspectable: true,
+    variablesViewLabel: "Object[4]"
+  },
+
+  // 15
+  {
+    input: "new Proxy({a:1},[1,2,3])",
+    output: 'Proxy { <target>: Object, <handler>: Array[3] }',
+    printOutput: "[object Object]",
+    inspectable: true,
+    variablesViewLabel: "Proxy"
   }
 ];
 
 function test() {
   requestLongerTimeout(2);
-  Task.spawn(function*() {
+  Task.spawn(function* () {
     let {tab} = yield loadTab(TEST_URI);
     let hud = yield openConsole(tab);
     return checkOutputForInputs(hud, inputTests);

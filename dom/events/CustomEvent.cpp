@@ -17,20 +17,29 @@ using namespace mozilla::dom;
 CustomEvent::CustomEvent(mozilla::dom::EventTarget* aOwner,
                          nsPresContext* aPresContext,
                          mozilla::WidgetEvent* aEvent)
-: Event(aOwner, aPresContext, aEvent)
+  : Event(aOwner, aPresContext, aEvent)
+  , mDetail(JS::NullValue())
 {
+  mozilla::HoldJSObjects(this);
 }
 
-CustomEvent::~CustomEvent() {}
+CustomEvent::~CustomEvent()
+{
+  mozilla::DropJSObjects(this);
+}
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(CustomEvent)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(CustomEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDetail)
+  tmp->mDetail.setUndefined();
+  mozilla::DropJSObjects(this);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(CustomEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDetail)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(CustomEvent, Event)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mDetail)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_ADDREF_INHERITED(CustomEvent, Event)
 NS_IMPL_RELEASE_INHERITED(CustomEvent, Event)
@@ -51,6 +60,7 @@ CustomEvent::Constructor(const GlobalObject& aGlobal,
   JS::Rooted<JS::Value> detail(aGlobal.Context(), aParam.mDetail);
   e->InitCustomEvent(aGlobal.Context(), aType, aParam.mBubbles, aParam.mCancelable, detail, aRv);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -66,8 +76,23 @@ CustomEvent::InitCustomEvent(const nsAString& aType,
                              bool aCancelable,
                              nsIVariant* aDetail)
 {
+  NS_ENSURE_TRUE(!mEvent->mFlags.mIsBeingDispatched, NS_OK);
+
+  AutoJSAPI jsapi;
+  NS_ENSURE_STATE(jsapi.Init(GetParentObject()));
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> detail(cx);
+
+  if (!aDetail) {
+    detail = JS::NullValue();
+  } else if (NS_WARN_IF(!VariantToJsval(cx, aDetail, &detail))) {
+    JS_ClearPendingException(cx);
+    return NS_ERROR_FAILURE;
+  }
+
   Event::InitEvent(aType, aCanBubble, aCancelable);
-  mDetail = aDetail;
+  mDetail = detail;
+
   return NS_OK;
 }
 
@@ -79,35 +104,38 @@ CustomEvent::InitCustomEvent(JSContext* aCx,
                              JS::Handle<JS::Value> aDetail,
                              ErrorResult& aRv)
 {
-  nsCOMPtr<nsIVariant> detail;
-  if (nsIXPConnect* xpc = nsContentUtils::XPConnect()) {
-    xpc->JSToVariant(aCx, aDetail, getter_AddRefs(detail));
-  }
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
 
-  if (!detail) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-  InitCustomEvent(aType, aCanBubble, aCancelable, detail);
+  Event::InitEvent(aType, aCanBubble, aCancelable);
+  mDetail = aDetail;
 }
 
 NS_IMETHODIMP
 CustomEvent::GetDetail(nsIVariant** aDetail)
 {
-  NS_IF_ADDREF(*aDetail = mDetail);
-  return NS_OK;
+  if (mDetail.isNull()) {
+    *aDetail = nullptr;
+    return NS_OK;
+  }
+
+  AutoJSAPI jsapi;
+  NS_ENSURE_STATE(jsapi.Init(GetParentObject()));
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> detail(cx, mDetail);
+  nsIXPConnect* xpc = nsContentUtils::XPConnect();
+
+  if (NS_WARN_IF(!xpc)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return xpc->JSToVariant(cx, detail, aDetail);
 }
 
 void
 CustomEvent::GetDetail(JSContext* aCx,
                        JS::MutableHandle<JS::Value> aRetval)
 {
-  if (!mDetail) {
-    aRetval.setNull();
-    return;
-  }
-
-  VariantToJsval(aCx, mDetail, aRetval);
+  aRetval.set(mDetail);
 }
 
 already_AddRefed<CustomEvent>

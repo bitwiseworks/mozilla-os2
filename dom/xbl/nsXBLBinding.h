@@ -9,7 +9,6 @@
 
 #include "nsXBLService.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsINodeList.h"
 #include "nsIStyleRuleProcessor.h"
 #include "nsClassHashtable.h"
@@ -76,7 +75,7 @@ public:
    * otherwise we don't have untainted data with which to do a proper lookup.
    */
   bool LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
-                    JS::MutableHandle<JSPropertyDescriptor> aDesc);
+                    JS::MutableHandle<JS::PropertyDescriptor> aDesc);
 
   /*
    * Determines whether the binding has a field with the given name.
@@ -92,7 +91,7 @@ protected:
    */
   bool LookupMemberInternal(JSContext* aCx, nsString& aName,
                             JS::Handle<jsid> aNameAsId,
-                            JS::MutableHandle<JSPropertyDescriptor> aDesc,
+                            JS::MutableHandle<JS::PropertyDescriptor> aDesc,
                             JS::Handle<JSObject*> aXBLScope);
 
 public:
@@ -156,6 +155,8 @@ public:
   // Returns a live node list that iterates over the anonymous nodes generated
   // by this binding.
   nsAnonymousContentList* GetAnonymousNodeList();
+
+ nsIURI* GetSourceDocURI();
 
 // MEMBER VARIABLES
 protected:

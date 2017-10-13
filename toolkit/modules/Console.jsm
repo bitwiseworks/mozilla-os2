@@ -70,9 +70,7 @@ function fmt(aStr, aMaxLen, aMinLen, aOptions) {
       let end = aStr.substring((aStr.length - (aMaxLen / 2)) + 1);
       return start + "_" + end;
     }
-    else {
-      return aStr.substring(0, aMaxLen - 1) + "_";
-    }
+    return aStr.substring(0, aMaxLen - 1) + "_";
   }
   if (aStr.length < aMinLen) {
     let padding = Array(aMinLen - aStr.length + 1).join(" ");
@@ -106,6 +104,21 @@ function getCtorName(aObj) {
 }
 
 /**
+ * Indicates whether an object is a JS or `Components.Exception` error.
+ *
+ * @param {object} aThing
+          The object to check
+ * @return {boolean}
+          Is this object an error?
+ */
+function isError(aThing) {
+  return aThing && (
+           (typeof aThing.name == "string" &&
+            aThing.name.startsWith("NS_ERROR_")) ||
+           getCtorName(aThing).endsWith("Error"));
+}
+
+/**
  * A single line stringification of an object designed for use by humans
  *
  * @param {any} aThing
@@ -122,6 +135,10 @@ function stringify(aThing, aAllowNewLines) {
 
   if (aThing === null) {
     return "null";
+  }
+
+  if (isError(aThing)) {
+    return "Message: " + aThing;
   }
 
   if (typeof aThing == "object") {
@@ -203,9 +220,7 @@ function log(aThing) {
         i++;
       }
     }
-    else if (type.match("Error$") ||
-             (typeof aThing.name == "string" &&
-              aThing.name.match("NS_ERROR_"))) {
+    else if (isError(aThing)) {
       reply += "  Message: " + aThing + "\n";
       if (aThing.stack) {
         reply += "  Stack:\n";
@@ -283,6 +298,7 @@ const LOG_LEVELS = {
   "debug": 2,
   "log": 3,
   "info": 3,
+  "clear": 3,
   "trace": 3,
   "timeEnd": 3,
   "time": 3,

@@ -9,6 +9,7 @@
 #include "VP8TrackEncoder.h"
 #include "ImageContainer.h"
 #include "MediaStreamGraph.h"
+#include "MediaStreamListener.h"
 #include "WebMWriter.h" // TODO: it's weird to include muxer header to get the class definition of VP8 METADATA
 
 using ::testing::TestWithParam;
@@ -87,7 +88,7 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->SetData(data);
+    image->CopyData(data);
     return image;
   }
 
@@ -124,7 +125,7 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->SetData(data);
+    image->CopyData(data);
     return image;
   }
 
@@ -161,7 +162,7 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->SetData(data);
+    image->CopyData(data);
     return image;
   }
 
@@ -174,22 +175,23 @@ struct InitParam {
   bool mShouldSucceed;  // This parameter should cause success or fail result
   int  mWidth;          // frame width
   int  mHeight;         // frame height
-  mozilla::TrackRate mTrackRate; // track rate. 90K is the most commond track rate.
 };
 
 class TestVP8TrackEncoder: public VP8TrackEncoder
 {
 public:
+  explicit TestVP8TrackEncoder(TrackRate aTrackRate = 90000)
+    : VP8TrackEncoder(aTrackRate) {}
+
   ::testing::AssertionResult TestInit(const InitParam &aParam)
   {
-    nsresult result = Init(aParam.mWidth, aParam.mHeight, aParam.mWidth, aParam.mHeight, aParam.mTrackRate);
+    nsresult result = Init(aParam.mWidth, aParam.mHeight, aParam.mWidth, aParam.mHeight);
 
     if (((NS_FAILED(result) && aParam.mShouldSucceed)) || (NS_SUCCEEDED(result) && !aParam.mShouldSucceed))
     {
       return ::testing::AssertionFailure()
                 << " width = " << aParam.mWidth
-                << " height = " << aParam.mHeight
-                << " TrackRate = " << aParam.mTrackRate << ".";
+                << " height = " << aParam.mHeight;
     }
     else
     {
@@ -203,17 +205,15 @@ TEST(VP8VideoTrackEncoder, Initialization)
 {
   InitParam params[] = {
     // Failure cases.
-    { false, 640, 480, 0 },      // Trackrate should be larger than 1.
-    { false, 640, 480, -1 },     // Trackrate should be larger than 1.
-    { false, 0, 0, 90000 },      // Height/ width should be larger than 1.
-    { false, 0, 1, 90000 },      // Height/ width should be larger than 1.
-    { false, 1, 0, 90000},       // Height/ width should be larger than 1.
+    { false, 0, 0},      // Height/ width should be larger than 1.
+    { false, 0, 1},      // Height/ width should be larger than 1.
+    { false, 1, 0},       // Height/ width should be larger than 1.
 
     // Success cases
-    { true, 640, 480, 90000},    // Standard VGA
-    { true, 800, 480, 90000},    // Standard WVGA
-    { true, 960, 540, 90000},    // Standard qHD
-    { true, 1280, 720, 90000}    // Standard HD
+    { true, 640, 480},    // Standard VGA
+    { true, 800, 480},    // Standard WVGA
+    { true, 960, 540},    // Standard qHD
+    { true, 1280, 720}    // Standard HD
   };
 
   for (size_t i = 0; i < ArrayLength(params); i++)
@@ -228,10 +228,10 @@ TEST(VP8VideoTrackEncoder, FetchMetaData)
 {
   InitParam params[] = {
     // Success cases
-    { true, 640, 480, 90000},    // Standard VGA
-    { true, 800, 480, 90000},    // Standard WVGA
-    { true, 960, 540, 90000},    // Standard qHD
-    { true, 1280, 720, 90000}    // Standard HD
+    { true, 640, 480},    // Standard VGA
+    { true, 800, 480},    // Standard WVGA
+    { true, 960, 540},    // Standard qHD
+    { true, 1280, 720}    // Standard HD
   };
 
   for (size_t i = 0; i < ArrayLength(params); i++)
@@ -249,14 +249,11 @@ TEST(VP8VideoTrackEncoder, FetchMetaData)
 }
 
 // Encode test
-// XXX(bug 1018402): Disable this test when compiled with VS2013 because it
-// crashes.
-#if !defined(_MSC_VER) || _MSC_VER < 1800
 TEST(VP8VideoTrackEncoder, FrameEncode)
 {
   // Initiate VP8 encoder
   TestVP8TrackEncoder encoder;
-  InitParam param = {true, 640, 480, 90000};
+  InitParam param = {true, 640, 480};
   encoder.TestInit(param);
 
   // Create YUV images as source.
@@ -271,29 +268,80 @@ TEST(VP8VideoTrackEncoder, FrameEncode)
   for (nsTArray<RefPtr<Image>>::size_type i = 0; i < images.Length(); i++)
   {
     RefPtr<Image> image = images[i];
-    segment.AppendFrame(image.forget(), mozilla::StreamTime(90000), generator.GetSize());
+    segment.AppendFrame(image.forget(),
+                        mozilla::StreamTime(90000),
+                        generator.GetSize(),
+                        PRINCIPAL_HANDLE_NONE);
   }
 
   // track change notification.
-  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, 0, segment);
+  encoder.SetCurrentFrames(segment);
 
   // Pull Encoded Data back from encoder.
   EncodedFrameContainer container;
   EXPECT_TRUE(NS_SUCCEEDED(encoder.GetEncodedTrack(container)));
 }
-#endif // _MSC_VER
+
+// Test encoding a track that has to skip frames.
+TEST(VP8VideoTrackEncoder, SkippedFrames)
+{
+  // Initiate VP8 encoder
+  TestVP8TrackEncoder encoder;
+  InitParam param = {true, 640, 480};
+  encoder.TestInit(param);
+  nsTArray<RefPtr<Image>> images;
+  YUVBufferGenerator generator;
+  generator.Init(mozilla::gfx::IntSize(640, 480));
+  TimeStamp now = TimeStamp::Now();
+  VideoSegment segment;
+
+  while (images.Length() < 100) { 
+    generator.Generate(images);
+  }
+
+  // Pass 100 frames of the shortest possible duration where we don't get
+  // rounding errors between input/output rate.
+  for (uint32_t i = 0; i < 100; ++i) {
+    segment.AppendFrame(images[i].forget(),
+                        mozilla::StreamTime(90), // 1ms
+                        generator.GetSize(),
+                        PRINCIPAL_HANDLE_NONE,
+                        false,
+                        now + TimeDuration::FromMilliseconds(i));
+  }
+
+  encoder.SetCurrentFrames(segment);
+
+  // End the track.
+  segment.Clear();
+  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, TrackEventCommand::TRACK_EVENT_ENDED, segment);
+
+  EncodedFrameContainer container;
+  ASSERT_TRUE(NS_SUCCEEDED(encoder.GetEncodedTrack(container)));
+
+  EXPECT_TRUE(encoder.IsEncodingComplete());
+
+  // Verify total duration being 100 * 1ms = 100ms in terms of 30fps frame
+  // durations (3 * 1/30s).
+  uint64_t totalDuration = 0;
+  for (auto& frame : container.GetEncodedFrames()) {
+    totalDuration += frame->GetDuration();
+  }
+  const uint64_t threeFrames = (PR_USEC_PER_SEC / 30) * 3;
+  EXPECT_EQ(threeFrames, totalDuration);
+}
 
 // EOS test
 TEST(VP8VideoTrackEncoder, EncodeComplete)
 {
   // Initiate VP8 encoder
   TestVP8TrackEncoder encoder;
-  InitParam param = {true, 640, 480, 90000};
+  InitParam param = {true, 640, 480};
   encoder.TestInit(param);
 
   // track end notification.
   VideoSegment segment;
-  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, MediaStreamListener::TRACK_EVENT_ENDED, segment);
+  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, TrackEventCommand::TRACK_EVENT_ENDED, segment);
 
   // Pull Encoded Data back from encoder. Since we have sent
   // EOS to encoder, encoder.GetEncodedTrack should return

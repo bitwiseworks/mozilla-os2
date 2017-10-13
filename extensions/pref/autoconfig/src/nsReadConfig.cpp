@@ -26,7 +26,7 @@
 #include "nsXULAppAPI.h"
 #include "nsContentUtils.h"
 
-extern PRLogModuleInfo *MCD;
+extern mozilla::LazyLogModule MCD;
 
 extern nsresult EvaluateAdminConfigScript(const char *js_buffer, size_t length,
                                           const char *filename, 
@@ -56,12 +56,12 @@ static void DisplayError(void)
         return;
 
     nsXPIDLString title;
-    rv = bundle->GetStringFromName(MOZ_UTF16("readConfigTitle"), getter_Copies(title));
+    rv = bundle->GetStringFromName(u"readConfigTitle", getter_Copies(title));
     if (NS_FAILED(rv))
         return;
 
     nsXPIDLString err;
-    rv = bundle->GetStringFromName(MOZ_UTF16("readConfigMsg"), getter_Copies(err));
+    rv = bundle->GetStringFromName(u"readConfigMsg", getter_Copies(err));
     if (NS_FAILED(rv))
         return;
 
@@ -75,8 +75,6 @@ NS_IMPL_ISUPPORTS(nsReadConfig, nsIReadConfig, nsIObserver)
 nsReadConfig::nsReadConfig() :
     mRead(false)
 {
-    if (!MCD)
-      MCD = PR_NewLogModule("MCD");
 }
 
 nsresult nsReadConfig::Init()

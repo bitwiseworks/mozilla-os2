@@ -35,6 +35,14 @@ class ICStubSpace
 
     JS_DECLARE_NEW_METHODS(allocate, alloc, inline)
 
+    void freeAllAfterMinorGC(JSRuntime* rt);
+
+#ifdef DEBUG
+    bool isEmpty() const {
+        return allocator_.isEmpty();
+    }
+#endif
+
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return allocator_.sizeOfExcludingThis(mallocSizeOf);
     }
@@ -44,23 +52,19 @@ class ICStubSpace
 // OptimizedICStubSpace.
 struct OptimizedICStubSpace : public ICStubSpace
 {
-    static const size_t STUB_DEFAULT_CHUNK_SIZE = 4 * 1024;
+    static const size_t STUB_DEFAULT_CHUNK_SIZE = 4096;
 
   public:
     OptimizedICStubSpace()
       : ICStubSpace(STUB_DEFAULT_CHUNK_SIZE)
     {}
-
-    void free() {
-        allocator_.freeAll();
-    }
 };
 
 // Space for fallback stubs. Every BaselineScript has a
 // FallbackICStubSpace.
 struct FallbackICStubSpace : public ICStubSpace
 {
-    static const size_t STUB_DEFAULT_CHUNK_SIZE = 256;
+    static const size_t STUB_DEFAULT_CHUNK_SIZE = 4096;
 
   public:
     FallbackICStubSpace()

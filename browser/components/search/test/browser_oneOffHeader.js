@@ -10,11 +10,15 @@ const textbox = searchbar._textbox;
 const searchPopup = document.getElementById("PopupSearchAutoComplete");
 const searchIcon = document.getAnonymousElementByAttribute(searchbar, "anonid",
                                                            "searchbar-search-button");
-const searchSettings =
+
+const oneOffsContainer =
   document.getAnonymousElementByAttribute(searchPopup, "anonid",
+                                          "search-one-off-buttons");
+const searchSettings =
+  document.getAnonymousElementByAttribute(oneOffsContainer, "anonid",
                                           "search-settings");
 var header =
-  document.getAnonymousElementByAttribute(searchPopup, "anonid",
+  document.getAnonymousElementByAttribute(oneOffsContainer, "anonid",
                                           "search-panel-one-offs-header");
 function getHeaderText() {
   let headerChild = header.selectedPanel;
@@ -28,28 +32,13 @@ function getHeaderText() {
   return headerStrings.join("");
 }
 
-// Get an array of the one-off buttons.
-function getOneOffs() {
-  let oneOffs = [];
-  let oneOff =
-    document.getAnonymousElementByAttribute(searchPopup, "anonid",
-                                            "search-panel-one-offs");
-  for (oneOff = oneOff.firstChild; oneOff; oneOff = oneOff.nextSibling) {
-    if (oneOff.classList.contains("dummy"))
-      break;
-    oneOffs.push(oneOff);
-  }
-
-  return oneOffs;
-}
-
 const msg = isMac ? 5 : 1;
 const utils = window.QueryInterface(Ci.nsIInterfaceRequestor)
                     .getInterface(Ci.nsIDOMWindowUtils);
 const scale = utils.screenPixelsPerCSSPixel;
 function* synthesizeNativeMouseMove(aElement) {
   let rect = aElement.getBoundingClientRect();
-  let win = aElement.ownerDocument.defaultView;
+  let win = aElement.ownerGlobal;
   let x = win.mozInnerScreenX + (rect.left + rect.right) / 2;
   let y = win.mozInnerScreenY + (rect.top + rect.bottom) / 2;
 
@@ -134,10 +123,19 @@ add_task(function* test_text() {
   is(getHeaderText(), "Search for foo with:",
      "Header has the correct text when search terms have been entered and the Change Search Settings button is selected.");
 
-  promise = promiseEvent(searchPopup, "popuphidden");
-  info("Closing search panel");
-  EventUtils.synthesizeKey("VK_ESCAPE", {});
-  yield promise;
+  // Click the "Foo Search" header at the top of the popup and make sure it
+  // loads the search results.
+  let searchbarEngine =
+    document.getAnonymousElementByAttribute(searchPopup, "anonid",
+                                            "searchbar-engine");
+
+  yield synthesizeNativeMouseMove(searchbarEngine);
+  SimpleTest.executeSoon(() => {
+    EventUtils.synthesizeMouseAtCenter(searchbarEngine, {});
+  });
+
+  let url = Services.search.currentEngine.getSubmission(textbox.value).uri.spec;
+  yield promiseTabLoadEvent(gBrowser.selectedTab, url);
 
   // Move the cursor out of the panel area to avoid messing with other tests.
   yield synthesizeNativeMouseMove(searchbar);

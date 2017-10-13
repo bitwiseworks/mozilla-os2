@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -42,6 +42,9 @@ public:
 
   AbstractThread(bool aSupportsTailDispatch) : mSupportsTailDispatch(aSupportsTailDispatch) {}
 
+  static already_AddRefed<AbstractThread>
+  CreateXPCOMThreadWrapper(nsIThread* aThread, bool aRequireTailDispatch);
+
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AbstractThread);
 
   enum DispatchFailureHandling { AssertDispatchSuccess, DontAssertDispatchSuccess };
@@ -63,12 +66,23 @@ public:
   // threads which support it.
   virtual TaskDispatcher& TailDispatcher() = 0;
 
+  // Returns true if we have tail tasks scheduled, or if this isn't known.
+  // Returns false if we definitely don't have any tail tasks.
+  virtual bool MightHaveTailTasks() { return true; }
+
+  // Helper functions for methods on the tail TasklDispatcher. These check
+  // HasTailTasks to avoid allocating a TailDispatcher if it isn't
+  // needed.
+  void TailDispatchTasksFor(AbstractThread* aThread);
+  bool HasTailTasksFor(AbstractThread* aThread);
+
   // Returns true if this supports the tail dispatcher.
   bool SupportsTailDispatch() const { return mSupportsTailDispatch; }
 
   // Returns true if this thread requires all dispatches originating from
   // aThread go through the tail dispatcher.
   bool RequiresTailDispatch(AbstractThread* aThread) const;
+  bool RequiresTailDispatchFromCurrentThread() const;
 
   virtual TaskQueue* AsTaskQueue() { MOZ_CRASH("Not a task queue!"); }
   virtual nsIThread* AsXPCOMThread() { MOZ_CRASH("Not an XPCOM thread!"); }
@@ -85,15 +99,12 @@ public:
 
 protected:
   virtual ~AbstractThread() {}
-  static ThreadLocal<AbstractThread*> sCurrentThreadTLS;
+  static MOZ_THREAD_LOCAL(AbstractThread*) sCurrentThreadTLS;
 
   // True if we want to require that every task dispatched from tasks running in
   // this queue go through our queue's tail dispatcher.
   const bool mSupportsTailDispatch;
 };
-
-already_AddRefed<AbstractThread> CreateXPCOMAbstractThreadWrapper(nsIThread* aThread,
-                                 bool aRequireTailDispatch);
 
 } // namespace mozilla
 

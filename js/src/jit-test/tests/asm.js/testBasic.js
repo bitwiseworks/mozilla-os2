@@ -1,4 +1,3 @@
-// |jit-test| test-also-noasmjs
 load(libdir + "asm.js");
 load(libdir + "asserts.js");
 
@@ -97,6 +96,12 @@ var exp = asmLink(asmCompile(USE_ASM + "function f() { return 3 } return {f:f,f:
 assertEq(exp.f(), 3);
 assertEq(Object.keys(exp).join(), 'f');
 
+var exp = asmLink(asmCompile(USE_ASM + "function f() { return 4 } return {f1:f,f2:f}"));
+assertEq(exp.f1(), 4);
+assertEq(exp.f2(), 4);
+assertEq(Object.keys(exp).sort().join(), 'f1,f2');
+assertEq(exp.f1, exp.f2);
+
 assertAsmTypeFail(USE_ASM + "function f() { return 3 } return {1:f}");
 assertAsmTypeFail(USE_ASM + "function f() { return 3 } return {__proto__:f}");
 assertAsmTypeFail(USE_ASM + "function f() { return 3 } return {get x() {} }");
@@ -136,15 +141,6 @@ assertAsmTypeFail(USE_ASM + 'return {m() {}};');
 assertTypeFailInEval('class f { constructor() {"use asm"; return {}} }');
 assertAsmTypeFail(USE_ASM + 'class c { constructor() {}}; return c;');
 
-assertAsmTypeFail(USE_ASM + 'function f(i) {i=i|0; (i for (x in [1,2,3])) } return f');
-assertAsmTypeFail(USE_ASM + 'function f(i) {i=i|0; [i for (x in [1,2,3])] } return f');
-assertAsmTypeFail(USE_ASM + 'function f() { (x for (x in [1,2,3])) } return f');
-assertAsmTypeFail(USE_ASM + 'function f() { [x for (x in [1,2,3])] } return f');
-assertTypeFailInEval('function f() { "use asm"; function g(i) {i=i|0; (i for (x in [1,2,3])) } return g }');
-assertTypeFailInEval('function f() { "use asm"; function g(i) {i=i|0; [i for (x in [1,2,3])] } return g }');
-assertTypeFailInEval('function f() { "use asm"; function g() { (x for (x in [1,2,3])) } return g }');
-assertTypeFailInEval('function f() { "use asm"; function g() { [x for (x in [1,2,3])] } return g }');
-
 assertThrowsInstanceOf(function() { new Function(USE_ASM + 'var)') }, SyntaxError);
 assertThrowsInstanceOf(function() { new Function(USE_ASM + 'return)') }, SyntaxError);
 assertThrowsInstanceOf(function() { new Function(USE_ASM + 'var z=-2w') }, SyntaxError);
@@ -159,3 +155,22 @@ assertThrowsInstanceOf(function() { new Function(USE_ASM + 'function f() {} var 
 assertThrowsInstanceOf(function() { new Function(USE_ASM + 'function f() {} var TBL=-2w return f') }, SyntaxError);
 assertThrowsInstanceOf(function() { new Function(USE_ASM + 'function () {}') }, SyntaxError);
 assertNoWarning(function() { parse("function f() { 'use asm'; function g() {} return g }") });
+
+// Test asm.js->asm.js, wasm->asm.js, asm.js->wasm imports:
+
+var f = asmLink(asmCompile(USE_ASM + 'function f() {} return f'));
+var g = asmLink(asmCompile('glob', 'ffis', USE_ASM + 'var f = ffis.f; function g() { return f(1)|0; } return g'), null, {f});
+assertEq(g(), 0);
+
+if (wasmIsSupported()) {
+    var h = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`(module
+        (import $f "imp" "f" (param i32) (result i32))
+        (func $h (result i32) (call $f (i32.const 1)))
+        (export "h" $h)
+    )`)), {imp:{f}}).exports.h;
+    assertEq(h(), 0);
+
+    var i = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`(module (func $i) (export "i" $i))`))).exports.i
+    var j = asmLink(asmCompile('glob', 'ffis', USE_ASM + 'var i = ffis.i; function j() { return i(1)|0; } return j'), null, {i});
+    assertEq(j(), 0);
+}

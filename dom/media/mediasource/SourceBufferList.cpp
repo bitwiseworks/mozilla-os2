@@ -131,16 +131,6 @@ SourceBufferList::RangeRemoval(double aStart, double aEnd)
 }
 
 void
-SourceBufferList::Evict(double aStart, double aEnd)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MSE_DEBUG("Evict(aStart=%f, aEnd=%f)", aStart, aEnd);
-  for (uint32_t i = 0; i < mSourceBuffers.Length(); ++i) {
-    mSourceBuffers[i]->Evict(aStart, aEnd);
-  }
-}
-
-void
 SourceBufferList::Ended()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -187,6 +177,30 @@ MediaSource*
 SourceBufferList::GetParentObject() const
 {
   return mMediaSource;
+}
+
+double
+SourceBufferList::HighestStartTime()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  double highestStartTime = 0;
+  for (auto& sourceBuffer : mSourceBuffers) {
+    highestStartTime =
+      std::max(sourceBuffer->HighestStartTime(), highestStartTime);
+  }
+  return highestStartTime;
+}
+
+double
+SourceBufferList::HighestEndTime()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  double highestEndTime = 0;
+  for (auto& sourceBuffer : mSourceBuffers) {
+    highestEndTime =
+      std::max(sourceBuffer->HighestEndTime(), highestEndTime);
+  }
+  return highestEndTime;
 }
 
 JSObject*

@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable */
 
 /**
  * Tests markers filtering mechanism.
@@ -37,7 +38,7 @@ function* spawnTest() {
   WaterfallView._cache.delete(markers);
 
   // Select everything
-  let waterfallRendered = WaterfallView.once(EVENTS.WATERFALL_RENDERED);
+  let waterfallRendered = WaterfallView.once(EVENTS.UI_WATERFALL_RENDERED);
   OverviewView.setTimeInterval({ startTime: 0, endTime: Number.MAX_VALUE });
 
   $("#filter-button").click();
@@ -115,3 +116,4 @@ function waitForOverviewAndCommand(overview, item) {
   let menuitemCommandDispatched = once(item, "command");
   return Promise.all([overviewRendered, menuitemCommandDispatched]);
 }
+/* eslint-enable */

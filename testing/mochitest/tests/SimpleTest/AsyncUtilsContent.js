@@ -37,6 +37,27 @@ addMessageListener("Test:SynthesizeMouse", (message) => {
   let left = data.x;
   let top = data.y;
   if (target) {
+    if (target.ownerDocument !== content.document) {
+      // Account for nodes found in iframes.
+      let cur = target;
+      do {
+        let frame = cur.ownerDocument.defaultView.frameElement;
+        let rect = frame.getBoundingClientRect();
+
+        left += rect.left;
+        top += rect.top;
+
+        cur = frame;
+      } while (cur && cur.ownerDocument !== content.document);
+
+      // node must be in this document tree.
+      if (!cur) {
+        sendAsyncMessage("Test:SynthesizeMouseDone",
+                         { error: "target must be in the main document tree" });
+        return;
+      }
+    }
+
     let rect = target.getBoundingClientRect();
     left += rect.left;
     top += rect.top;
@@ -47,11 +68,31 @@ addMessageListener("Test:SynthesizeMouse", (message) => {
     }
   }
 
-  let result = EventUtils.synthesizeMouseAtPoint(left, top, data.event, content);
+  let result;
+  if (data.event && data.event.wheel) {
+    EventUtils.synthesizeWheelAtPoint(left, top, data.event, content);
+  } else {
+    result = EventUtils.synthesizeMouseAtPoint(left, top, data.event, content);
+  }
   sendAsyncMessage("Test:SynthesizeMouseDone", { defaultPrevented: result });
 });
 
 addMessageListener("Test:SendChar", message => {
   let result = EventUtils.sendChar(message.data.char, content);
-  sendAsyncMessage("Test:SendCharDone", { sendCharResult: result });
+  sendAsyncMessage("Test:SendCharDone", { result, seq: message.data.seq });
+});
+
+addMessageListener("Test:SynthesizeKey", message => {
+  EventUtils.synthesizeKey(message.data.key, message.data.event || {}, content);
+  sendAsyncMessage("Test:SynthesizeKeyDone", { seq: message.data.seq });
+});
+
+addMessageListener("Test:SynthesizeComposition", message => {
+  let result = EventUtils.synthesizeComposition(message.data.event, content);
+  sendAsyncMessage("Test:SynthesizeCompositionDone", { result, seq: message.data.seq });
+});
+
+addMessageListener("Test:SynthesizeCompositionChange", message => {
+  EventUtils.synthesizeCompositionChange(message.data.event, content);
+  sendAsyncMessage("Test:SynthesizeCompositionChangeDone", { seq: message.data.seq });
 });

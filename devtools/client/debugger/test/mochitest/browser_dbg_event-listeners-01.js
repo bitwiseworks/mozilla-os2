@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Tests that the eventListeners request works.
@@ -18,18 +20,18 @@ function test() {
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
-  gClient.connect((aType, aTraits) => {
+  gClient.connect().then(([aType, aTraits]) => {
     is(aType, "browser",
       "Root actor should identify itself as a browser.");
 
     addTab(TAB_URL)
       .then((aTab) => {
         gTab = aTab;
-        return attachThreadActorForUrl(gClient, TAB_URL)
+        return attachThreadActorForUrl(gClient, TAB_URL);
       })
       .then(pauseDebuggee)
       .then(testEventListeners)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
       .then(null, aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
@@ -85,7 +87,7 @@ function testEventListeners(aThreadClient) {
       let types = [];
 
       for (let l of listeners) {
-        info("Listener for the "+l.type+" event.");
+        info("Listener for the " + l.type + " event.");
         let node = l.node;
         ok(node, "There is a node property.");
         ok(node.object, "There is a node object property.");
@@ -100,7 +102,7 @@ function testEventListeners(aThreadClient) {
 
         // The onchange handler is an inline string that doesn't have
         // a URL because it's basically eval'ed
-        if (l.type !== 'change') {
+        if (l.type !== "change") {
           is(func.url, TAB_URL, "The function url is correct.");
         }
 
@@ -140,12 +142,6 @@ function testEventListeners(aThreadClient) {
   return deferred.promise;
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

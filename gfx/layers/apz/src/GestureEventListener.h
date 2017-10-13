@@ -10,13 +10,14 @@
 #include "InputData.h"                  // for MultiTouchInput, etc
 #include "Units.h"
 #include "mozilla/EventForwards.h"      // for nsEventStatus
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/RefPtr.h"             // for RefPtr
 #include "nsISupportsImpl.h"
 #include "nsTArray.h"                   // for nsTArray
 
-class CancelableTask;
-
 namespace mozilla {
+
+class CancelableRunnable;
+
 namespace layers {
 
 class AsyncPanZoomController;
@@ -137,7 +138,7 @@ private:
   nsEventStatus HandleInputTouchMove();
   nsEventStatus HandleInputTouchCancel();
   void HandleInputTimeoutLongTap();
-  void HandleInputTimeoutMaxTap();
+  void HandleInputTimeoutMaxTap(bool aDuringFastFling);
 
   void TriggerSingleTapConfirmedEvent();
 
@@ -170,13 +171,17 @@ private:
    * out we are compared to our original pinch span. Note that this does _not_
    * continue to be updated once we jump into the |GESTURE_PINCH| state.
    */
-  float mSpanChange;
+  ParentLayerCoord mSpanChange;
 
   /**
    * Previous span calculated for the purposes of setting inside a
    * PinchGestureInput.
    */
-  float mPreviousSpan;
+  ParentLayerCoord mPreviousSpan;
+
+  /* Properties similar to mSpanChange and mPreviousSpan, but for the focus */
+  ParentLayerCoord mFocusChange;
+  ParentLayerPoint mPreviousFocus;
 
   /**
    * Cached copy of the last touch input.
@@ -214,7 +219,7 @@ private:
    * CancelLongTapTimeoutTask: Cancel the mLongTapTimeoutTask and also set
    * it to null.
    */
-  CancelableTask *mLongTapTimeoutTask;
+  RefPtr<CancelableRunnable> mLongTapTimeoutTask;
   void CancelLongTapTimeoutTask();
   void CreateLongTapTimeoutTask();
 
@@ -227,9 +232,18 @@ private:
    * CancelMaxTapTimeoutTask: Cancel the mMaxTapTimeoutTask and also set
    * it to null.
    */
-  CancelableTask *mMaxTapTimeoutTask;
+  RefPtr<CancelableRunnable> mMaxTapTimeoutTask;
   void CancelMaxTapTimeoutTask();
   void CreateMaxTapTimeoutTask();
+
+  /**
+   * Tracks whether the single-tap event was already sent to content. This is
+   * needed because it affects how the double-tap gesture, if detected, is
+   * handled. The value is only valid in states GESTURE_FIRST_SINGLE_TOUCH_UP and
+   * GESTURE_SECOND_SINGLE_TOUCH_DOWN; to more easily catch violations it is
+   * stored in a Maybe which is set to Nothing() at all other times.
+   */
+  Maybe<bool> mSingleTapSent;
 };
 
 } // namespace layers

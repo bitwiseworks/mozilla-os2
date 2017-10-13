@@ -7,6 +7,7 @@
 #define GFX_WINDOWSDWRITEFONTS_H
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/UniquePtr.h"
 #include <dwrite.h>
 
 #include "gfxFont.h"
@@ -33,24 +34,20 @@ public:
 
     virtual uint32_t GetSpaceGlyph() override;
 
-    virtual bool SetupCairoFont(gfxContext *aContext) override;
+    virtual bool SetupCairoFont(DrawTarget* aDrawTarget) override;
 
     virtual bool AllowSubpixelAA() override
     { return mAllowManualShowGlyphs; }
 
     bool IsValid() const;
 
-    virtual gfxFloat GetAdjustedSize() const override {
-        return mAdjustedSize;
-    }
-
     IDWriteFontFace *GetFontFace();
 
     /* override Measure to add padding for antialiasing */
-    virtual RunMetrics Measure(gfxTextRun *aTextRun,
+    virtual RunMetrics Measure(const gfxTextRun *aTextRun,
                                uint32_t aStart, uint32_t aEnd,
                                BoundingBoxType aBoundingBoxType,
-                               gfxContext *aContextForTightBoundingBox,
+                               DrawTarget *aDrawTargetForTightBoundingBox,
                                Spacing *aSpacing,
                                uint16_t aOrientation) override;
 
@@ -63,11 +60,11 @@ public:
     GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams = nullptr) override;
 
     virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontCacheSizes* aSizes) const;
+                                        FontCacheSizes* aSizes) const override;
     virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontCacheSizes* aSizes) const;
+                                        FontCacheSizes* aSizes) const override;
 
-    virtual FontType GetType() const { return FONT_TYPE_DWRITE; }
+    virtual FontType GetType() const override { return FONT_TYPE_DWRITE; }
 
     virtual already_AddRefed<mozilla::gfx::ScaledFont>
     GetScaledFont(mozilla::gfx::DrawTarget *aTarget) override;
@@ -96,7 +93,7 @@ protected:
     Metrics *mMetrics;
 
     // cache of glyph widths in 16.16 fixed-point pixels
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,int32_t>> mGlyphWidths;
 
     uint32_t mSpaceGlyph;
 

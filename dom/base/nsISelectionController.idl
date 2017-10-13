@@ -7,7 +7,6 @@
 #include "nsISelectionDisplay.idl"
 
 %{C++
-typedef short SelectionType;
 typedef short SelectionRegion;
 %}
 
@@ -19,6 +18,7 @@ interface nsISelectionDisplay;
 [scriptable, uuid(3801c9d4-8e69-4bfc-9edb-b58278621f8f)]
 interface nsISelectionController : nsISelectionDisplay
 {
+   // RawSelectionType values:
    const short SELECTION_NONE=0;
    const short SELECTION_NORMAL=1;
    const short SELECTION_SPELLCHECK=2;
@@ -32,6 +32,7 @@ interface nsISelectionController : nsISelectionDisplay
    const short SELECTION_URLSTRIKEOUT=512;
    const short NUM_SELECTIONTYPES=11;
 
+   // SelectionRegion values:
    const short SELECTION_ANCHOR_REGION = 0;
    const short SELECTION_FOCUS_REGION = 1;
    const short SELECTION_WHOLE_SELECTION = 2;
@@ -57,7 +58,8 @@ interface nsISelectionController : nsISelectionDisplay
    * GetSelection will return the selection that the presentation
    *  shell may implement.
    *
-   * @param aType will hold the type of selection //SelectionType
+   * @param aType This will hold the type of selection.  This value must be one
+   *              of RawSelectionType values.
    * @param _return will hold the return value
    */
     nsISelection getSelection(in short type);
@@ -66,12 +68,14 @@ interface nsISelectionController : nsISelectionDisplay
    const short SCROLL_FIRST_ANCESTOR_ONLY = 1<<2;
    const short SCROLL_CENTER_VERTICALLY = 1<<4;
    const short SCROLL_OVERFLOW_HIDDEN = 1<<5;
+   const short SCROLL_FOR_CARET_MOVE = 1<<6;
 
    /**
    * ScrollSelectionIntoView scrolls a region of the selection,
    * so that it is visible in the scrolled view.
    *
-   * @param aType the selection to scroll into view. //SelectionType
+   * @param aType the selection to scroll into view.  This value must be one
+   *              of RawSelectionType values.
    * @param aRegion the region inside the selection to scroll into view. //SelectionRegion
    * @param aFlags the scroll flags.  Valid bits include:
    * SCROLL_SYNCHRONOUS: when set, scrolls the selection into view
@@ -81,6 +85,9 @@ interface nsISelectionController : nsISelectionDisplay
    * into view.
    * SCROLL_OVERFLOW_HIDDEN: if set, scrolls even if the overflow is specified
    * as hidden.
+   * SCROLL_FOR_CARET_MOVE: set to indicate whether scrolling is in response
+   * to the caret being moved. Does not affect behavior (used for telemetry
+   * purposes only).
    *
    * Note that if isSynchronous is true, then this might flush the pending
    * reflow. It's dangerous for some objects. See bug 418470 comment 12.
@@ -106,7 +113,7 @@ interface nsISelectionController : nsISelectionDisplay
 
    /**
    * Set the caret readonly or not. An readonly caret will
-   * draw but not blink when made visible. 
+   * draw but not blink when made visible.
    * @param aReadOnly PR_TRUE to enable caret.  PR_FALSE to disable.
    * @return always NS_OK
    */
@@ -126,7 +133,7 @@ interface nsISelectionController : nsISelectionDisplay
     * blink cycle.
     */
     readonly attribute boolean caretVisible;
-    
+
    /**
    * Show the caret even in selections. By default the caret is hidden unless the
    * selection is collapsed. Use this function to show the caret even in selections.
@@ -137,7 +144,7 @@ interface nsISelectionController : nsISelectionDisplay
 
    /** CharacterMove will move the selection one character forward/backward in the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -147,9 +154,9 @@ interface nsISelectionController : nsISelectionDisplay
    /** PhysicalMove will move the selection one "unit" in a given direction
    *  within the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
-   *  @param aDirection 
+   *  @param aDirection
    *  @param aAmount    character/line; word/lineBoundary
    *  @param aExtend    should it collapse the selection of extend it?
    */
@@ -181,7 +188,7 @@ interface nsISelectionController : nsISelectionDisplay
 
    /** WordMove will move the selection one word forward/backward in the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -197,7 +204,7 @@ interface nsISelectionController : nsISelectionDisplay
 
     /** LineMove will move the selection one line forward/backward in the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -207,7 +214,7 @@ interface nsISelectionController : nsISelectionDisplay
   /** IntraLineMove will move the selection to the front of the line or end of the line
    *  in the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -216,7 +223,7 @@ interface nsISelectionController : nsISelectionDisplay
 
   /** PageMove will move the selection one page forward/backward in the document.
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -230,7 +237,7 @@ interface nsISelectionController : nsISelectionDisplay
 
   /** CompleteMove will move page view to the top or bottom of the document
    *  this will also have the effect of collapsing the selection if the aExtend = PR_FALSE
-   *  the "point" of selection that is extended is considered the "focus" point. 
+   *  the "point" of selection that is extended is considered the "focus" point.
    *  or the last point adjusted by the selection.
    *  @param aForward forward or backward if PR_FALSE
    *  @param aExtend  should it collapse the selection of extend it?
@@ -257,7 +264,7 @@ interface nsISelectionController : nsISelectionDisplay
    */
     void selectAll();
 
-  /** CheckVisibility will return true if textnode and offsets are actually rendered 
+  /** CheckVisibility will return true if textnode and offsets are actually rendered
    *  in the current precontext.
    *  @param aNode textNode to test
    *  @param aStartOffset  offset in dom to first char of textnode to test
@@ -271,4 +278,45 @@ interface nsISelectionController : nsISelectionDisplay
    #define NS_ISELECTIONCONTROLLER_CID \
    { 0x513b9460, 0xd56a, 0x4c4e, \
    { 0xb6, 0xf9, 0x0b, 0x8a, 0xe4, 0x37, 0x2a, 0x3b }}
+
+namespace mozilla {
+
+typedef short RawSelectionType;
+enum class SelectionType : RawSelectionType
+{
+  eInvalid = -1,
+  eNone = nsISelectionController::SELECTION_NONE,
+  eNormal = nsISelectionController::SELECTION_NORMAL,
+  eSpellCheck = nsISelectionController::SELECTION_SPELLCHECK,
+  eIMERawClause = nsISelectionController::SELECTION_IME_RAWINPUT,
+  eIMESelectedRawClause = nsISelectionController::SELECTION_IME_SELECTEDRAWTEXT,
+  eIMEConvertedClause = nsISelectionController::SELECTION_IME_CONVERTEDTEXT,
+  eIMESelectedClause =
+    nsISelectionController::SELECTION_IME_SELECTEDCONVERTEDTEXT,
+  eAccessibility = nsISelectionController::SELECTION_ACCESSIBILITY,
+  eFind = nsISelectionController::SELECTION_FIND,
+  eURLSecondary = nsISelectionController::SELECTION_URLSECONDARY,
+  eURLStrikeout = nsISelectionController::SELECTION_URLSTRIKEOUT,
+};
+
+// Using anonymous enum to define constants because these constants may be
+// used at defining fixed size array in some header files (e.g.,
+// nsFrameSelection.h).  So, the values needs to be defined here, but we cannot
+// use static/const even with extern since it causes failing to link or
+// initializes them after such headers.
+enum : size_t
+{
+  // kSelectionTypeCount is number of SelectionType.
+  kSelectionTypeCount = nsISelectionController::NUM_SELECTIONTYPES,
+  // kPresentSelectionTypeCount is number of SelectionType except "none".
+  kPresentSelectionTypeCount = kSelectionTypeCount - 1
+};
+
+const char* ToChar(SelectionType aSelectionType);
+SelectionType ToSelectionType(RawSelectionType aRawSelectionType);
+RawSelectionType ToRawSelectionType(SelectionType aSelectionType);
+bool operator &(SelectionType aSelectionType,
+                RawSelectionType aRawSelectionTypes);
+
+} // namespace mozilla
 %}

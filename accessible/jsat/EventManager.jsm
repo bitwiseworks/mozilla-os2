@@ -77,7 +77,7 @@ this.EventManager.prototype = {
     Logger.debug('EventManager.stop');
     AccessibilityEventObserver.removeListener(this);
     try {
-      this._preDialogPosition.clear();
+      this._preDialogPosition = new WeakMap();
       this.webProgress.removeProgressListener(this);
       this.removeEventListener('wheel', this, true);
       this.removeEventListener('scroll', this, true);
@@ -559,7 +559,7 @@ this.EventManager.prototype = {
     }
 
     if (tabstate) {
-      let docAcc = Utils.AccRetrieval.getAccessibleFor(aWebProgress.DOMWindow.document);
+      let docAcc = Utils.AccService.getAccessibleFor(aWebProgress.DOMWindow.document);
       this.present(Presentation.tabStateChanged(docAcc, tabstate));
     }
   },
@@ -567,7 +567,7 @@ this.EventManager.prototype = {
   onProgressChange: function onProgressChange() {},
 
   onLocationChange: function onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-    let docAcc = Utils.AccRetrieval.getAccessibleFor(aWebProgress.DOMWindow.document);
+    let docAcc = Utils.AccService.getAccessibleFor(aWebProgress.DOMWindow.document);
     this.present(Presentation.tabStateChanged(docAcc, 'newdoc'));
   },
 
@@ -618,7 +618,7 @@ const AccessibilityEventObserver = {
     }
     Services.obs.removeObserver(this, 'accessible-event');
     // Clean up all registered event managers.
-    this.eventManagers.clear();
+    this.eventManagers = new WeakMap();
     this.listenerCount = 0;
     this.started = false;
   },

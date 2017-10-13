@@ -42,8 +42,6 @@ GLBlitTextureImageHelper::BlitTextureImage(TextureImage *aSrc, const gfx::IntRec
                                            TextureImage *aDst, const gfx::IntRect& aDstRect)
 {
     GLContext *gl = mCompositor->gl();
-    NS_ASSERTION(!aSrc->InUpdate(), "Source texture is in update!");
-    NS_ASSERTION(!aDst->InUpdate(), "Destination texture is in update!");
 
     if (!aSrc || !aDst || aSrcRect.IsEmpty() || aDstRect.IsEmpty())
         return;
@@ -126,8 +124,8 @@ GLBlitTextureImageHelper::BlitTextureImage(TextureImage *aSrc, const gfx::IntRec
 
             gfx::IntSize realTexSize = srcSize;
             if (!CanUploadNonPowerOfTwo(gl)) {
-                realTexSize = gfx::IntSize(gfx::NextPowerOfTwo(srcSize.width),
-                                           gfx::NextPowerOfTwo(srcSize.height));
+                realTexSize = gfx::IntSize(RoundUpPow2(srcSize.width),
+                                           RoundUpPow2(srcSize.height));
             }
 
             if (aSrc->GetWrapMode() == LOCAL_GL_REPEAT) {

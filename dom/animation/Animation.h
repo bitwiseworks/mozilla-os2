@@ -10,14 +10,15 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/EffectCompositor.h" // For EffectCompositor::CascadeLevel
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h" // for TimeStamp, TimeDuration
 #include "mozilla/dom/AnimationBinding.h" // for AnimationPlayState
-#include "mozilla/dom/AnimationTimeline.h" // for AnimationTimeline
-#include "mozilla/DOMEventTargetHelper.h" // for DOMEventTargetHelper
-#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadOnly
-#include "mozilla/dom/Promise.h" // for Promise
-#include "nsCSSProperty.h" // for nsCSSProperty
+#include "mozilla/dom/AnimationEffectReadOnly.h"
+#include "mozilla/dom/AnimationTimeline.h"
+#include "mozilla/dom/Promise.h"
+#include "nsCSSPropertyID.h"
 #include "nsIGlobalObject.h"
 
 // X11 has a #define for CurrentTime.
@@ -32,15 +33,13 @@
 #endif
 
 struct JSContext;
-class nsCSSPropertySet;
+class nsCSSPropertyIDSet;
 class nsIDocument;
 class nsPresContext;
 
 namespace mozilla {
 
-struct AnimationCollection;
 class AnimValuesStyleRule;
-class CommonAnimationManager;
 
 namespace dom {
 
@@ -70,7 +69,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(Animation,
                                            DOMEventTargetHelper)
 
-  AnimationTimeline* GetParentObject() const { return mTimeline; }
+  nsIGlobalObject* GetParentObject() const { return GetOwnerGlobal(); }
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -91,9 +90,15 @@ public:
   };
 
   // Animation interface methods
-
-  KeyframeEffectReadOnly* GetEffect() const { return mEffect; }
-  void SetEffect(KeyframeEffectReadOnly* aEffect);
+  static already_AddRefed<Animation>
+  Constructor(const GlobalObject& aGlobal,
+              AnimationEffectReadOnly* aEffect,
+              const Optional<AnimationTimeline*>& aTimeline,
+              ErrorResult& aRv);
+  void GetId(nsAString& aResult) const { aResult = mId; }
+  void SetId(const nsAString& aId);
+  AnimationEffectReadOnly* GetEffect() const { return mEffect; }
+  void SetEffect(AnimationEffectReadOnly* aEffect);
   AnimationTimeline* GetTimeline() const { return mTimeline; }
   void SetTimeline(AnimationTimeline* aTimeline);
   Nullable<TimeDuration> GetStartTime() const { return mStartTime; }
@@ -139,7 +144,9 @@ public:
 
   // Wrapper functions for Animation DOM methods when called from style.
 
-  virtual void CancelFromStyle() { DoCancel(); }
+  virtual void CancelFromStyle() { CancelNoUpdate(); }
+  void SetTimelineNoUpdate(AnimationTimeline* aTimeline);
+  void SetEffectNoUpdate(AnimationEffectReadOnly* aEffect);
 
   virtual void Tick();
   bool NeedsTicks() const
@@ -233,6 +240,13 @@ public:
   Nullable<TimeDuration> GetCurrentOrPendingStartTime() const;
 
   /**
+   * Calculates the corresponding start time to use for an animation that is
+   * currently pending with current time |mHoldTime| but should behave
+   * as if it began or resumed playback at timeline time |aReadyTime|.
+   */
+  TimeDuration StartTimeFromReadyTime(const TimeDuration& aReadyTime) const;
+
+  /**
    * Converts a time in the timescale of this Animation's currentTime, to a
    * TimeStamp. Returns a null TimeStamp if the conversion cannot be performed
    * because of the current state of this Animation (e.g. it has no timeline, a
@@ -241,16 +255,16 @@ public:
    */
   TimeStamp AnimationTimeToTimeStamp(const StickyTimeDuration& aTime) const;
 
+  // Converts an AnimationEvent's elapsedTime value to an equivalent TimeStamp
+  // that can be used to sort events by when they occurred.
+  TimeStamp ElapsedTimeToTimeStamp(const StickyTimeDuration& aElapsedTime) const;
+
   bool IsPausedOrPausing() const
   {
     return PlayState() == AnimationPlayState::Paused ||
            mPendingState == PendingState::PausePending;
   }
 
-  bool HasInPlayEffect() const
-  {
-    return GetEffect() && GetEffect()->IsInPlay();
-  }
   bool HasCurrentEffect() const
   {
     return GetEffect() && GetEffect()->IsCurrent();
@@ -261,21 +275,22 @@ public:
   }
 
   /**
-   * "Playing" is different to "running". An animation in its delay phase is
-   * still running but we only consider it playing when it is in its active
-   * interval. This definition is used for fetching the animations that are
-   * candidates for running on the compositor (since we don't ship animations
-   * to the compositor when they are in their delay phase or paused including
-   * being effectively paused due to having a zero playback rate).
+   * Returns true if this animation's playback state makes it a candidate for
+   * running on the compositor.
+   * We send animations to the compositor when their target effect is 'current'
+   * (a definition that is roughly equivalent to when they are in their before
+   * or active phase). However, we don't send animations to the compositor when
+   * they are paused/pausing (including being effectively paused due to
+   * having a zero playback rate), have a zero-duration active interval, or have
+   * no target effect at all.
    */
-  bool IsPlaying() const
+  bool IsPlayableOnCompositor() const
   {
-    // We need to have an effect in its active interval, and
-    // be either running or waiting to run with a non-zero playback rate.
-    return HasInPlayEffect() &&
+    return HasCurrentEffect() &&
            mPlaybackRate != 0.0 &&
            (PlayState() == AnimationPlayState::Running ||
-            mPendingState == PendingState::PlayPending);
+            mPendingState == PendingState::PlayPending) &&
+           !GetEffect()->IsActiveDurationZero();
   }
   bool IsRelevant() const { return mIsRelevant; }
   void UpdateRelevance();
@@ -283,7 +298,16 @@ public:
   /**
    * Returns true if this Animation has a lower composite order than aOther.
    */
-  virtual bool HasLowerCompositeOrderThan(const Animation& aOther) const;
+  bool HasLowerCompositeOrderThan(const Animation& aOther) const;
+
+   /**
+   * Returns the level at which the effect(s) associated with this Animation
+   * are applied to the CSS cascade.
+   */
+  virtual EffectCompositor::CascadeLevel CascadeLevel() const
+  {
+    return EffectCompositor::CascadeLevel::Animations;
+  }
 
   /**
    * Returns true if this animation does not currently need to update
@@ -294,26 +318,20 @@ public:
   /**
    * Updates |aStyleRule| with the animation values of this animation's effect,
    * if any.
-   * Any properties already contained in |aSetProperties| are not changed. Any
-   * properties that are changed are added to |aSetProperties|.
-   * |aStyleChanging| will be set to true if this animation expects to update
-   * the style rule on the next refresh driver tick as well (because it
-   * is running and has an effect to sample).
+   * Any properties contained in |aPropertiesToSkip| will not be added or
+   * updated in |aStyleRule|.
    */
   void ComposeStyle(RefPtr<AnimValuesStyleRule>& aStyleRule,
-                    nsCSSPropertySet& aSetProperties,
-                    bool& aStyleChanging);
+                    const nsCSSPropertyIDSet& aPropertiesToSkip);
 
   void NotifyEffectTimingUpdated();
-
-  AnimationCollection* GetCollection() const;
 
 protected:
   void SilentlySetCurrentTime(const TimeDuration& aNewCurrentTime);
   void SilentlySetPlaybackRate(double aPlaybackRate);
-  void DoCancel();
-  void DoPlay(ErrorResult& aRv, LimitBehavior aLimitBehavior);
-  void DoPause(ErrorResult& aRv);
+  void CancelNoUpdate();
+  void PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior);
+  void PauseNoUpdate(ErrorResult& aRv);
   void ResumeAt(const TimeDuration& aReadyTime);
   void PauseAt(const TimeDuration& aReadyTime);
   void FinishPendingAt(const TimeDuration& aReadyTime)
@@ -361,15 +379,19 @@ protected:
    */
   void CancelPendingTasks();
 
+  /**
+   * Performs the same steps as CancelPendingTasks and also rejects and
+   * recreates the ready promise if the animation was pending.
+   */
+  void ResetPendingTasks();
+
   bool IsPossiblyOrphanedPendingAnimation() const;
   StickyTimeDuration EffectEnd() const;
 
   nsIDocument* GetRenderedDocument() const;
-  nsPresContext* GetPresContext() const;
-  virtual CommonAnimationManager* GetAnimationManager() const = 0;
 
   RefPtr<AnimationTimeline> mTimeline;
-  RefPtr<KeyframeEffectReadOnly> mEffect;
+  RefPtr<AnimationEffectReadOnly> mEffect;
   // The beginning of the delay period.
   Nullable<TimeDuration> mStartTime; // Timeline timescale
   Nullable<TimeDuration> mHoldTime;  // Animation timescale
@@ -421,6 +443,8 @@ protected:
   // in that case mFinished is immediately reset to represent a new current
   // finished promise.
   bool mFinishedIsResolved;
+
+  nsString mId;
 };
 
 } // namespace dom

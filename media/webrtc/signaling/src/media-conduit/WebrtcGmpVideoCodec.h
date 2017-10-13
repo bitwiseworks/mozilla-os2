@@ -76,7 +76,7 @@ class WebrtcGmpPCHandleSetter
     static std::string sCurrentHandle;
 };
 
-class GmpInitDoneRunnable : public nsRunnable
+class GmpInitDoneRunnable : public Runnable
 {
   public:
     explicit GmpInitDoneRunnable(const std::string& aPCHandle) :
@@ -85,7 +85,7 @@ class GmpInitDoneRunnable : public nsRunnable
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       if (mResult == WEBRTC_VIDEO_CODEC_OK) {
         // Might be useful to notify the PeerConnection about successful init
@@ -133,7 +133,7 @@ public:
 
   // Implement VideoEncoder interface, sort of.
   // (We cannot use |Release|, since that's needed for nsRefPtr)
-  virtual const uint64_t PluginID()
+  virtual uint64_t PluginID() const
   {
     return mCachedPluginId;
   }
@@ -275,6 +275,7 @@ private:
   GMPVideoHost* mHost;
   GMPVideoCodec mCodecParams;
   uint32_t mMaxPayloadSize;
+  webrtc::CodecSpecificInfo mCodecSpecificInfo;
   // Protects mCallback
   Mutex mCallbackMutex;
   webrtc::EncodedImageCallback* mCallback;
@@ -300,7 +301,7 @@ class WebrtcVideoEncoderProxy : public WebrtcVideoEncoder
       RegisterEncodeCompleteCallback(nullptr);
     }
 
-    const uint64_t PluginID() override
+    uint64_t PluginID() const override
     {
       return mEncoderImpl->PluginID();
     }
@@ -359,7 +360,7 @@ public:
 
   // Implement VideoEncoder interface, sort of.
   // (We cannot use |Release|, since that's needed for nsRefPtr)
-  virtual const uint64_t PluginID()
+  virtual uint64_t PluginID() const
   {
     return mCachedPluginId;
   }
@@ -477,7 +478,7 @@ class WebrtcVideoDecoderProxy : public WebrtcVideoDecoder
       RegisterDecodeCompleteCallback(nullptr);
     }
 
-    const uint64_t PluginID() override
+    uint64_t PluginID() const override
     {
       return mDecoderImpl->PluginID();
     }

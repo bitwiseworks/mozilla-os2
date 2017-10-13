@@ -332,14 +332,14 @@ class JarReader(object):
     Class with methods to read Jar files. Can open standard jar files as well
     as Mozilla jar files (see further details in the JarWriter documentation).
     '''
-    def __init__(self, file=None, fileobj=None):
+    def __init__(self, file=None, fileobj=None, data=None):
         '''
         Opens the given file as a Jar archive. Use the given file-like object
         if one is given instead of opening the given file name.
         '''
         if fileobj:
             data = fileobj.read()
-        else:
+        elif file:
             data = open(file, 'rb').read()
         self._data = memoryview(data)
         # The End of Central Directory Record has a variable size because of
@@ -570,7 +570,7 @@ class JarWriter(object):
         self._data.write(end.serialize())
         self._data.close()
 
-    def add(self, name, data, compress=None, mode=None):
+    def add(self, name, data, compress=None, mode=None, skip_duplicates=False):
         '''
         Add a new member to the jar archive, with the given name and the given
         data.
@@ -582,13 +582,15 @@ class JarWriter(object):
         than the uncompressed size.
         The mode option gives the unix permissions that should be stored
         for the jar entry.
+        If a duplicated member is found skip_duplicates will prevent raising
+        an exception if set to True.
         The given data may be a buffer, a file-like instance, a Deflater or a
         JarFileReader instance. The latter two allow to avoid uncompressing
         data to recompress it.
         '''
         name = mozpath.normsep(name)
 
-        if name in self._contents:
+        if name in self._contents and not skip_duplicates:
             raise JarWriterError("File %s already in JarWriter" % name)
         if compress is None:
             compress = self._compress
@@ -600,7 +602,8 @@ class JarWriter(object):
             if isinstance(data, basestring):
                 deflater.write(data)
             elif hasattr(data, 'read'):
-                data.seek(0)
+                if hasattr(data, 'seek'):
+                    data.seek(0)
                 deflater.write(data.read())
             else:
                 raise JarWriterError("Don't know how to handle %s" %

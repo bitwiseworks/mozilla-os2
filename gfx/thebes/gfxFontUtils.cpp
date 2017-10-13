@@ -14,7 +14,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/BinarySearch.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #include "nsCOMPtr.h"
 #include "nsIUUIDGenerator.h"
@@ -66,8 +66,10 @@ gfxSparseBitSet::Dump(const char* aPrefix, eGfxLog aWhichLog) const
     uint32_t b, numBlocks = mBlocks.Length();
 
     for (b = 0; b < numBlocks; b++) {
-        Block *block = mBlocks[b];
-        if (!block) continue;
+        Block *block = mBlocks[b].get();
+        if (!block) {
+            continue;
+        }
         const int BUFSIZE = 256;
         char outStr[BUFSIZE];
         int index = 0;
@@ -377,9 +379,8 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
     return NS_OK;
 }
 
-// Windows requires fonts to have a format-4 cmap with a Microsoft ID (3).  On the Mac, fonts either have
-// a format-4 cmap with Microsoft platform/encoding id or they have one with a platformID == Unicode (0)
-// For fonts with two format-4 tables, the first one (Unicode platform) is preferred on the Mac.
+// For fonts with two format-4 tables, the first one (Unicode platform) is preferred on the Mac;
+// on other platforms we allow the Microsoft-platform subtable to replace it.
 
 #if defined(XP_MACOSX)
     #define acceptableFormat4(p,e,k) (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft && !(k)) || \
@@ -388,9 +389,10 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
     #define acceptableUCS4Encoding(p, e, k) \
         (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDUCS4ForMicrosoftPlatform) && (k) != 12 || \
          ((p) == PLATFORM_ID_UNICODE   && \
-          ((e) == EncodingIDDefaultForUnicodePlatform || (e) >= EncodingIDUCS4ForUnicodePlatform)))
+          ((e) != EncodingIDUVSForUnicodePlatform)))
 #else
-    #define acceptableFormat4(p,e,k) ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft)
+    #define acceptableFormat4(p,e,k) (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft) || \
+                                      ((p) == PLATFORM_ID_UNICODE))
 
     #define acceptableUCS4Encoding(p, e, k) \
         ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDUCS4ForMicrosoftPlatform)
@@ -884,7 +886,7 @@ nsresult gfxFontUtils::MakeUniqueUserFontName(nsAString& aName)
             *p = '-';
     }
 
-    aName.AssignLiteral(MOZ_UTF16("uf"));
+    aName.AssignLiteral(u"uf");
     aName.AppendASCII(guidB64);
     return NS_OK;
 }
@@ -916,16 +918,18 @@ IsValidSFNTVersion(uint32_t version)
            version == TRUETYPE_TAG('t','r','u','e');
 }
 
-// copy and swap UTF-16 values, assume no surrogate pairs, can be in place
+// Copy and swap UTF-16 values, assume no surrogate pairs, can be in place.
+// aInBuf and aOutBuf are NOT necessarily 16-bit-aligned, so we should avoid
+// accessing them directly as uint16_t* values.
+// aLen is count of UTF-16 values, so the byte buffers are twice that.
 static void
-CopySwapUTF16(const uint16_t *aInBuf, uint16_t *aOutBuf, uint32_t aLen)
+CopySwapUTF16(const char* aInBuf, char* aOutBuf, uint32_t aLen)
 {
-    const uint16_t *end = aInBuf + aLen;
+    const char* end = aInBuf + aLen * 2;
     while (aInBuf < end) {
-        uint16_t value = *aInBuf;
-        *aOutBuf = (value >> 8) | (value & 0xff) << 8;
-        aOutBuf++;
-        aInBuf++;
+        uint8_t b0 = *aInBuf++;
+        *aOutBuf++ = *aInBuf++;
+        *aOutBuf++ = b0;
     }
 }
 
@@ -960,6 +964,41 @@ gfxFontUtils::DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontData
     return GFX_USERFONT_UNKNOWN;
 }
 
+static int
+DirEntryCmp(const void* aKey, const void* aItem)
+{
+    int32_t tag = *static_cast<const int32_t*>(aKey);
+    const TableDirEntry* entry = static_cast<const TableDirEntry*>(aItem);
+    return tag - int32_t(entry->tag);
+}
+
+/* static */
+TableDirEntry*
+gfxFontUtils::FindTableDirEntry(const void* aFontData, uint32_t aTableTag)
+{
+    const SFNTHeader* header =
+        reinterpret_cast<const SFNTHeader*>(aFontData);
+    const TableDirEntry* dir =
+        reinterpret_cast<const TableDirEntry*>(header + 1);
+    return static_cast<TableDirEntry*>
+        (bsearch(&aTableTag, dir, uint16_t(header->numTables),
+                 sizeof(TableDirEntry), DirEntryCmp));
+}
+
+/* static */
+hb_blob_t*
+gfxFontUtils::GetTableFromFontData(const void* aFontData, uint32_t aTableTag)
+{
+    const TableDirEntry* dir = FindTableDirEntry(aFontData, aTableTag);
+    if (dir) {
+        return hb_blob_create(reinterpret_cast<const char*>(aFontData) +
+                                  dir->offset, dir->length,
+                              HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+
+    }
+    return nullptr;
+}
+
 nsresult
 gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData, 
                          uint32_t aFontDataLength, FallibleTArray<uint8_t> *aNewFont)
@@ -979,7 +1018,12 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
     uint16_t nameCount = ArrayLength(neededNameIDs);
 
     // leave room for null-terminator
-    uint16_t nameStrLength = (aName.Length() + 1) * sizeof(char16_t); 
+    uint32_t nameStrLength = (aName.Length() + 1) * sizeof(char16_t);
+    if (nameStrLength > 65535) {
+        // The name length _in bytes_ must fit in an unsigned short field;
+        // therefore, a name longer than this cannot be used.
+        return NS_ERROR_FAILURE;
+    }
 
     // round name table size up to 4-byte multiple
     uint32_t nameTableSize = (sizeof(NameHeader) +
@@ -1043,21 +1087,14 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
     SFNTHeader *sfntHeader = reinterpret_cast<SFNTHeader*>(newFontData);
 
     // table directory entries begin immediately following SFNT header
-    TableDirEntry *dirEntry = 
-        reinterpret_cast<TableDirEntry*>(newFontData + sizeof(SFNTHeader));
+    TableDirEntry *dirEntry =
+        FindTableDirEntry(newFontData, TRUETYPE_TAG('n','a','m','e'));
+    // function only called if font validates, so this should always be true
+    MOZ_ASSERT(dirEntry, "attempt to rename font with no name table");
 
     uint32_t numTables = sfntHeader->numTables;
     
-    for (i = 0; i < numTables; i++, dirEntry++) {
-        if (dirEntry->tag == TRUETYPE_TAG('n','a','m','e')) {
-            break;
-        }
-    }
-    
-    // function only called if font validates, so this should always be true
-    NS_ASSERTION(i < numTables, "attempt to rename font with no name table");
-
-    // note: dirEntry now points to name record
+    // note: dirEntry now points to 'name' table record
     
     // recalculate name table checksum
     uint32_t checkSum = 0;
@@ -1114,25 +1151,11 @@ gfxFontUtils::GetFullNameFromSFNT(const uint8_t* aFontData, uint32_t aLength,
 {
     aFullName.AssignLiteral("(MISSING NAME)"); // should always get replaced
 
-    NS_ENSURE_TRUE(aLength >= sizeof(SFNTHeader), NS_ERROR_UNEXPECTED);
-    const SFNTHeader *sfntHeader =
-        reinterpret_cast<const SFNTHeader*>(aFontData);
     const TableDirEntry *dirEntry =
-        reinterpret_cast<const TableDirEntry*>(aFontData + sizeof(SFNTHeader));
-    uint32_t numTables = sfntHeader->numTables;
-    NS_ENSURE_TRUE(aLength >=
-                   sizeof(SFNTHeader) + numTables * sizeof(TableDirEntry),
-                   NS_ERROR_UNEXPECTED);
-    bool foundName = false;
-    for (uint32_t i = 0; i < numTables; i++, dirEntry++) {
-        if (dirEntry->tag == TRUETYPE_TAG('n','a','m','e')) {
-            foundName = true;
-            break;
-        }
-    }
+        FindTableDirEntry(aFontData, TRUETYPE_TAG('n','a','m','e'));
     
     // should never fail, as we're only called after font validation succeeded
-    NS_ENSURE_TRUE(foundName, NS_ERROR_NOT_AVAILABLE);
+    NS_ENSURE_TRUE(dirEntry, NS_ERROR_NOT_AVAILABLE);
 
     uint32_t len = dirEntry->length;
     NS_ENSURE_TRUE(aLength > len && aLength - len >= dirEntry->offset,
@@ -1415,8 +1438,8 @@ gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
         char warnBuf[128];
         if (aByteLen > 64)
             aByteLen = 64;
-        snprintf_literal(warnBuf, "skipping font name, unknown charset %d:%d:%d for <%.*s>",
-                         aPlatformCode, aScriptCode, aLangCode, aByteLen, aNameData);
+        SprintfLiteral(warnBuf, "skipping font name, unknown charset %d:%d:%d for <%.*s>",
+                       aPlatformCode, aScriptCode, aLangCode, aByteLen, aNameData);
         NS_WARNING(warnBuf);
 #endif
         return false;
@@ -1425,13 +1448,13 @@ gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
     if (csName[0] == 0) {
         // empty charset name: data is utf16be, no need to instantiate a converter
         uint32_t strLen = aByteLen / 2;
-#ifdef IS_LITTLE_ENDIAN
         aName.SetLength(strLen);
-        CopySwapUTF16(reinterpret_cast<const uint16_t*>(aNameData),
-                      reinterpret_cast<uint16_t*>(aName.BeginWriting()), strLen);
+#ifdef IS_LITTLE_ENDIAN
+        CopySwapUTF16(aNameData, reinterpret_cast<char*>(aName.BeginWriting()),
+                      strLen);
 #else
-        aName.Assign(reinterpret_cast<const char16_t*>(aNameData), strLen);
-#endif    
+        memcpy(aName.BeginWriting(), aNameData, strLen * 2);
+#endif
         return true;
     }
 
@@ -1495,19 +1518,22 @@ gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
         uint32_t platformID;
 
         // skip over unwanted nameID's
-        if (uint32_t(nameRecord->nameID) != aNameID)
+        if (uint32_t(nameRecord->nameID) != aNameID) {
             continue;
+        }
 
         // skip over unwanted platform data
         platformID = nameRecord->platformID;
-        if (aPlatformID != PLATFORM_ALL
-            && uint32_t(nameRecord->platformID) != PLATFORM_ID)
+        if (aPlatformID != PLATFORM_ALL &&
+            platformID != uint32_t(aPlatformID)) {
             continue;
+        }
 
         // skip over unwanted languages
-        if (aLangID != LANG_ALL
-              && uint32_t(nameRecord->languageID) != uint32_t(aLangID))
+        if (aLangID != LANG_ALL &&
+            uint32_t(nameRecord->languageID) != uint32_t(aLangID)) {
             continue;
+        }
 
         // add name to names array
 
@@ -1667,7 +1693,8 @@ gfxFontUtils::ValidateColorGlyphs(hb_blob_t* aCOLR, hb_blob_t* aCPAL)
             reinterpret_cast<const uint8_t*>(colr) + offsetLayerRecord);
 
     for (uint16_t i = 0; i < numLayerRecords; i++, layer++) {
-        if (uint16_t(layer->paletteEntryIndex) >= numPaletteEntries) {
+        if (uint16_t(layer->paletteEntryIndex) >= numPaletteEntries &&
+            uint16_t(layer->paletteEntryIndex) != 0xFFFF) {
             // CPAL palette entry record is overflow
             return false;
         }
@@ -1711,6 +1738,7 @@ bool
 gfxFontUtils::GetColorGlyphLayers(hb_blob_t* aCOLR,
                                   hb_blob_t* aCPAL,
                                   uint32_t aGlyphId,
+                                  const mozilla::gfx::Color& aDefaultColor,
                                   nsTArray<uint16_t>& aGlyphs,
                                   nsTArray<mozilla::gfx::Color>& aColors)
 {
@@ -1742,15 +1770,19 @@ gfxFontUtils::GetColorGlyphLayers(hb_blob_t* aCOLR,
 
     for (uint16_t layerIndex = 0; layerIndex < numLayers; layerIndex++) {
         aGlyphs.AppendElement(uint16_t(layer->glyphId));
-        const CPALColorRecord* color =
-            reinterpret_cast<const CPALColorRecord*>(
-                reinterpret_cast<const uint8_t*>(cpal) +
-                offsetFirstColorRecord +
-                sizeof(CPALColorRecord) * uint16_t(layer->paletteEntryIndex));
-        aColors.AppendElement(mozilla::gfx::Color(color->red / 255.0,
-                                                  color->green / 255.0,
-                                                  color->blue / 255.0,
-                                                  color->alpha / 255.0));
+        if (uint16_t(layer->paletteEntryIndex) == 0xFFFF) {
+            aColors.AppendElement(aDefaultColor);
+        } else {
+            const CPALColorRecord* color =
+                reinterpret_cast<const CPALColorRecord*>(
+                    reinterpret_cast<const uint8_t*>(cpal) +
+                    offsetFirstColorRecord +
+                    sizeof(CPALColorRecord) * uint16_t(layer->paletteEntryIndex));
+            aColors.AppendElement(mozilla::gfx::Color(color->red / 255.0,
+                                                      color->green / 255.0,
+                                                      color->blue / 255.0,
+                                                      color->alpha / 255.0));
+        }
         layer++;
     }
     return true;
@@ -1770,3 +1802,8 @@ gfxFontUtils::IsCffFont(const uint8_t* aFontData)
 
 #endif
 
+#undef acceptablePlatform
+#undef isSymbol
+#undef isUVSEncoding
+#undef LOG
+#undef LOG_ENABLED

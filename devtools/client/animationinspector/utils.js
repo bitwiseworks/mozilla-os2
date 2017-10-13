@@ -6,26 +6,19 @@
 
 "use strict";
 
-const {Cu} = require("chrome");
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
-var {loader} = Cu.import("resource://devtools/shared/Loader.jsm");
-loader.lazyRequireGetter(this, "EventEmitter",
-                               "devtools/shared/event-emitter");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
+
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const L10N =
+      new LocalizationHelper("devtools/client/locales/animationinspector.properties");
 
 // How many times, maximum, can we loop before we find the optimal time
 // interval in the timeline graph.
 const OPTIMAL_TIME_INTERVAL_MAX_ITERS = 100;
-// Background time graduations should be multiple of this number of millis.
-const TIME_INTERVAL_MULTIPLE = 25;
-const TIME_INTERVAL_SCALES = 3;
-// The default minimum spacing between time graduations in px.
-const TIME_GRADUATION_MIN_SPACING = 10;
-// RGB color for the time interval background.
-const TIME_INTERVAL_COLOR = [128, 136, 144];
-// byte
-const TIME_INTERVAL_OPACITY_MIN = 32;
-// byte
-const TIME_INTERVAL_OPACITY_ADD = 32;
+// Time graduations should be multiple of one of these number.
+const OPTIMAL_TIME_INTERVAL_MULTIPLES = [1, 2.5, 5];
+
+const MILLIS_TIME_FORMAT_MAX_DURATION = 4000;
 
 /**
  * DOM node creation helper function.
@@ -35,6 +28,7 @@ const TIME_INTERVAL_OPACITY_ADD = 32;
  *   {attrName1:value1, attrName2: value2, ...}
  * - parent {DOMNode} Mandatory node to append the newly created node to.
  * - textContent {String} Optional text for the node.
+ * - namespace {String} Optional namespace
  * @return {DOMNode} The newly created node.
  */
 function createNode(options) {
@@ -43,7 +37,10 @@ function createNode(options) {
   }
 
   let type = options.nodeType || "div";
-  let node = options.parent.ownerDocument.createElement(type);
+  let node =
+    options.namespace
+    ? options.parent.ownerDocument.createElementNS(options.namespace, type)
+    : options.parent.ownerDocument.createElement(type);
 
   for (let name in options.attributes || {}) {
     let value = options.attributes[name];
@@ -61,122 +58,35 @@ function createNode(options) {
 exports.createNode = createNode;
 
 /**
- * Given a data-scale, draw the background for a graph (vertical lines) into a
- * canvas and set that canvas as an image-element with an ID that can be used
- * from CSS.
- * @param {Document} document The document where the image-element should be set.
- * @param {String} id The ID for the image-element.
- * @param {Number} graphWidth The width of the graph.
- * @param {Number} timeScale How many px is 1ms in the graph.
- */
-function drawGraphElementBackground(document, id, graphWidth, timeScale) {
-  let canvas = document.createElement("canvas");
-  let ctx = canvas.getContext("2d");
-
-  // Set the canvas width (as requested) and height (1px, repeated along the Y
-  // axis).
-  canvas.width = graphWidth;
-  canvas.height = 1;
-
-  // Create the image data array which will receive the pixels.
-  let imageData = ctx.createImageData(canvas.width, canvas.height);
-  let pixelArray = imageData.data;
-
-  let buf = new ArrayBuffer(pixelArray.length);
-  let view8bit = new Uint8ClampedArray(buf);
-  let view32bit = new Uint32Array(buf);
-
-  // Build new millisecond tick lines...
-  let [r, g, b] = TIME_INTERVAL_COLOR;
-  let alphaComponent = TIME_INTERVAL_OPACITY_MIN;
-  let interval = findOptimalTimeInterval(timeScale);
-
-  // Insert one pixel for each division on each scale.
-  for (let i = 1; i <= TIME_INTERVAL_SCALES; i++) {
-    let increment = interval * Math.pow(2, i);
-    for (let x = 0; x < canvas.width; x += increment) {
-      let position = x | 0;
-      view32bit[position] = (alphaComponent << 24) | (b << 16) | (g << 8) | r;
-    }
-    alphaComponent += TIME_INTERVAL_OPACITY_ADD;
-  }
-
-  // Flush the image data and cache the waterfall background.
-  pixelArray.set(view8bit);
-  ctx.putImageData(imageData, 0, 0);
-  document.mozSetImageElement(id, canvas);
-}
-
-exports.drawGraphElementBackground = drawGraphElementBackground;
-
-/**
  * Find the optimal interval between time graduations in the animation timeline
- * graph based on a time scale and a minimum spacing.
- * @param {Number} timeScale How many px is 1ms in the graph.
- * @param {Number} minSpacing The minimum spacing between 2 graduations,
- * defaults to TIME_GRADUATION_MIN_SPACING.
- * @return {Number} The optimal interval, in pixels.
+ * graph based on a minimum time interval
+ * @param {Number} minTimeInterval Minimum time in ms in one interval
+ * @return {Number} The optimal interval time in ms
  */
-function findOptimalTimeInterval(timeScale,
-                                 minSpacing=TIME_GRADUATION_MIN_SPACING) {
-  let timingStep = TIME_INTERVAL_MULTIPLE;
+function findOptimalTimeInterval(minTimeInterval) {
   let numIters = 0;
+  let multiplier = 1;
 
-  if (timeScale > minSpacing) {
-    return timeScale;
+  if (!minTimeInterval) {
+    return 0;
   }
 
+  let interval;
   while (true) {
-    let scaledStep = timeScale * timingStep;
+    for (let i = 0; i < OPTIMAL_TIME_INTERVAL_MULTIPLES.length; i++) {
+      interval = OPTIMAL_TIME_INTERVAL_MULTIPLES[i] * multiplier;
+      if (minTimeInterval <= interval) {
+        return interval;
+      }
+    }
     if (++numIters > OPTIMAL_TIME_INTERVAL_MAX_ITERS) {
-      return scaledStep;
+      return interval;
     }
-    if (scaledStep < minSpacing) {
-      timingStep *= 2;
-      continue;
-    }
-    return scaledStep;
+    multiplier *= 10;
   }
 }
 
 exports.findOptimalTimeInterval = findOptimalTimeInterval;
-
-/**
- * The TargetNodeHighlighter util is a helper for AnimationTargetNode components
- * that is used to lock the highlighter on animated nodes in the page.
- * It instantiates a new highlighter that is then shared amongst all instances
- * of AnimationTargetNode. This is useful because that means showing the
- * highlighter on one animated node will unhighlight the previously highlighted
- * one, but will not interfere with the default inspector highlighter.
- */
-var TargetNodeHighlighter = {
-  highlighter: null,
-  isShown: false,
-
-  highlight: Task.async(function*(animationTargetNode) {
-    if (!this.highlighter) {
-      let hUtils = animationTargetNode.inspector.toolbox.highlighterUtils;
-      this.highlighter = yield hUtils.getHighlighterByType("BoxModelHighlighter");
-    }
-
-    yield this.highlighter.show(animationTargetNode.nodeFront);
-    this.isShown = true;
-    this.emit("highlighted", animationTargetNode);
-  }),
-
-  unhighlight: Task.async(function*() {
-    if (!this.highlighter || !this.isShown) {
-      return;
-    }
-
-    yield this.highlighter.hide();
-    this.isShown = false;
-    this.emit("unhighlighted");
-  })
-};
-
-EventEmitter.decorate(TargetNodeHighlighter);
-exports.TargetNodeHighlighter = TargetNodeHighlighter;
 
 /**
  * Format a timestamp (in ms) as a mm:ss.mmm string.
@@ -195,10 +105,10 @@ function formatStopwatchTime(time) {
 
   let pad = (nb, max) => {
     if (nb < max) {
-      return new Array((max+"").length - (nb+"").length + 1).join("0") + nb;
+      return new Array((max + "").length - (nb + "").length + 1).join("0") + nb;
     }
     return nb;
-  }
+  };
 
   minutes = pad(minutes, 10);
   seconds = pad(seconds, 10);
@@ -208,3 +118,158 @@ function formatStopwatchTime(time) {
 }
 
 exports.formatStopwatchTime = formatStopwatchTime;
+
+/**
+ * The TimeScale helper object is used to know which size should something be
+ * displayed with in the animation panel, depending on the animations that are
+ * currently displayed.
+ * If there are 5 animations displayed, and the first one starts at 10000ms and
+ * the last one ends at 20000ms, then this helper can be used to convert any
+ * time in this range to a distance in pixels.
+ *
+ * For the helper to know how to convert, it needs to know all the animations.
+ * Whenever a new animation is added to the panel, addAnimation(state) should be
+ * called. reset() can be called to start over.
+ */
+var TimeScale = {
+  minStartTime: Infinity,
+  maxEndTime: 0,
+
+  /**
+   * Add a new animation to time scale.
+   * @param {Object} state A PlayerFront.state object.
+   */
+  addAnimation: function (state) {
+    let {previousStartTime, delay, duration, endDelay,
+         iterationCount, playbackRate} = state;
+
+    endDelay = typeof endDelay === "undefined" ? 0 : endDelay;
+    let toRate = v => v / playbackRate;
+    let minZero = v => Math.max(v, 0);
+    let rateRelativeDuration =
+      toRate(duration * (!iterationCount ? 1 : iterationCount));
+    // Negative-delayed animations have their startTimes set such that we would
+    // be displaying the delay outside the time window if we didn't take it into
+    // account here.
+    let relevantDelay = delay < 0 ? toRate(delay) : 0;
+    previousStartTime = previousStartTime || 0;
+
+    let startTime = toRate(minZero(delay)) +
+                    rateRelativeDuration +
+                    endDelay;
+    this.minStartTime = Math.min(
+      this.minStartTime,
+      previousStartTime +
+      relevantDelay +
+      Math.min(startTime, 0)
+    );
+    let length = toRate(delay) +
+                 rateRelativeDuration +
+                 toRate(minZero(endDelay));
+    let endTime = previousStartTime + length;
+    this.maxEndTime = Math.max(this.maxEndTime, endTime);
+  },
+
+  /**
+   * Reset the current time scale.
+   */
+  reset: function () {
+    this.minStartTime = Infinity;
+    this.maxEndTime = 0;
+  },
+
+  /**
+   * Convert a startTime to a distance in %, in the current time scale.
+   * @param {Number} time
+   * @return {Number}
+   */
+  startTimeToDistance: function (time) {
+    time -= this.minStartTime;
+    return this.durationToDistance(time);
+  },
+
+  /**
+   * Convert a duration to a distance in %, in the current time scale.
+   * @param {Number} time
+   * @return {Number}
+   */
+  durationToDistance: function (duration) {
+    return duration * 100 / this.getDuration();
+  },
+
+  /**
+   * Convert a distance in % to a time, in the current time scale.
+   * @param {Number} distance
+   * @return {Number}
+   */
+  distanceToTime: function (distance) {
+    return this.minStartTime + (this.getDuration() * distance / 100);
+  },
+
+  /**
+   * Convert a distance in % to a time, in the current time scale.
+   * The time will be relative to the current minimum start time.
+   * @param {Number} distance
+   * @return {Number}
+   */
+  distanceToRelativeTime: function (distance) {
+    let time = this.distanceToTime(distance);
+    return time - this.minStartTime;
+  },
+
+  /**
+   * Depending on the time scale, format the given time as milliseconds or
+   * seconds.
+   * @param {Number} time
+   * @return {String} The formatted time string.
+   */
+  formatTime: function (time) {
+    // Format in milliseconds if the total duration is short enough.
+    if (this.getDuration() <= MILLIS_TIME_FORMAT_MAX_DURATION) {
+      return L10N.getFormatStr("timeline.timeGraduationLabel", time.toFixed(0));
+    }
+
+    // Otherwise format in seconds.
+    return L10N.getFormatStr("player.timeLabel", (time / 1000).toFixed(1));
+  },
+
+  getDuration: function () {
+    return this.maxEndTime - this.minStartTime;
+  },
+
+  /**
+   * Given an animation, get the various dimensions (in %) useful to draw the
+   * animation in the timeline.
+   */
+  getAnimationDimensions: function ({state}) {
+    let start = state.previousStartTime || 0;
+    let duration = state.duration;
+    let rate = state.playbackRate;
+    let count = state.iterationCount;
+    let delay = state.delay || 0;
+    let endDelay = state.endDelay || 0;
+
+    // The start position.
+    let x = this.startTimeToDistance(start + (delay / rate));
+    // The width for a single iteration.
+    let w = this.durationToDistance(duration / rate);
+    // The width for all iterations.
+    let iterationW = w * (count || 1);
+    // The start position of the delay.
+    let delayX = delay < 0 ? x : this.startTimeToDistance(start);
+    // The width of the delay.
+    let delayW = this.durationToDistance(Math.abs(delay) / rate);
+    // The width of the delay if it is negative, 0 otherwise.
+    let negativeDelayW = delay < 0 ? delayW : 0;
+    // The width of the endDelay.
+    let endDelayW = this.durationToDistance(Math.abs(endDelay) / rate);
+    // The start position of the endDelay.
+    let endDelayX = endDelay < 0 ? x + iterationW - endDelayW
+                                 : x + iterationW;
+
+    return {x, w, iterationW, delayX, delayW, negativeDelayW,
+            endDelayX, endDelayW};
+  }
+};
+
+exports.TimeScale = TimeScale;

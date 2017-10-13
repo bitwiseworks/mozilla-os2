@@ -21,9 +21,6 @@ var security = {
   },
 
   _getSecurityInfo : function() {
-    const nsIX509Cert = Components.interfaces.nsIX509Cert;
-    const nsIX509CertDB = Components.interfaces.nsIX509CertDB;
-    const nsX509CertDB = "@mozilla.org/security/x509certdb;1";
     const nsISSLStatusProvider = Components.interfaces.nsISSLStatusProvider;
     const nsISSLStatus = Components.interfaces.nsISSLStatus;
 
@@ -65,7 +62,8 @@ var security = {
         isBroken : isBroken,
         isMixed : isMixed,
         isEV : isEV,
-        cert : cert
+        cert : cert,
+        certificateTransparency : undefined
       };
 
       var version;
@@ -90,23 +88,46 @@ var security = {
         case nsISSLStatus.TLS_VERSION_1_2:
           retval.version = "TLS 1.2"
           break;
+        case nsISSLStatus.TLS_VERSION_1_3:
+          retval.version = "TLS 1.3"
+          break;
+      }
+
+      // Select status text to display for Certificate Transparency.
+      switch (status.certificateTransparencyStatus) {
+        case nsISSLStatus.CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE:
+          // CT compliance checks were not performed,
+          // do not display any status text.
+          retval.certificateTransparency = null;
+          break;
+        case nsISSLStatus.CERTIFICATE_TRANSPARENCY_NONE:
+          retval.certificateTransparency = "None";
+          break;
+        case nsISSLStatus.CERTIFICATE_TRANSPARENCY_OK:
+          retval.certificateTransparency = "OK";
+          break;
+        case nsISSLStatus.CERTIFICATE_TRANSPARENCY_UNKNOWN_LOG:
+          retval.certificateTransparency = "UnknownLog";
+          break;
+        case nsISSLStatus.CERTIFICATE_TRANSPARENCY_INVALID:
+          retval.certificateTransparency = "Invalid";
+          break;
       }
 
       return retval;
-    } else {
-      return {
-        hostName : hostName,
-        cAName : "",
-        encryptionAlgorithm : "",
-        encryptionStrength : 0,
-        version: "",
-        isBroken : isBroken,
-        isMixed : isMixed,
-        isEV : isEV,
-        cert : null
-
-      };
     }
+    return {
+      hostName : hostName,
+      cAName : "",
+      encryptionAlgorithm : "",
+      encryptionStrength : 0,
+      version: "",
+      isBroken : isBroken,
+      isMixed : isMixed,
+      isEV : isEV,
+      cert : null,
+      certificateTransparency : null
+    };
   },
 
   // Find the secureBrowserUI object (if present)
@@ -127,7 +148,7 @@ var security = {
     // No mapping required
     return name;
   },
-  
+
   /**
    * Open the cookie manager window
    */
@@ -175,15 +196,13 @@ function securityOnLoad(uri, windowInfo) {
     document.getElementById("securityTab").hidden = true;
     return;
   }
-  else {
-    document.getElementById("securityTab").hidden = false;
-  }
+  document.getElementById("securityTab").hidden = false;
 
   const pageInfoBundle = document.getElementById("pageinfobundle");
 
   /* Set Identity section text */
   setText("security-identity-domain-value", info.hostName);
-  
+
   var owner, verifier;
   if (info.cert && !info.isBroken) {
     // Try to pull out meaningful values.  Technically these fields are optional
@@ -231,9 +250,9 @@ function securityOnLoad(uri, windowInfo) {
           hostHasCookies(uri) ? yesStr : noStr);
   setText("security-privacy-passwords-value",
           realmHasPasswords(uri) ? yesStr : noStr);
-  
+
   var visitCount = previousVisitCount(info.hostName);
-  if(visitCount > 1) {
+  if (visitCount > 1) {
     setText("security-privacy-history-value",
             pageInfoBundle.getFormattedString("securityNVisits", [visitCount.toLocaleString()]));
   }
@@ -242,7 +261,7 @@ function securityOnLoad(uri, windowInfo) {
             pageInfoBundle.getString("securityOneVisit"));
   }
   else {
-    setText("security-privacy-history-value", noStr);        
+    setText("security-privacy-history-value", noStr);
   }
 
   /* Set the Technical Detail section messages */
@@ -278,12 +297,22 @@ function securityOnLoad(uri, windowInfo) {
     if (info.hostName != null)
       msg1 = pkiBundle.getFormattedString("pageInfo_Privacy_None1", [info.hostName]);
     else
-      msg1 = pkiBundle.getString("pageInfo_Privacy_None3");
+      msg1 = pkiBundle.getString("pageInfo_Privacy_None4");
     msg2 = pkiBundle.getString("pageInfo_Privacy_None2");
   }
   setText("security-technical-shortform", hdr);
   setText("security-technical-longform1", msg1);
-  setText("security-technical-longform2", msg2); 
+  setText("security-technical-longform2", msg2);
+
+  const ctStatus =
+    document.getElementById("security-technical-certificate-transparency");
+  if (info.certificateTransparency) {
+    ctStatus.hidden = false;
+    ctStatus.value = pkiBundle.getString(
+      "pageInfo_CertificateTransparency_" + info.certificateTransparency);
+  } else {
+    ctStatus.hidden = true;
+  }
 }
 
 function setText(id, value)
@@ -338,13 +367,13 @@ function realmHasPasswords(uri) {
 function previousVisitCount(host, endTimeReference) {
   if (!host)
     return false;
-  
+
   var historyService = Components.classes["@mozilla.org/browser/nav-history-service;1"]
                                  .getService(Components.interfaces.nsINavHistoryService);
-    
+
   var options = historyService.getNewQueryOptions();
   options.resultType = options.RESULTS_AS_VISIT;
-  
+
   // Search for visits to this host before today
   var query = historyService.getNewQuery();
   query.endTimeReference = query.TIME_RELATIVE_TODAY;

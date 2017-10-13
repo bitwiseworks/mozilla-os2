@@ -106,6 +106,9 @@ class MultiLocaleBuild(LocalesMixin, MercurialScript):
                                               'upload-multi', 'summary'],
                                  require_config_file=require_config_file)
 
+    def query_l10n_env(self):
+        return self.query_env()
+
     def clobber(self):
         c = self.config
         if c['work_dir'] != '.':
@@ -153,7 +156,7 @@ class MultiLocaleBuild(LocalesMixin, MercurialScript):
             self.run_compare_locales(locale, halt_on_failure=True)
             command = 'make chrome-%s L10NBASEDIR=%s' % (locale, dirs['abs_l10n_dir'])
             if c['merge_locales']:
-                command += " LOCALE_MERGEDIR=%s" % dirs['abs_merge_dir']
+                command += " LOCALE_MERGEDIR=%s" % dirs['abs_merge_dir'].replace(os.sep, '/')
             status = self._process_command(command=command,
                                            cwd=dirs['abs_locales_dir'],
                                            error_list=MakefileErrorList)

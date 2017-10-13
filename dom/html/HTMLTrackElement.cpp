@@ -33,6 +33,7 @@
 #include "nsIObserver.h"
 #include "nsIStreamListener.h"
 #include "nsISupportsImpl.h"
+#include "nsISupportsPrimitives.h"
 #include "nsMappedAttributes.h"
 #include "nsNetUtil.h"
 #include "nsRuleData.h"
@@ -49,10 +50,6 @@ nsGenericHTMLElement*
 NS_NewHTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                        mozilla::dom::FromParser aFromParser)
 {
-  if (!mozilla::dom::HTMLTrackElement::IsWebVTTEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
-  }
-
   return new mozilla::dom::HTMLTrackElement(aNodeInfo);
 }
 
@@ -60,26 +57,91 @@ namespace mozilla {
 namespace dom {
 
 // Map html attribute string values to TextTrackKind enums.
-static MOZ_CONSTEXPR nsAttrValue::EnumTable kKindTable[] = {
+static constexpr nsAttrValue::EnumTable kKindTable[] = {
   { "subtitles", static_cast<int16_t>(TextTrackKind::Subtitles) },
   { "captions", static_cast<int16_t>(TextTrackKind::Captions) },
   { "descriptions", static_cast<int16_t>(TextTrackKind::Descriptions) },
   { "chapters", static_cast<int16_t>(TextTrackKind::Chapters) },
   { "metadata", static_cast<int16_t>(TextTrackKind::Metadata) },
-  { 0 }
+  { nullptr, 0 }
 };
 
-// The default value for kKindTable is "subtitles"
-static MOZ_CONSTEXPR const char* kKindTableDefaultString = kKindTable[0].tag;
+// Invalid values are treated as "metadata" in ParseAttribute, but if no value
+// at all is specified, it's treated as "subtitles" in GetKind
+static constexpr const nsAttrValue::EnumTable* kKindTableInvalidValueDefault = &kKindTable[4];
+
+class WindowDestroyObserver final : public nsIObserver
+{
+  NS_DECL_ISUPPORTS
+
+public:
+  explicit WindowDestroyObserver(HTMLTrackElement* aElement, uint64_t aWinID)
+    : mTrackElement(aElement)
+    , mInnerID(aWinID)
+  {
+    RegisterWindowDestroyObserver();
+  }
+  void RegisterWindowDestroyObserver()
+  {
+    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+    if (obs) {
+      obs->AddObserver(this, "inner-window-destroyed", false);
+    }
+  }
+  void UnRegisterWindowDestroyObserver()
+  {
+    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+    if (obs) {
+      obs->RemoveObserver(this, "inner-window-destroyed");
+    }
+    mTrackElement = nullptr;
+  }
+  NS_IMETHODIMP Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (strcmp(aTopic, "inner-window-destroyed") == 0) {
+      nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
+      NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
+      uint64_t innerID;
+      nsresult rv = wrapper->GetData(&innerID);
+      NS_ENSURE_SUCCESS(rv, rv);
+      if (innerID == mInnerID) {
+        if (mTrackElement) {
+          mTrackElement->NotifyShutdown();
+        }
+        UnRegisterWindowDestroyObserver();
+      }
+    }
+    return NS_OK;
+  }
+
+private:
+  ~WindowDestroyObserver() {};
+  HTMLTrackElement* mTrackElement;
+  uint64_t mInnerID;
+};
+NS_IMPL_ISUPPORTS(WindowDestroyObserver, nsIObserver);
 
 /** HTMLTrackElement */
 HTMLTrackElement::HTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
+  , mLoadResourceDispatched(false)
+  , mWindowDestroyObserver(nullptr)
 {
+  nsISupports* parentObject = OwnerDoc()->GetParentObject();
+  NS_ENSURE_TRUE_VOID(parentObject);
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(parentObject);
+  if (window) {
+    mWindowDestroyObserver = new WindowDestroyObserver(this, window->WindowID());
+  }
 }
 
 HTMLTrackElement::~HTMLTrackElement()
 {
+  if (mWindowDestroyObserver) {
+    mWindowDestroyObserver->UnRegisterWindowDestroyObserver();
+  }
+  NotifyShutdown();
 }
 
 NS_IMPL_ELEMENT_CLONE(HTMLTrackElement)
@@ -96,7 +158,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 void
 HTMLTrackElement::GetKind(DOMString& aKind) const
 {
-  GetEnumAttr(nsGkAtoms::kind, kKindTableDefaultString, aKind);
+  GetEnumAttr(nsGkAtoms::kind, kKindTable[0].tag, aKind);
 }
 
 void
@@ -112,13 +174,6 @@ JSObject*
 HTMLTrackElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   return HTMLTrackElementBinding::Wrap(aCx, this, aGivenProto);
-}
-
-bool
-HTMLTrackElement::IsWebVTTEnabled()
-{
-  // Our callee does not use its arguments.
-  return HTMLTrackElementBinding::ConstructorEnabled(nullptr, nullptr);
 }
 
 TextTrack*
@@ -150,7 +205,7 @@ HTMLTrackElement::CreateTextTrack()
 
   NS_ENSURE_TRUE_VOID(parentObject);
 
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(parentObject);
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(parentObject);
   mTrack = new TextTrack(window, kind, label, srcLang,
                          TextTrackMode::Disabled,
                          TextTrackReadyState::NotLoaded,
@@ -170,7 +225,8 @@ HTMLTrackElement::ParseAttribute(int32_t aNamespaceID,
 {
   if (aNamespaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::kind) {
     // Case-insensitive lookup, with the first element as the default.
-    return aResult.ParseEnumValue(aValue, kKindTable, false, kKindTable);
+    return aResult.ParseEnumValue(aValue, kKindTable, false,
+                                  kKindTableInvalidValueDefault);
   }
 
   // Otherwise call the generic implementation.
@@ -181,8 +237,45 @@ HTMLTrackElement::ParseAttribute(int32_t aNamespaceID,
 }
 
 void
+HTMLTrackElement::SetSrc(const nsAString& aSrc, ErrorResult& aError)
+{
+  SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
+  uint16_t oldReadyState = ReadyState();
+  SetReadyState(TextTrackReadyState::NotLoaded);
+  if (!mMediaParent) {
+    return;
+  }
+  if (mTrack && (oldReadyState != TextTrackReadyState::NotLoaded)) {
+    // Remove all the cues in MediaElement.
+    mMediaParent->RemoveTextTrack(mTrack);
+    // Recreate mTrack.
+    CreateTextTrack();
+  }
+  // Stop WebVTTListener.
+  mListener = nullptr;
+  if (mChannel) {
+    mChannel->Cancel(NS_BINDING_ABORTED);
+    mChannel = nullptr;
+  }
+
+  DispatchLoadResource();
+}
+
+void
+HTMLTrackElement::DispatchLoadResource()
+{
+  if (!mLoadResourceDispatched) {
+    RefPtr<Runnable> r = NewRunnableMethod(this, &HTMLTrackElement::LoadResource);
+    nsContentUtils::RunInStableState(r.forget());
+    mLoadResourceDispatched = true;
+  }
+}
+
+void
 HTMLTrackElement::LoadResource()
 {
+  mLoadResourceDispatched = false;
+
   // Find our 'src' url
   nsAutoString src;
   if (!GetAttr(kNameSpaceID_None, nsGkAtoms::src, src)) {
@@ -198,13 +291,6 @@ HTMLTrackElement::LoadResource()
   if (mChannel) {
     mChannel->Cancel(NS_BINDING_ABORTED);
     mChannel = nullptr;
-  }
-
-  // We may already have a TextTrack at this point if GetTrack() has already
-  // been called. This happens, for instance, if script tries to get the
-  // TextTrack before its mTrackElement has been bound to the DOM tree.
-  if (!mTrack) {
-    CreateTextTrack();
   }
 
   // According to https://www.w3.org/TR/html5/embedded-content-0.html#sourcing-out-of-band-text-tracks
@@ -239,7 +325,9 @@ HTMLTrackElement::LoadResource()
                      static_cast<Element*>(this),
                      secFlags,
                      nsIContentPolicy::TYPE_INTERNAL_TRACK,
-                     loadGroup);
+                     loadGroup,
+                     nullptr,   // aCallbacks
+                     nsIRequest::LOAD_NORMAL | nsIChannel::LOAD_CLASSIFY_URI);
 
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
@@ -271,10 +359,6 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!aDocument) {
-    return NS_OK;
-  }
-
   LOG(LogLevel::Debug, ("Track Element bound to tree."));
   if (!aParent || !aParent->IsNodeOfType(nsINode::eMEDIA)) {
     return NS_OK;
@@ -284,13 +368,17 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
   if (!mMediaParent) {
     mMediaParent = static_cast<HTMLMediaElement*>(aParent);
 
-    HTMLMediaElement* media = static_cast<HTMLMediaElement*>(aParent);
     // TODO: separate notification for 'alternate' tracks?
-    media->NotifyAddedSource();
+    mMediaParent->NotifyAddedSource();
     LOG(LogLevel::Debug, ("Track element sent notification to parent."));
 
-    mMediaParent->RunInStableState(
-      NS_NewRunnableMethod(this, &HTMLTrackElement::LoadResource));
+    // We may already have a TextTrack at this point if GetTrack() has already
+    // been called. This happens, for instance, if script tries to get the
+    // TextTrack before its mTrackElement has been bound to the DOM tree.
+    if (!mTrack) {
+      CreateTextTrack();
+    }
+    DispatchLoadResource();
   }
 
   return NS_OK;
@@ -299,15 +387,13 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
 void
 HTMLTrackElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  if (mMediaParent) {
+  if (mMediaParent && aNullParent) {
     // mTrack can be null if HTMLTrackElement::LoadResource has never been
     // called.
     if (mTrack) {
       mMediaParent->RemoveTextTrack(mTrack);
     }
-    if (aNullParent) {
-      mMediaParent = nullptr;
-    }
+    mMediaParent = nullptr;
   }
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
@@ -326,6 +412,10 @@ HTMLTrackElement::ReadyState() const
 void
 HTMLTrackElement::SetReadyState(uint16_t aReadyState)
 {
+  if (ReadyState() == aReadyState) {
+    return;
+  }
+
   if (mTrack) {
     switch (aReadyState) {
       case TextTrackReadyState::Loaded:
@@ -343,7 +433,7 @@ void
 HTMLTrackElement::DispatchTrackRunnable(const nsString& aEventName)
 {
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg
+    NewRunnableMethod
       <const nsString>(this,
                        &HTMLTrackElement::DispatchTrustedEvent,
                        aEventName);
@@ -365,6 +455,16 @@ void
 HTMLTrackElement::DropChannel()
 {
   mChannel = nullptr;
+}
+
+void
+HTMLTrackElement::NotifyShutdown()
+{
+  if (mChannel) {
+    mChannel->Cancel(NS_BINDING_ABORTED);
+  }
+  mChannel = nullptr;
+  mListener = nullptr;
 }
 
 } // namespace dom

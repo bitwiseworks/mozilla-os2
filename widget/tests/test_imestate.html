@@ -5,7 +5,6 @@
           src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript"
           src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js"></script>
   <script type="text/javascript" src="utils.js"></script>
   <link rel="stylesheet" type="text/css"
           href="chrome://mochikit/content/tests/SimpleTest/test.css" />
@@ -1231,6 +1230,9 @@ function runEditorFlagChangeTests()
   var description = "runEditorFlagChangeTests: ";
 
   var container = document.getElementById("display");
+
+  // Reset selection from previous tests.
+  window.getSelection().collapse(container, 0);
 
   // the editor has focus directly.
   container.setAttribute("contenteditable", "true");

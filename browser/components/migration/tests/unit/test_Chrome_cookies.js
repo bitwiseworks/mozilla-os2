@@ -1,3 +1,5 @@
+"use strict";
+
 Cu.import("resource://gre/modules/ForgetAboutSite.jsm");
 
 add_task(function* () {
@@ -34,7 +36,7 @@ add_task(function* () {
                "Migrated the expected number of encrypted cookies");
 
   // Now check the cookie details.
-  let enumerator = Services.cookies.getCookiesFromHost(COOKIE.host);
+  let enumerator = Services.cookies.getCookiesFromHost(COOKIE.host, {});
   Assert.ok(enumerator.hasMoreElements(), "Cookies available");
   let foundCookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
 
@@ -46,5 +48,4 @@ add_task(function* () {
   ForgetAboutSite.removeDataFromDomain(COOKIE.host);
   Assert.equal(Services.cookies.countCookiesFromHost(COOKIE.host), 0,
                "There are no cookies after cleanup");
-
 });

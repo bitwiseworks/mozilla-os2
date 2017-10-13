@@ -26,18 +26,12 @@ static std::string getId(const char *bin_name)
   using namespace google_breakpad;
   using namespace std;
 
-  uint8_t identifier[kMDGUIDSize];
-  char id_str[37]; // magic number from file_id.h
+  PageAllocator allocator;
+  auto_wasteful_vector<uint8_t, sizeof(MDGUID)> identifier(&allocator);
 
   FileID file_id(bin_name);
   if (file_id.ElfFileIdentifier(identifier)) {
-    FileID::ConvertIdentifierToString(identifier, id_str, ARRAY_SIZE(id_str));
-    // ConvertIdentifierToString converts the identifier to a string with
-    // some dashes (don't ask me why), but we need it raw, so remove the dashes.
-    char *id_end = remove(id_str, id_str + strlen(id_str), '-');
-    // Also add an extra "0" by the end.  google-breakpad does it for
-    // consistency with PDB files so we need to do too.
-    return string(id_str, id_end) + '0';
+    return FileID::ConvertIdentifierToUUIDString(identifier) + "0";
   }
 
   return "";
@@ -63,7 +57,8 @@ int dl_iterate_phdr(
           void *data);
 #endif
 
-int dl_iterate_callback(struct dl_phdr_info *dl_info, size_t size, void *data)
+static int
+dl_iterate_callback(struct dl_phdr_info *dl_info, size_t size, void *data)
 {
   SharedLibraryInfo& info = *reinterpret_cast<SharedLibraryInfo*>(data);
 
@@ -90,7 +85,8 @@ int dl_iterate_callback(struct dl_phdr_info *dl_info, size_t size, void *data)
 
   return 0;
 }
-#endif
+
+#endif // !MOZ_WIDGET_GONK
 
 SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
 {
@@ -105,13 +101,12 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
     // not call it.
     return info;
   }
-#endif
-  dl_iterate_phdr(dl_iterate_callback, &info);
-#ifndef ANDROID
-  return info;
-#endif
-#endif
+#endif // ANDROID
 
+  dl_iterate_phdr(dl_iterate_callback, &info);
+#endif // !MOZ_WIDGET_GONK
+
+#if defined(ANDROID) || defined(MOZ_WIDGET_GONK)
   pid_t pid = getpid();
   char path[PATH_MAX];
   snprintf(path, PATH_MAX, "/proc/%d/maps", pid);
@@ -158,5 +153,7 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
     }
     count++;
   }
+#endif // ANDROID || MOZ_WIDGET_GONK
+
   return info;
 }

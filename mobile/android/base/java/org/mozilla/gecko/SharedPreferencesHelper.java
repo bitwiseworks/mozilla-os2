@@ -64,7 +64,7 @@ public final class SharedPreferencesHelper
 
         mListeners = new HashMap<String, SharedPreferences.OnSharedPreferenceChangeListener>();
 
-        EventDispatcher dispatcher = EventDispatcher.getInstance();
+        EventDispatcher dispatcher = GeckoApp.getEventDispatcher();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
@@ -76,7 +76,7 @@ public final class SharedPreferencesHelper
     }
 
     public synchronized void uninit() {
-        EventDispatcher dispatcher = EventDispatcher.getInstance();
+        EventDispatcher dispatcher = GeckoApp.getEventDispatcher();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
@@ -233,7 +233,7 @@ public final class SharedPreferencesHelper
                 // SharedPreferences instance.
                 msg.put("value", sharedPreferences.getAll().get(key));
 
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SharedPreferences:Changed", msg.toString()));
+                GeckoAppShell.notifyObservers("SharedPreferences:Changed", msg.toString());
             } catch (JSONException e) {
                 Log.e(LOGTAG, "Got exception creating JSON object", e);
                 return;

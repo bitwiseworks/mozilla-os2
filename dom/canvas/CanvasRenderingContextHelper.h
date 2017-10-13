@@ -7,6 +7,7 @@
 #define MOZILLA_DOM_CANVASRENDERINGCONTEXTHELPER_H_
 
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "nsSize.h"
 
 class nsICanvasRenderingContextInternal;
@@ -18,13 +19,15 @@ class ErrorResult;
 
 namespace dom {
 
-class FileCallback;
+class BlobCallback;
+class EncodeCompleteCallback;
 
 enum class CanvasContextType : uint8_t {
   NoContext,
   Canvas2D,
   WebGL1,
-  WebGL2
+  WebGL2,
+  ImageBitmap
 };
 
 /**
@@ -53,12 +56,20 @@ protected:
                                nsAString& outParams,
                                bool* const outCustomParseOptions);
 
-  void ToBlob(JSContext* aCx, nsIGlobalObject* global, FileCallback& aCallback,
+  void ToBlob(JSContext* aCx, nsIGlobalObject* global, BlobCallback& aCallback,
+              const nsAString& aType, JS::Handle<JS::Value> aParams,
+              ErrorResult& aRv);
+
+  void ToBlob(JSContext* aCx, nsIGlobalObject* aGlobal, EncodeCompleteCallback* aCallback,
               const nsAString& aType, JS::Handle<JS::Value> aParams,
               ErrorResult& aRv);
 
   virtual already_AddRefed<nsICanvasRenderingContextInternal>
   CreateContext(CanvasContextType aContextType);
+
+  already_AddRefed<nsICanvasRenderingContextInternal>
+  CreateContextHelper(CanvasContextType aContextType,
+                      layers::LayersBackend aCompositorBackend);
 
   virtual nsIntSize GetWidthHeight() = 0;
 

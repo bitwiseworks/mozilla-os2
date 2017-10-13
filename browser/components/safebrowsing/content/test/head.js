@@ -21,37 +21,35 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
  */
 function promiseTabLoadEvent(tab, url, eventType="load")
 {
-  let deferred = Promise.defer();
-  info("Wait tab event: " + eventType);
+  info(`Wait tab event: ${eventType}`);
 
-  function handle(event) {
-    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
-        event.target.location.href == "about:blank" ||
-        (url && event.target.location.href != url)) {
-      info("Skipping spurious '" + eventType + "'' event" +
-           " for " + event.target.location.href);
-      return;
+  function handle(loadedUrl) {
+    if (loadedUrl === "about:blank" || (url && loadedUrl !== url)) {
+      info(`Skipping spurious load event for ${loadedUrl}`);
+      return false;
     }
-    clearTimeout(timeout);
-    tab.linkedBrowser.removeEventListener(eventType, handle, true);
-    info("Tab event received: " + eventType);
-    deferred.resolve(event);
+
+    info("Tab event received: load");
+    return true;
   }
 
-  let timeout = setTimeout(() => {
-    tab.linkedBrowser.removeEventListener(eventType, handle, true);
-    deferred.reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
-  }, 30000);
-
-  tab.linkedBrowser.addEventListener(eventType, handle, true, true);
-  if (url) {
-    tab.linkedBrowser.loadURI(url);
+  let loaded;
+  if (eventType === "load") {
+    loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
+  } else {
+    // No need to use handle.
+    loaded =
+      BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, eventType,
+                                           true, undefined, true);
   }
-  return deferred.promise;
+
+  if (url)
+    BrowserTestUtils.loadURI(tab.linkedBrowser, url);
+
+  return loaded;
 }
 
-Services.prefs.setCharPref("urlclassifier.forbiddenTable", "test-forbid-simple");
 Services.prefs.setCharPref("urlclassifier.malwareTable", "test-malware-simple,test-unwanted-simple");
 Services.prefs.setCharPref("urlclassifier.phishTable", "test-phish-simple");
-Services.prefs.setBoolPref("browser.safebrowsing.forbiddenURIs.enabled", true);
+Services.prefs.setCharPref("urlclassifier.blockedTable", "test-block-simple");
 SafeBrowsing.init();

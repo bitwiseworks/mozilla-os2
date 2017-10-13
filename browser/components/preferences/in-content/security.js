@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
+ "resource://gre/modules/LoginHelper.jsm");
+
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 var gSecurityPane = {
@@ -20,6 +23,7 @@ var gSecurityPane = {
 
     this._pane = document.getElementById("paneSecurity");
     this._initMasterPasswordUI();
+    this._initSafeBrowsing();
 
     setEventListener("addonExceptions", "command",
       gSecurityPane.showAddonExceptions);
@@ -111,11 +115,10 @@ var gSecurityPane = {
       document.getElementById("savePasswords").disabled = true;
       excepts.disabled = true;
       return false;
-    } else {
-      excepts.disabled = !pref.value;
-      // don't override pref value in UI
-      return undefined;
     }
+    excepts.disabled = !pref.value;
+    // don't override pref value in UI
+    return undefined;
   },
 
   /**
@@ -124,7 +127,20 @@ var gSecurityPane = {
    */
   showPasswordExceptions: function ()
   {
-    gSubDialog.open("chrome://passwordmgr/content/passwordManagerExceptions.xul");
+    var bundlePrefs = document.getElementById("bundlePreferences");
+    var params = {
+      blockVisible: true,
+      sessionVisible: false,
+      allowVisible: false,
+      hideStatusColumn: true,
+      prefilledHost: "",
+      permissionType: "login-saving",
+      windowTitle: bundlePrefs.getString("savedLoginsExceptions_title"),
+      introText: bundlePrefs.getString("savedLoginsExceptions_desc")
+    };
+
+    gSubDialog.open("chrome://browser/content/preferences/permissions.xul",
+                    null, params);
   },
 
   /**
@@ -135,7 +151,7 @@ var gSecurityPane = {
    */
   _initMasterPasswordUI: function ()
   {
-    var noMP = !this._masterPasswordSet();
+    var noMP = !LoginHelper.isMasterPasswordSet();
 
     var button = document.getElementById("changeMasterPassword");
     button.disabled = noMP;
@@ -144,23 +160,77 @@ var gSecurityPane = {
     checkbox.checked = !noMP;
   },
 
-  /**
-   * Returns true if the user has a master password set and false otherwise.
-   */
-  _masterPasswordSet: function ()
-  {
-    var secmodDB = Cc["@mozilla.org/security/pkcs11moduledb;1"].
-                   getService(Ci.nsIPKCS11ModuleDB);
-    var slot = secmodDB.findSlotByName("");
-    if (slot) {
-      var status = slot.status;
-      var hasMP = status != Ci.nsIPKCS11Slot.SLOT_UNINITIALIZED &&
-                  status != Ci.nsIPKCS11Slot.SLOT_READY;
-      return hasMP;
-    } else {
-      // XXX I have no bloody idea what this means
-      return false;
+  _initSafeBrowsing() {
+    let enableSafeBrowsing = document.getElementById("enableSafeBrowsing");
+    let blockDownloads = document.getElementById("blockDownloads");
+    let blockUncommonUnwanted = document.getElementById("blockUncommonUnwanted");
+
+    let safeBrowsingPhishingPref = document.getElementById("browser.safebrowsing.phishing.enabled");
+    let safeBrowsingMalwarePref = document.getElementById("browser.safebrowsing.malware.enabled");
+
+    let blockDownloadsPref = document.getElementById("browser.safebrowsing.downloads.enabled");
+    let malwareTable = document.getElementById("urlclassifier.malwareTable");
+
+    let blockUnwantedPref = document.getElementById("browser.safebrowsing.downloads.remote.block_potentially_unwanted");
+    let blockUncommonPref = document.getElementById("browser.safebrowsing.downloads.remote.block_uncommon");
+
+    enableSafeBrowsing.addEventListener("command", function() {
+      safeBrowsingPhishingPref.value = enableSafeBrowsing.checked;
+      safeBrowsingMalwarePref.value = enableSafeBrowsing.checked;
+
+      if (enableSafeBrowsing.checked) {
+        blockDownloads.removeAttribute("disabled");
+        if (blockDownloads.checked) {
+          blockUncommonUnwanted.removeAttribute("disabled");
+        }
+      } else {
+        blockDownloads.setAttribute("disabled", "true");
+        blockUncommonUnwanted.setAttribute("disabled", "true");
+      }
+    });
+
+    blockDownloads.addEventListener("command", function() {
+      blockDownloadsPref.value = blockDownloads.checked;
+      if (blockDownloads.checked) {
+        blockUncommonUnwanted.removeAttribute("disabled");
+      } else {
+        blockUncommonUnwanted.setAttribute("disabled", "true");
+      }
+    });
+
+    blockUncommonUnwanted.addEventListener("command", function() {
+      blockUnwantedPref.value = blockUncommonUnwanted.checked;
+      blockUncommonPref.value = blockUncommonUnwanted.checked;
+
+      let malware = malwareTable.value
+        .split(",")
+        .filter(x => x !== "goog-unwanted-shavar" && x !== "test-unwanted-simple");
+
+      if (blockUncommonUnwanted.checked) {
+        malware.push("goog-unwanted-shavar");
+        malware.push("test-unwanted-simple");
+      }
+
+      // sort alphabetically to keep the pref consistent
+      malware.sort();
+
+      malwareTable.value = malware.join(",");
+    });
+
+    // set initial values
+
+    enableSafeBrowsing.checked = safeBrowsingPhishingPref.value && safeBrowsingMalwarePref.value;
+    if (!enableSafeBrowsing.checked) {
+      blockDownloads.setAttribute("disabled", "true");
+      blockUncommonUnwanted.setAttribute("disabled", "true");
     }
+
+    blockDownloads.checked = blockDownloadsPref.value;
+    if (!blockDownloadsPref.value) {
+      blockUncommonUnwanted.setAttribute("disabled", "true");
+    }
+
+    blockUncommonUnwanted.checked = blockUnwantedPref.value && blockUncommonPref.value;
   },
 
   /**

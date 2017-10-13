@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PrintDataUtils.h"
-#include "nsIPrintOptions.h"
 #include "nsIPrintSettings.h"
 #include "nsIServiceManager.h"
 #include "nsIWebBrowserPrint.h"
@@ -22,7 +21,7 @@ namespace embedding {
 
 NS_IMPL_ISUPPORTS(MockWebBrowserPrint, nsIWebBrowserPrint);
 
-MockWebBrowserPrint::MockWebBrowserPrint(PrintData aData)
+MockWebBrowserPrint::MockWebBrowserPrint(const PrintData &aData)
   : mData(aData)
 {
   MOZ_COUNT_CTOR(MockWebBrowserPrint);
@@ -46,7 +45,7 @@ MockWebBrowserPrint::GetCurrentPrintSettings(nsIPrintSettings **aCurrentPrintSet
 }
 
 NS_IMETHODIMP
-MockWebBrowserPrint::GetCurrentChildDOMWindow(nsIDOMWindow **aCurrentPrintSettings)
+MockWebBrowserPrint::GetCurrentChildDOMWindow(mozIDOMWindowProxy **aCurrentPrintSettings)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -106,7 +105,7 @@ MockWebBrowserPrint::Print(nsIPrintSettings* aThePrintSettings,
 
 NS_IMETHODIMP
 MockWebBrowserPrint::PrintPreview(nsIPrintSettings* aThePrintSettings,
-                                  nsIDOMWindow* aChildDOMWin,
+                                  mozIDOMWindowProxy* aChildDOMWin,
                                   nsIWebProgressListener* aWPListener)
 {
   return NS_ERROR_NOT_IMPLEMENTED;

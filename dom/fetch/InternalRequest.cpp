@@ -11,6 +11,7 @@
 #include "nsStreamUtils.h"
 
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/FetchTypes.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/workers/Workers.h"
 
@@ -18,17 +19,16 @@
 
 namespace mozilla {
 namespace dom {
-
 // The global is used to extract the principal.
 already_AddRefed<InternalRequest>
 InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal, ErrorResult& aRv) const
 {
-  RefPtr<InternalRequest> copy = new InternalRequest();
-  copy->mURL.Assign(mURL);
+  MOZ_RELEASE_ASSERT(!mURLList.IsEmpty(), "Internal Request's urlList should not be empty when copied from constructor.");
+  RefPtr<InternalRequest> copy = new InternalRequest(mURLList.LastElement(),
+                                                     mFragment);
   copy->SetMethod(mMethod);
   copy->mHeaders = new InternalHeaders(*mHeaders);
   copy->SetUnsafeRequest();
-
   copy->mBodyStream = mBodyStream;
   copy->mForceOriginHeader = true;
   // The "client" is not stored in our implementation. Fetch API users should
@@ -36,14 +36,20 @@ InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal, ErrorResult
   // mechanisms as appropriate.
   copy->mSameOriginDataURL = true;
   copy->mPreserveContentCodings = true;
-  // The default referrer is already about:client.
+  copy->mReferrer = mReferrer;
+  copy->mReferrerPolicy = mReferrerPolicy;
+  copy->mEnvironmentReferrerPolicy = mEnvironmentReferrerPolicy;
+  copy->mIntegrity = mIntegrity;
 
-  copy->mContentPolicyType = nsIContentPolicy::TYPE_FETCH;
+  copy->mContentPolicyType = mContentPolicyTypeOverridden ?
+                             mContentPolicyType :
+                             nsIContentPolicy::TYPE_FETCH;
   copy->mMode = mMode;
   copy->mCredentialsMode = mCredentialsMode;
   copy->mCacheMode = mCacheMode;
   copy->mRedirectMode = mRedirectMode;
   copy->mCreatedByFetchEvent = mCreatedByFetchEvent;
+  copy->mContentPolicyTypeOverridden = mContentPolicyTypeOverridden;
   return copy.forget();
 }
 
@@ -67,33 +73,117 @@ InternalRequest::Clone()
   if (replacementBody) {
     mBodyStream.swap(replacementBody);
   }
-
   return clone.forget();
 }
-
+InternalRequest::InternalRequest(const nsACString& aURL,
+                                 const nsACString& aFragment)
+  : mMethod("GET")
+  , mHeaders(new InternalHeaders(HeadersGuardEnum::None))
+  , mContentPolicyType(nsIContentPolicy::TYPE_FETCH)
+  , mReferrer(NS_LITERAL_STRING(kFETCH_CLIENT_REFERRER_STR))
+  , mReferrerPolicy(ReferrerPolicy::_empty)
+  , mEnvironmentReferrerPolicy(net::RP_Default)
+  , mMode(RequestMode::No_cors)
+  , mCredentialsMode(RequestCredentials::Omit)
+  , mResponseTainting(LoadTainting::Basic)
+  , mCacheMode(RequestCache::Default)
+  , mRedirectMode(RequestRedirect::Follow)
+  , mAuthenticationFlag(false)
+  , mForceOriginHeader(false)
+  , mPreserveContentCodings(false)
+    // FIXME(nsm): This should be false by default, but will lead to the
+    // algorithm never loading data: URLs right now. See Bug 1018872 about
+    // how certain contexts will override it to set it to true. Fetch
+    // specification does not handle this yet.
+  , mSameOriginDataURL(true)
+  , mSkipServiceWorker(false)
+  , mSynchronous(false)
+  , mUnsafeRequest(false)
+  , mUseURLCredentials(false)
+{
+  MOZ_ASSERT(!aURL.IsEmpty());
+  AddURL(aURL, aFragment);
+}
+InternalRequest::InternalRequest(const nsACString& aURL,
+                                 const nsACString& aFragment,
+                                 const nsACString& aMethod,
+                                 already_AddRefed<InternalHeaders> aHeaders,
+                                 RequestCache aCacheMode,
+                                 RequestMode aMode,
+                                 RequestRedirect aRequestRedirect,
+                                 RequestCredentials aRequestCredentials,
+                                 const nsAString& aReferrer,
+                                 ReferrerPolicy aReferrerPolicy,
+                                 nsContentPolicyType aContentPolicyType,
+                                 const nsAString& aIntegrity)
+  : mMethod(aMethod)
+  , mHeaders(aHeaders)
+  , mContentPolicyType(aContentPolicyType)
+  , mReferrer(aReferrer)
+  , mReferrerPolicy(aReferrerPolicy)
+  , mEnvironmentReferrerPolicy(net::RP_Default)
+  , mMode(aMode)
+  , mCredentialsMode(aRequestCredentials)
+  , mResponseTainting(LoadTainting::Basic)
+  , mCacheMode(aCacheMode)
+  , mRedirectMode(aRequestRedirect)
+  , mIntegrity(aIntegrity)
+  , mAuthenticationFlag(false)
+  , mForceOriginHeader(false)
+  , mPreserveContentCodings(false)
+    // FIXME See the above comment in the default constructor.
+  , mSameOriginDataURL(true)
+  , mSkipServiceWorker(false)
+  , mSynchronous(false)
+  , mUnsafeRequest(false)
+  , mUseURLCredentials(false)
+{
+  MOZ_ASSERT(!aURL.IsEmpty());
+  AddURL(aURL, aFragment);
+}
 InternalRequest::InternalRequest(const InternalRequest& aOther)
   : mMethod(aOther.mMethod)
-  , mURL(aOther.mURL)
+  , mURLList(aOther.mURLList)
   , mHeaders(new InternalHeaders(*aOther.mHeaders))
   , mContentPolicyType(aOther.mContentPolicyType)
   , mReferrer(aOther.mReferrer)
+  , mReferrerPolicy(aOther.mReferrerPolicy)
+  , mEnvironmentReferrerPolicy(aOther.mEnvironmentReferrerPolicy)
   , mMode(aOther.mMode)
   , mCredentialsMode(aOther.mCredentialsMode)
   , mResponseTainting(aOther.mResponseTainting)
   , mCacheMode(aOther.mCacheMode)
   , mRedirectMode(aOther.mRedirectMode)
+  , mIntegrity(aOther.mIntegrity)
+  , mFragment(aOther.mFragment)
   , mAuthenticationFlag(aOther.mAuthenticationFlag)
   , mForceOriginHeader(aOther.mForceOriginHeader)
   , mPreserveContentCodings(aOther.mPreserveContentCodings)
   , mSameOriginDataURL(aOther.mSameOriginDataURL)
-  , mSandboxedStorageAreaURLs(aOther.mSandboxedStorageAreaURLs)
   , mSkipServiceWorker(aOther.mSkipServiceWorker)
   , mSynchronous(aOther.mSynchronous)
   , mUnsafeRequest(aOther.mUnsafeRequest)
   , mUseURLCredentials(aOther.mUseURLCredentials)
   , mCreatedByFetchEvent(aOther.mCreatedByFetchEvent)
+  , mContentPolicyTypeOverridden(aOther.mContentPolicyTypeOverridden)
 {
   // NOTE: does not copy body stream... use the fallible Clone() for that
+}
+
+InternalRequest::InternalRequest(const IPCInternalRequest& aIPCRequest)
+  : mMethod(aIPCRequest.method())
+  , mURLList(aIPCRequest.urls())
+  , mHeaders(new InternalHeaders(aIPCRequest.headers(),
+                                 aIPCRequest.headersGuard()))
+  , mContentPolicyType(aIPCRequest.contentPolicyType())
+  , mReferrer(aIPCRequest.referrer())
+  , mReferrerPolicy(aIPCRequest.referrerPolicy())
+  , mMode(aIPCRequest.mode())
+  , mCredentialsMode(aIPCRequest.credentials())
+  , mCacheMode(aIPCRequest.requestCache())
+  , mRedirectMode(aIPCRequest.requestRedirect())
+{
+  MOZ_ASSERT(!mURLList.IsEmpty());
 }
 
 InternalRequest::~InternalRequest()
@@ -101,9 +191,35 @@ InternalRequest::~InternalRequest()
 }
 
 void
+InternalRequest::ToIPC(IPCInternalRequest* aIPCRequest)
+{
+  MOZ_ASSERT(aIPCRequest);
+  MOZ_ASSERT(!mURLList.IsEmpty());
+  aIPCRequest->urls() = mURLList;
+  aIPCRequest->method() = mMethod;
+
+  mHeaders->ToIPC(aIPCRequest->headers(), aIPCRequest->headersGuard());
+
+  aIPCRequest->referrer() = mReferrer;
+  aIPCRequest->referrerPolicy() = mReferrerPolicy;
+  aIPCRequest->mode() = mMode;
+  aIPCRequest->credentials() = mCredentialsMode;
+  aIPCRequest->contentPolicyType() = mContentPolicyType;
+  aIPCRequest->requestCache() = mCacheMode;
+  aIPCRequest->requestRedirect() = mRedirectMode;
+}
+
+void
 InternalRequest::SetContentPolicyType(nsContentPolicyType aContentPolicyType)
 {
   mContentPolicyType = aContentPolicyType;
+}
+
+void
+InternalRequest::OverrideContentPolicyType(nsContentPolicyType aContentPolicyType)
+{
+  SetContentPolicyType(aContentPolicyType);
+  mContentPolicyTypeOverridden = true;
 }
 
 /* static */
@@ -128,6 +244,7 @@ InternalRequest::MapContentPolicyTypeToRequestContext(nsContentPolicyType aConte
     break;
   case nsIContentPolicy::TYPE_INTERNAL_IMAGE:
   case nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD:
+  case nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON:
     context = RequestContext::Image;
     break;
   case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET:
@@ -274,21 +391,19 @@ InternalRequest::MapChannelToRequestMode(nsIChannel* aChannel)
   MOZ_ASSERT(aChannel);
 
   nsCOMPtr<nsILoadInfo> loadInfo;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aChannel->GetLoadInfo(getter_AddRefs(loadInfo))));
+  MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
 
-  // RequestMode deviates from our internal security mode for navigations.
-  // While navigations normally allow cross origin we must set a same-origin
-  // RequestMode to get the correct service worker interception restrictions
-  // in place.
-  // TODO: remove the worker override once securityMode is fully implemented (bug 1189945)
   nsContentPolicyType contentPolicy = loadInfo->InternalContentPolicyType();
-  if (IsNavigationContentPolicy(contentPolicy) ||
-      IsWorkerContentPolicy(contentPolicy)) {
+  if (IsNavigationContentPolicy(contentPolicy)) {
+    return RequestMode::Navigate;
+  }
+
+  // TODO: remove the worker override once securityMode is fully implemented (bug 1189945)
+  if (IsWorkerContentPolicy(contentPolicy)) {
     return RequestMode::Same_origin;
   }
 
-  uint32_t securityMode;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(loadInfo->GetSecurityMode(&securityMode)));
+  uint32_t securityMode = loadInfo->GetSecurityMode();
 
   switch(securityMode) {
     case nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS:
@@ -308,18 +423,11 @@ InternalRequest::MapChannelToRequestMode(nsIChannel* aChannel)
 
   // TODO: remove following code once securityMode is fully implemented (bug 1189945)
 
-  // We only support app:// protocol interception in non-release builds.
-#ifndef RELEASE_BUILD
-  nsCOMPtr<nsIJARChannel> jarChannel = do_QueryInterface(aChannel);
-  if (jarChannel) {
-    return RequestMode::No_cors;
-  }
-#endif
-
   nsCOMPtr<nsIHttpChannelInternal> httpChannel = do_QueryInterface(aChannel);
 
   uint32_t corsMode;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(httpChannel->GetCorsMode(&corsMode)));
+  MOZ_ALWAYS_SUCCEEDS(httpChannel->GetCorsMode(&corsMode));
+  MOZ_ASSERT(corsMode != nsIHttpChannelInternal::CORS_MODE_NAVIGATE);
 
   // This cast is valid due to static asserts in ServiceWorkerManager.cpp.
   return static_cast<RequestMode>(corsMode);
@@ -332,13 +440,11 @@ InternalRequest::MapChannelToRequestCredentials(nsIChannel* aChannel)
   MOZ_ASSERT(aChannel);
 
   nsCOMPtr<nsILoadInfo> loadInfo;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aChannel->GetLoadInfo(getter_AddRefs(loadInfo))));
+  MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
 
-  uint32_t securityMode;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(loadInfo->GetSecurityMode(&securityMode)));
 
   // TODO: Remove following code after stylesheet and image support cookie policy
-  if (securityMode == nsILoadInfo::SEC_NORMAL) {
+  if (loadInfo->GetSecurityMode() == nsILoadInfo::SEC_NORMAL) {
     uint32_t loadFlags;
     aChannel->GetLoadFlags(&loadFlags);
 
@@ -368,6 +474,21 @@ InternalRequest::MapChannelToRequestCredentials(nsIChannel* aChannel)
 
   MOZ_ASSERT_UNREACHABLE("Unexpected cookie policy!");
   return RequestCredentials::Same_origin;
+}
+
+void
+InternalRequest::MaybeSkipCacheIfPerformingRevalidation()
+{
+  if (mCacheMode == RequestCache::Default &&
+      mHeaders->HasRevalidationHeaders()) {
+    mCacheMode = RequestCache::No_store;
+  }
+}
+
+void
+InternalRequest::SetPrincipalInfo(UniquePtr<mozilla::ipc::PrincipalInfo> aPrincipalInfo)
+{
+  mPrincipalInfo = Move(aPrincipalInfo);
 }
 
 } // namespace dom

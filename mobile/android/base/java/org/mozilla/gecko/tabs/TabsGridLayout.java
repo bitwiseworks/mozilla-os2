@@ -7,7 +7,6 @@ package org.mozilla.gecko.tabs;
 
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
@@ -34,12 +33,11 @@ import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.GridView;
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.AnimatorSet;
-import com.nineoldandroids.animation.ObjectAnimator;
-import com.nineoldandroids.animation.PropertyValuesHolder;
-import com.nineoldandroids.animation.ValueAnimator;
-import com.nineoldandroids.view.ViewHelper;
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
+import android.animation.ValueAnimator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -104,9 +102,14 @@ class TabsGridLayout extends GridView
         setOnItemClickListener(new OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                TabsLayoutItemView tab = (TabsLayoutItemView) view;
-                Tabs.getInstance().selectTab(tab.getTabId());
+                final TabsLayoutItemView tabView = (TabsLayoutItemView) view;
+                final int tabId = tabView.getTabId();
+                final Tab tab = Tabs.getInstance().selectTab(tabId);
+                if (tab == null) {
+                    return;
+                }
                 autoHidePanel();
+                Tabs.getInstance().notifyListeners(tab, Tabs.TabEvents.OPENED_FROM_TABS_TRAY);
             }
         });
 
@@ -190,7 +193,7 @@ class TabsGridLayout extends GridView
         lastSelectedTabId = Tabs.getInstance().getSelectedTab().getId();
         setVisibility(View.GONE);
         Tabs.unregisterOnTabsChangedListener(this);
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:Screenshot:Cancel", ""));
+        GeckoAppShell.notifyObservers("Tab:Screenshot:Cancel", "");
         tabsAdapter.clear();
     }
 
@@ -204,7 +207,7 @@ class TabsGridLayout extends GridView
     }
 
     @Override
-    public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
+    public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
         switch (msg) {
             case ADDED:
                 // Refresh only if panel is shown. show() will call refreshTabsData() later again.
@@ -292,9 +295,7 @@ class TabsGridLayout extends GridView
                         ((TabsLayoutItemView) tabView).setChecked(checked);
                     }
                     // setItemChecked doesn't exist until API 11, despite what the API docs say!
-                    if (AppConstants.Versions.feature11Plus) {
-                        setItemChecked(i, checked);
-                    }
+                    setItemChecked(i, checked);
                 }
             }
         });
@@ -316,9 +317,9 @@ class TabsGridLayout extends GridView
     }
 
     private void resetTransforms(View view) {
-        ViewHelper.setAlpha(view, 1);
-        ViewHelper.setTranslationX(view, 0);
-        ViewHelper.setTranslationY(view, 0);
+        view.setAlpha(1);
+        view.setTranslationX(0);
+        view.setTranslationY(0);
 
         ((TabsLayoutItemView) view).setCloseVisible(true);
     }
@@ -575,9 +576,13 @@ class TabsGridLayout extends GridView
                     mSwipeView.setPressed(false);
 
                     if (!mSwiping) {
-                        TabsLayoutItemView item = (TabsLayoutItemView) mSwipeView;
-                        Tabs.getInstance().selectTab(item.getTabId());
-                        autoHidePanel();
+                        final TabsLayoutItemView item = (TabsLayoutItemView) mSwipeView;
+                        final int tabId = item.getTabId();
+                        final Tab tab = Tabs.getInstance().selectTab(tabId);
+                        if (tab != null) {
+                            autoHidePanel();
+                            Tabs.getInstance().notifyListeners(tab, Tabs.TabEvents.OPENED_FROM_TABS_TRAY);
+                        }
 
                         mVelocityTracker.recycle();
                         mVelocityTracker = null;
@@ -591,7 +596,7 @@ class TabsGridLayout extends GridView
 
                     boolean dismiss = false;
 
-                    float deltaX = ViewHelper.getTranslationX(mSwipeView);
+                    float deltaX = mSwipeView.getTranslationX();
 
                     if (Math.abs(deltaX) > mTabWidth / 2) {
                         dismiss = true;
@@ -645,10 +650,9 @@ class TabsGridLayout extends GridView
                     }
 
                     if (mSwiping) {
-                        ViewHelper.setTranslationX(mSwipeView, delta);
+                        mSwipeView.setTranslationX(delta);
 
-                        ViewHelper.setAlpha(mSwipeView, Math.min(1f,
-                                1f - 2f * Math.abs(delta) / mTabWidth));
+                        mSwipeView.setAlpha(Math.min(1f, 1f - 2f * Math.abs(delta) / mTabWidth));
 
                         return true;
                     }

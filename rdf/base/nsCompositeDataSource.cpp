@@ -45,7 +45,7 @@
 #include "mozilla/Logging.h"
 #include "prprf.h"
 #include <stdio.h>
-PRLogModuleInfo* nsRDFLog = nullptr;
+mozilla::LazyLogModule nsRDFLog("RDF");
 
 //----------------------------------------------------------------------
 //
@@ -129,7 +129,7 @@ protected:
     nsISimpleEnumerator* mCurrent;
     nsIRDFNode*  mResult;
     int32_t      mNext;
-    nsAutoTArray<nsCOMPtr<nsIRDFNode>, 8>  mAlreadyReturned;
+    AutoTArray<nsCOMPtr<nsIRDFNode>, 8>  mAlreadyReturned;
     bool mAllowNegativeAssertions;
     bool mCoalesceDuplicateArcs;
 };
@@ -490,8 +490,6 @@ CompositeDataSourceImpl::CompositeDataSourceImpl(void)
 	  mCoalesceDuplicateArcs(true),
       mUpdateBatchNest(0)
 {
-    if (nsRDFLog == nullptr) 
-        nsRDFLog = PR_NewLogModule("RDF");
 }
 
 //----------------------------------------------------------------------
@@ -1101,9 +1099,9 @@ CompositeDataSourceImpl::GetAllCmds(nsIRDFResource* source,
 }
 
 NS_IMETHODIMP
-CompositeDataSourceImpl::IsCommandEnabled(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+CompositeDataSourceImpl::IsCommandEnabled(nsISupports/* nsIRDFResource container */* aSources,
                                           nsIRDFResource*   aCommand,
-                                          nsISupportsArray/*<nsIRDFResource>*/* aArguments,
+                                          nsISupports/* nsIRDFResource container */* aArguments,
                                           bool* aResult)
 {
     nsresult rv;
@@ -1125,9 +1123,9 @@ CompositeDataSourceImpl::IsCommandEnabled(nsISupportsArray/*<nsIRDFResource>*/* 
 }
 
 NS_IMETHODIMP
-CompositeDataSourceImpl::DoCommand(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+CompositeDataSourceImpl::DoCommand(nsISupports/* nsIRDFResource container */* aSources,
                                    nsIRDFResource*   aCommand,
-                                   nsISupportsArray/*<nsIRDFResource>*/* aArguments)
+                                   nsISupports/* nsIRDFResource container */* aArguments)
 {
     for (int32_t i = mDataSources.Count() - 1; i >= 0; --i) {
         nsresult rv = mDataSources[i]->DoCommand(aSources, aCommand, aArguments);

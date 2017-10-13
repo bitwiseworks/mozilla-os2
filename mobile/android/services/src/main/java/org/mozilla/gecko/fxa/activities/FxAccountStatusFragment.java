@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.CheckBoxPreference;
@@ -24,14 +23,15 @@ import android.preference.PreferenceScreen;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
+
 import com.squareup.picasso.Picasso;
 import com.squareup.picasso.Target;
+
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
 import org.mozilla.gecko.background.preferences.PreferenceFragment;
-import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.fxa.FxAccountConstants;
 import org.mozilla.gecko.fxa.SyncStatusListener;
 import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
@@ -83,6 +83,8 @@ public class FxAccountStatusFragment
   private static final long DELAY_IN_MILLISECONDS_BEFORE_REQUESTING_SYNC = 5 * 1000;
   private static final long LAST_SYNCED_TIME_UPDATE_INTERVAL_IN_MILLISECONDS = 60 * 1000;
   private static final long PROFILE_FETCH_RETRY_INTERVAL_IN_MILLISECONDS = 60 * 1000;
+
+  private static final String[] STAGES_TO_SYNC_ON_DEVICE_NAME_CHANGE = new String[] { "clients" };
 
   // By default, the auth/account server preference is only shown when the
   // account is configured to use a custom server. In debug mode, this is set.
@@ -213,6 +215,9 @@ public class FxAccountStatusFragment
     syncNowPreference = ensureFindPreference("sync_now");
     syncNowPreference.setEnabled(true);
     syncNowPreference.setOnPreferenceClickListener(this);
+
+    ensureFindPreference("linktos").setOnPreferenceClickListener(this);
+    ensureFindPreference("linkprivacy").setOnPreferenceClickListener(this);
   }
 
   /**
@@ -289,8 +294,18 @@ public class FxAccountStatusFragment
 
     if (preference == syncNowPreference) {
       if (fxAccount != null) {
-        FirefoxAccounts.requestSync(fxAccount.getAndroidAccount(), FirefoxAccounts.FORCE, null, null);
+        fxAccount.requestImmediateSync(null, null);
       }
+      return true;
+    }
+
+    if (TextUtils.equals("linktos", preference.getKey())) {
+      ActivityUtils.openURLInFennec(getActivity().getApplicationContext(), getResources().getString(R.string.fxaccount_link_tos));
+      return true;
+    }
+
+    if (TextUtils.equals("linkprivacy", preference.getKey())) {
+      ActivityUtils.openURLInFennec(getActivity().getApplicationContext(), getResources().getString(R.string.fxaccount_link_pn));
       return true;
     }
 
@@ -608,12 +623,6 @@ public class FxAccountStatusFragment
       profilePreference.setTitle(fxAccount.getEmail());
     }
 
-    // Icon update from java is not supported prior to API 11, skip the avatar image fetch and update for older device.
-    if (!AppConstants.Versions.feature11Plus) {
-      Logger.info(LOG_TAG, "Skipping profile image fetch for older pre-API 11 devices.");
-      return;
-    }
-
     // Avatar URI empty, skip profile image fetch.
     final String avatarURI = profileJSON.getString(FxAccountConstants.KEY_PROFILE_JSON_AVATAR);
     if (TextUtils.isEmpty(avatarURI)) {
@@ -794,7 +803,7 @@ public class FxAccountStatusFragment
         return;
       }
       Logger.info(LOG_TAG, "Requesting a sync sometime soon.");
-      fxAccount.requestSync();
+      fxAccount.requestEventualSync(null, null);
     }
   }
 
@@ -843,7 +852,7 @@ public class FxAccountStatusFragment
         fxAccount.dump();
       } else if ("debug_force_sync".equals(key)) {
         Logger.info(LOG_TAG, "Force syncing.");
-        fxAccount.requestSync(FirefoxAccounts.FORCE);
+        fxAccount.requestImmediateSync(null, null);
         // No sense refreshing, since the sync will complete in the future.
       } else if ("debug_forget_certificate".equals(key)) {
         State state = fxAccount.getState();
@@ -926,7 +935,10 @@ public class FxAccountStatusFragment
       }
       final long now = System.currentTimeMillis();
       clientsDataDelegate.setClientName(newClientName, now);
-      requestDelayedSync(); // Try to update our remote client record.
+      // Force sync the client record, we want the user to see the device name change immediately
+      // on the FxA Device Manager if possible ( = we are online) to avoid confusion
+      // ("I changed my Android's device name but I don't see it on my computer").
+      fxAccount.requestImmediateSync(STAGES_TO_SYNC_ON_DEVICE_NAME_CHANGE, null);
       hardRefresh(); // Updates the value displayed to the user, among other things.
       return true;
     }

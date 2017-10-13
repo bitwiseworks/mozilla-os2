@@ -16,7 +16,6 @@
 #include "SVGTransformListParser.h"
 #include "SVGTransform.h"
 
-#include "nsAutoPtr.h"
 #include <math.h>
 
 namespace mozilla {
@@ -208,7 +207,7 @@ DOMMatrixReadOnly::TransformPoint(const DOMPointInit& point) const
     transformedPoint.z = point.mZ;
     transformedPoint.w = point.mW;
 
-    transformedPoint = *mMatrix3D * transformedPoint;
+    transformedPoint = mMatrix3D->TransformPoint(transformedPoint);
 
     retval->SetX(transformedPoint.x);
     retval->SetY(transformedPoint.y);
@@ -223,7 +222,7 @@ DOMMatrixReadOnly::TransformPoint(const DOMPointInit& point) const
     transformedPoint.z = point.mZ;
     transformedPoint.w = point.mW;
 
-    transformedPoint = tempMatrix * transformedPoint;
+    transformedPoint = tempMatrix.TransformPoint(transformedPoint);
 
     retval->SetX(transformedPoint.x);
     retval->SetY(transformedPoint.y);
@@ -234,7 +233,7 @@ DOMMatrixReadOnly::TransformPoint(const DOMPointInit& point) const
     transformedPoint.x = point.mX;
     transformedPoint.y = point.mY;
 
-    transformedPoint = *mMatrix2D * transformedPoint;
+    transformedPoint = mMatrix2D->TransformPoint(transformedPoint);
 
     retval->SetX(transformedPoint.x);
     retval->SetY(transformedPoint.y);
@@ -267,7 +266,7 @@ template <typename T> void GetDataFromMatrix(const DOMMatrixReadOnly* aMatrix, T
 void
 DOMMatrixReadOnly::ToFloat32Array(JSContext* aCx, JS::MutableHandle<JSObject*> aResult, ErrorResult& aRv) const
 {
-  nsAutoTArray<float, 16> arr;
+  AutoTArray<float, 16> arr;
   arr.SetLength(16);
   GetDataFromMatrix(this, arr.Elements());
   JS::Rooted<JS::Value> value(aCx);
@@ -281,7 +280,7 @@ DOMMatrixReadOnly::ToFloat32Array(JSContext* aCx, JS::MutableHandle<JSObject*> a
 void
 DOMMatrixReadOnly::ToFloat64Array(JSContext* aCx, JS::MutableHandle<JSObject*> aResult, ErrorResult& aRv) const
 {
-  nsAutoTArray<double, 16> arr;
+  AutoTArray<double, 16> arr;
   arr.SetLength(16);
   GetDataFromMatrix(this, arr.Elements());
   JS::Rooted<JS::Value> value(aCx);
@@ -552,22 +551,10 @@ DOMMatrix::RotateAxisAngleSelf(double aX, double aY,
   }
 
   aAngle *= radPerDegree;
-  // sin(aAngle / 2) * cos(aAngle / 2)
-  double sc = sin(aAngle) / 2;
-  // pow(sin(aAngle / 2), 2)
-  double sq = (1 - cos(aAngle)) / 2;
 
   Ensure3DMatrix();
   gfx::Matrix4x4 m;
-  m._11 = 1 - 2 * (aY * aY + aZ * aZ) * sq;
-  m._12 = 2 * (aX * aY * sq + aZ * sc);
-  m._13 = 2 * (aX * aZ * sq - aY * sc);
-  m._21 = 2 * (aX * aY * sq - aZ * sc);
-  m._22 = 1 - 2 * (aX * aX + aZ * aZ) * sq;
-  m._23 = 2 * (aY * aZ * sq + aX * sc);
-  m._31 = 2 * (aX * aZ * sq + aY * sc);
-  m._32 = 2 * (aY * aZ * sq - aX * sc);
-  m._33 = 1 - 2 * (aX * aX + aY * aY) * sq;
+  m.SetRotateAxisAngle(aX, aY, aZ, aAngle);
 
   *mMatrix3D = m * *mMatrix3D;
 

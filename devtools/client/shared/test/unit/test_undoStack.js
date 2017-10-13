@@ -3,31 +3,31 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var Cu = Components.utils;
-var {Loader} = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js", {});
+"use strict";
 
-var loader = new Loader.Loader({
+const {Loader} = Components.utils.import("resource://gre/modules/commonjs/toolkit/loader.js", {});
+
+const loader = new Loader.Loader({
   paths: {
     "": "resource://gre/modules/commonjs/",
     "devtools": "resource://devtools",
   },
   globals: {},
 });
-var require = Loader.Require(loader, { id: "undo-test" })
+const require = Loader.Require(loader, { id: "undo-test" });
 
-var {UndoStack} = require("devtools/client/shared/undo");
+const {UndoStack} = require("devtools/client/shared/undo");
 
 const MAX_SIZE = 5;
 
-function run_test()
-{
+function run_test() {
   let str = "";
   let stack = new UndoStack(MAX_SIZE);
 
   function add(ch) {
-    stack.do(function() {
+    stack.do(function () {
       str += ch;
-    }, function() {
+    }, function () {
       str = str.slice(0, -1);
     });
   }
@@ -54,7 +54,7 @@ function run_test()
   do_check_true(stack.canRedo());
 
   stack.redo();
-  do_check_eq(str, "abcde")
+  do_check_eq(str, "abcde");
   do_check_false(stack.canRedo());
 
   // Check an undo followed by a new action

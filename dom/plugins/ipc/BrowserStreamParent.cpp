@@ -10,7 +10,7 @@
 #include "nsNPAPIPlugin.h"
 
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 // How much data are we willing to send across the wire
 // in one chunk?
@@ -135,7 +135,7 @@ BrowserStreamParent::RecvNPN_DestroyStream(const NPReason& reason)
   default:
     NS_ERROR("Unexpected state");
     return false;
-  };
+  }
 
   mNPP->mNPNIface->destroystream(mNPP->mNPP, mStream, reason);
   return true;
@@ -193,8 +193,8 @@ BrowserStreamParent::Write(int32_t offset,
     len = kSendDataChunk;
 
   return SendWrite(offset,
-                   nsCString(static_cast<char*>(buffer), len),
-                   mStream->end) ?
+                   mStream->end,
+                   nsCString(static_cast<char*>(buffer), len)) ?
     len : -1;
 }
 

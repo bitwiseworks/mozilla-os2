@@ -17,10 +17,19 @@
 #include "nsPIDOMWindow.h"
 #include "nsILoadContext.h"
 #include "nsIDocShell.h"
+#include "nsIScriptError.h"
 #include "nsISensitiveInfoHiddenURI.h"
+
+static_assert(nsIScriptError::errorFlag == JSREPORT_ERROR &&
+              nsIScriptError::warningFlag == JSREPORT_WARNING &&
+              nsIScriptError::exceptionFlag == JSREPORT_EXCEPTION &&
+              nsIScriptError::strictFlag == JSREPORT_STRICT &&
+              nsIScriptError::infoFlag == JSREPORT_USER_1,
+              "flags should be consistent");
 
 nsScriptErrorBase::nsScriptErrorBase()
     :  mMessage(),
+       mMessageName(),
        mSourceName(),
        mLineNumber(0),
        mSourceLine(),
@@ -47,7 +56,7 @@ nsScriptErrorBase::InitializeOnMainThread()
         nsGlobalWindow* window =
           nsGlobalWindow::GetInnerWindowWithId(mInnerWindowID);
         if (window) {
-            nsPIDOMWindow* outer = window->GetOuterWindow();
+            nsPIDOMWindowOuter* outer = window->GetOuterWindow();
             if (outer)
                 mOuterWindowID = outer->WindowID();
 
@@ -149,6 +158,18 @@ nsScriptErrorBase::GetStack(JS::MutableHandleValue aStack) {
 
 NS_IMETHODIMP
 nsScriptErrorBase::SetStack(JS::HandleValue aStack) {
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptErrorBase::GetErrorMessageName(nsAString& aErrorMessageName) {
+    aErrorMessageName = mMessageName;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptErrorBase::SetErrorMessageName(const nsAString& aErrorMessageName) {
+    mMessageName = aErrorMessageName;
     return NS_OK;
 }
 
@@ -280,9 +301,9 @@ nsScriptErrorBase::ToString(nsACString& /*UTF8*/ aResult)
 NS_IMETHODIMP
 nsScriptErrorBase::GetOuterWindowID(uint64_t* aOuterWindowID)
 {
-    NS_WARN_IF_FALSE(NS_IsMainThread() || mInitializedOnMainThread,
-                     "This can't be safely determined off the main thread, "
-                     "returning an inaccurate value!");
+    NS_WARNING_ASSERTION(NS_IsMainThread() || mInitializedOnMainThread,
+                         "This can't be safely determined off the main thread, "
+                         "returning an inaccurate value!");
 
     if (!mInitializedOnMainThread && NS_IsMainThread()) {
         InitializeOnMainThread();
@@ -309,9 +330,9 @@ nsScriptErrorBase::GetTimeStamp(int64_t* aTimeStamp)
 NS_IMETHODIMP
 nsScriptErrorBase::GetIsFromPrivateWindow(bool* aIsFromPrivateWindow)
 {
-    NS_WARN_IF_FALSE(NS_IsMainThread() || mInitializedOnMainThread,
-                     "This can't be safely determined off the main thread, "
-                     "returning an inaccurate value!");
+    NS_WARNING_ASSERTION(NS_IsMainThread() || mInitializedOnMainThread,
+                         "This can't be safely determined off the main thread, "
+                         "returning an inaccurate value!");
 
     if (!mInitializedOnMainThread && NS_IsMainThread()) {
         InitializeOnMainThread();

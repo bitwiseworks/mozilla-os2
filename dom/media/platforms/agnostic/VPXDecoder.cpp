@@ -9,36 +9,40 @@
 #include "nsError.h"
 #include "TimeUnits.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/SyncRunnable.h"
 #include "prsystem.h"
 
 #include <algorithm>
 
 #undef LOG
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(arg, ...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, ("VPXDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+#define LOG(arg, ...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, ("VPXDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
 namespace mozilla {
 
 using namespace gfx;
 using namespace layers;
 
-VPXDecoder::VPXDecoder(const VideoInfo& aConfig,
-                       ImageContainer* aImageContainer,
-                       FlushableTaskQueue* aTaskQueue,
-                       MediaDataDecoderCallback* aCallback)
-  : mImageContainer(aImageContainer)
-  , mTaskQueue(aTaskQueue)
-  , mCallback(aCallback)
-  , mInfo(aConfig)
+static int MimeTypeToCodec(const nsACString& aMimeType)
+{
+  if (aMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+    return VPXDecoder::Codec::VP8;
+  } else if (aMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
+    return VPXDecoder::Codec::VP9;
+  } else if (aMimeType.EqualsLiteral("video/vp9")) {
+    return VPXDecoder::Codec::VP9;
+  }
+  return -1;
+}
+
+VPXDecoder::VPXDecoder(const CreateDecoderParams& aParams)
+  : mImageContainer(aParams.mImageContainer)
+  , mTaskQueue(aParams.mTaskQueue)
+  , mCallback(aParams.mCallback)
+  , mIsFlushing(false)
+  , mInfo(aParams.VideoConfig())
+  , mCodec(MimeTypeToCodec(aParams.VideoConfig().mMimeType))
 {
   MOZ_COUNT_CTOR(VPXDecoder);
-  if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
-    mCodec = Codec::VP8;
-  } else if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
-    mCodec = Codec::VP9;
-  } else {
-    mCodec = -1;
-  }
   PodZero(&mVPX);
 }
 
@@ -47,11 +51,10 @@ VPXDecoder::~VPXDecoder()
   MOZ_COUNT_DTOR(VPXDecoder);
 }
 
-nsresult
+void
 VPXDecoder::Shutdown()
 {
   vpx_codec_destroy(&mVPX);
-  return NS_OK;
 }
 
 RefPtr<MediaDataDecoder::InitPromise>
@@ -77,21 +80,27 @@ VPXDecoder::Init()
   config.w = config.h = 0; // set after decode
 
   if (!dx || vpx_codec_dec_init(&mVPX, dx, &config, 0)) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
   return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
 }
 
-nsresult
+void
 VPXDecoder::Flush()
 {
-  mTaskQueue->Flush();
-  return NS_OK;
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mIsFlushing = true;
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([this] () {
+    // nothing to do for now.
+  });
+  SyncRunnable::DispatchToThread(mTaskQueue, r);
+  mIsFlushing = false;
 }
 
-int
-VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
+MediaResult
+VPXDecoder::DoDecode(MediaRawData* aSample)
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 #if defined(DEBUG)
   vpx_codec_stream_info_t si;
   PodZero(&si);
@@ -107,14 +116,18 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
 
   if (vpx_codec_err_t r = vpx_codec_decode(&mVPX, aSample->Data(), aSample->Size(), nullptr, 0)) {
     LOG("VPX Decode error: %s", vpx_codec_err_to_string(r));
-    return -1;
+    return MediaResult(
+      NS_ERROR_DOM_MEDIA_DECODE_ERR,
+      RESULT_DETAIL("VPX error: %s", vpx_codec_err_to_string(r)));
   }
 
   vpx_codec_iter_t  iter = nullptr;
   vpx_image_t      *img;
 
   while ((img = vpx_codec_get_frame(&mVPX, &iter))) {
-    NS_ASSERTION(img->fmt == VPX_IMG_FMT_I420, "WebM image format not I420");
+    NS_ASSERTION(img->fmt == VPX_IMG_FMT_I420 ||
+                 img->fmt == VPX_IMG_FMT_I444,
+                 "WebM image format not I420 or I444");
 
     // Chroma shifts are rounded down as per the decoding examples in the SDK
     VideoData::YCbCrBuffer b;
@@ -126,83 +139,114 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
 
     b.mPlanes[1].mData = img->planes[1];
     b.mPlanes[1].mStride = img->stride[1];
-    b.mPlanes[1].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
-    b.mPlanes[1].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
     b.mPlanes[1].mOffset = b.mPlanes[1].mSkip = 0;
 
     b.mPlanes[2].mData = img->planes[2];
     b.mPlanes[2].mStride = img->stride[2];
-    b.mPlanes[2].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
-    b.mPlanes[2].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
     b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-    VideoInfo info;
-    info.mDisplay = mInfo.mDisplay;
-    RefPtr<VideoData> v = VideoData::Create(info,
-                                              mImageContainer,
-                                              aSample->mOffset,
-                                              aSample->mTime,
-                                              aSample->mDuration,
-                                              b,
-                                              aSample->mKeyframe,
-                                              aSample->mTimecode,
-                                              mInfo.mImage);
+    if (img->fmt == VPX_IMG_FMT_I420) {
+      b.mPlanes[1].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
+      b.mPlanes[1].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
+
+      b.mPlanes[2].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
+      b.mPlanes[2].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
+    } else if (img->fmt == VPX_IMG_FMT_I444) {
+      b.mPlanes[1].mHeight = img->d_h;
+      b.mPlanes[1].mWidth = img->d_w;
+
+      b.mPlanes[2].mHeight = img->d_h;
+      b.mPlanes[2].mWidth = img->d_w;
+    } else {
+      LOG("VPX Unknown image format");
+      return MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                         RESULT_DETAIL("VPX Unknown image format"));
+    }
+
+    RefPtr<VideoData> v =
+      VideoData::CreateAndCopyData(mInfo,
+                                   mImageContainer,
+                                   aSample->mOffset,
+                                   aSample->mTime,
+                                   aSample->mDuration,
+                                   b,
+                                   aSample->mKeyframe,
+                                   aSample->mTimecode,
+                                   mInfo.ScaledImageRect(img->d_w,
+                                                         img->d_h));
 
     if (!v) {
       LOG("Image allocation error source %ldx%ld display %ldx%ld picture %ldx%ld",
           img->d_w, img->d_h, mInfo.mDisplay.width, mInfo.mDisplay.height,
           mInfo.mImage.width, mInfo.mImage.height);
-      return -1;
+      return MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__);
     }
     mCallback->Output(v);
   }
-  return 0;
+  return NS_OK;
 }
 
 void
-VPXDecoder::DecodeFrame(MediaRawData* aSample)
+VPXDecoder::ProcessDecode(MediaRawData* aSample)
 {
-  if (DoDecodeFrame(aSample) == -1) {
-    mCallback->Error();
-  } else if (mTaskQueue->IsEmpty()) {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  if (mIsFlushing) {
+    return;
+  }
+  MediaResult rv = DoDecode(aSample);
+  if (NS_FAILED(rv)) {
+    mCallback->Error(rv);
+  } else {
     mCallback->InputExhausted();
   }
 }
 
-nsresult
+void
 VPXDecoder::Input(MediaRawData* aSample)
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
-      this, &VPXDecoder::DecodeFrame,
-      RefPtr<MediaRawData>(aSample)));
-  mTaskQueue->Dispatch(runnable.forget());
-
-  return NS_OK;
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
+                       this, &VPXDecoder::ProcessDecode, aSample));
 }
 
 void
-VPXDecoder::DoDrain()
+VPXDecoder::ProcessDrain()
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
   mCallback->DrainComplete();
 }
 
-nsresult
+void
 VPXDecoder::Drain()
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethod(this, &VPXDecoder::DoDrain));
-  mTaskQueue->Dispatch(runnable.forget());
-
-  return NS_OK;
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mTaskQueue->Dispatch(NewRunnableMethod(this, &VPXDecoder::ProcessDrain));
 }
 
 /* static */
 bool
-VPXDecoder::IsVPX(const nsACString& aMimeType)
+VPXDecoder::IsVPX(const nsACString& aMimeType, uint8_t aCodecMask)
 {
-  return aMimeType.EqualsLiteral("video/webm; codecs=vp8") ||
-    aMimeType.EqualsLiteral("video/webm; codecs=vp9");
+  return ((aCodecMask & VPXDecoder::VP8) &&
+          aMimeType.EqualsLiteral("video/webm; codecs=vp8")) ||
+         ((aCodecMask & VPXDecoder::VP9) &&
+          aMimeType.EqualsLiteral("video/webm; codecs=vp9")) ||
+         ((aCodecMask & VPXDecoder::VP9) &&
+          aMimeType.EqualsLiteral("video/vp9"));
+}
+
+/* static */
+bool
+VPXDecoder::IsVP8(const nsACString& aMimeType)
+{
+  return IsVPX(aMimeType, VPXDecoder::VP8);
+}
+
+/* static */
+bool
+VPXDecoder::IsVP9(const nsACString& aMimeType)
+{
+  return IsVPX(aMimeType, VPXDecoder::VP9);
 }
 
 } // namespace mozilla

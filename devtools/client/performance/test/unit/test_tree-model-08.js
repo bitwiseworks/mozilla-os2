@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Verifies if FrameNodes retain and parse their data appropriately.
@@ -12,7 +13,7 @@ function run_test() {
 add_task(function test() {
   let FrameUtils = require("devtools/client/performance/modules/logic/frame-utils");
   let { FrameNode } = require("devtools/client/performance/modules/logic/tree-model");
-  let { CATEGORY_OTHER } = require("devtools/client/performance/modules/global");
+  let { CATEGORY_MASK } = require("devtools/client/performance/modules/categories");
   let compute = frame => {
     FrameUtils.computeIsContentAndCategory(frame);
     return frame;
@@ -42,7 +43,7 @@ add_task(function test() {
     new FrameNode("Foo::Bar::Baz", compute({
       location: "Foo::Bar::Baz",
       line: 456,
-      category: CATEGORY_OTHER,
+      category: CATEGORY_MASK("other"),
     }), false),
     new FrameNode("EnterJIT", compute({
       location: "EnterJIT",
@@ -65,9 +66,11 @@ add_task(function test() {
     }), false),
   ];
 
-  let fields = ["nodeType", "functionName", "fileName", "hostName", "url", "line", "column", "categoryData.abbrev", "isContent", "port"]
+  let fields = ["nodeType", "functionName", "fileName", "host", "url", "line", "column",
+                "categoryData.abbrev", "isContent", "port"];
   let expected = [
-    // nodeType, functionName, fileName, hostName, url, line, column, categoryData.abbrev, isContent, port
+    // nodeType, functionName, fileName, host, url, line, column, categoryData.abbrev,
+    // isContent, port
     ["Frame", "hello/<.world", "bar.js", "foo", "http://foo/bar.js", 123, 987, void 0, true],
     ["Frame", "hello/<.world", "bar.js", "foo", "http://foo/bar.js#baz", 123, 987, void 0, true],
     ["Frame", "hello/<.world", "/", "foo", "http://foo/#bar", 123, 987, void 0, true],
@@ -77,7 +80,7 @@ add_task(function test() {
     ["Frame", "EnterJIT", null, null, null, null, null, "js", false],
     ["Frame", "chrome://browser/content/content.js", null, null, null, 456, null, "other", false],
     ["Frame", "hello/<.world", "foo.js", null, "resource://gre/foo.js", 123, 434, "other", false],
-    ["Frame", "main", "file.js", "localhost", "http://localhost:8888/file.js", 123, 987, null, true, 8888],
+    ["Frame", "main", "file.js", "localhost:8888", "http://localhost:8888/file.js", 123, 987, null, true, 8888],
     ["Frame", "main", "timeline.js", null, "resource://devtools/timeline.js", 123, null, "tools", false]
   ];
 
@@ -87,7 +90,9 @@ add_task(function test() {
 
     for (let j = 0; j < fields.length; j++) {
       let field = fields[j];
-      let value = field === "categoryData.abbrev" ? info.categoryData.abbrev : info[field];
+      let value = field === "categoryData.abbrev"
+        ? info.categoryData.abbrev
+        : info[field];
       equal(value, expect[j], `${field} for frame #${i} is correct: ${expect[j]}`);
     }
   }

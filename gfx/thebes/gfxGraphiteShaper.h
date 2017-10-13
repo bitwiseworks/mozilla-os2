@@ -19,18 +19,18 @@ public:
     explicit gfxGraphiteShaper(gfxFont *aFont);
     virtual ~gfxGraphiteShaper();
 
-    virtual bool ShapeText(gfxContext      *aContext,
+    virtual bool ShapeText(DrawTarget      *aDrawTarget,
                            const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
-                           int32_t          aScript,
+                           Script           aScript,
                            bool             aVertical,
                            gfxShapedText   *aShapedText);
 
     static void Shutdown();
 
 protected:
-    nsresult SetGlyphsFromSegment(gfxContext      *aContext,
+    nsresult SetGlyphsFromSegment(DrawTarget      *aDrawTarget,
                                   gfxShapedText   *aShapedText,
                                   uint32_t         aOffset,
                                   uint32_t         aLength,

@@ -7,12 +7,12 @@
 #include "nsTreeSanitizer.h"
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Declaration.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/Rule.h"
 #include "nsCSSParser.h"
-#include "nsCSSProperty.h"
+#include "nsCSSPropertyID.h"
 #include "nsUnicharInputStream.h"
 #include "nsIDOMCSSRule.h"
 #include "nsAttrName.h"
@@ -203,7 +203,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::media,
   &nsGkAtoms::method,
   &nsGkAtoms::min,
-  &nsGkAtoms::mozdonotsend,
+  &nsGkAtoms::minlength,
   &nsGkAtoms::multiple,
   &nsGkAtoms::muted,
   &nsGkAtoms::name,
@@ -281,9 +281,6 @@ nsIAtom** const kURLAttributesHTML[] = {
 
 nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::a, // a
-  &nsGkAtoms::altGlyph, // altGlyph
-  &nsGkAtoms::altGlyphDef, // altGlyphDef
-  &nsGkAtoms::altGlyphItem, // altGlyphItem
   &nsGkAtoms::circle, // circle
   &nsGkAtoms::clipPath, // clipPath
   &nsGkAtoms::colorProfile, // color-profile
@@ -330,9 +327,9 @@ nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::font_face_uri, // font-face-uri
   &nsGkAtoms::foreignObject, // foreignObject
   &nsGkAtoms::g, // g
-  &nsGkAtoms::glyph, // glyph
+  // glyph
   &nsGkAtoms::glyphRef, // glyphRef
-  &nsGkAtoms::hkern, // hkern
+  // hkern
   &nsGkAtoms::image, // image
   &nsGkAtoms::line, // line
   &nsGkAtoms::linearGradient, // linearGradient
@@ -358,7 +355,7 @@ nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::tspan, // tspan
   &nsGkAtoms::use, // use
   &nsGkAtoms::view, // view
-  &nsGkAtoms::vkern, // vkern
+  // vkern
   nullptr
 };
 
@@ -431,8 +428,8 @@ nsIAtom** const kAttributesSVG[] = {
   // g2
   // glyph-name
   // glyphRef
-  &nsGkAtoms::glyph_orientation_horizontal, // glyph-orientation-horizontal
-  &nsGkAtoms::glyph_orientation_vertical, // glyph-orientation-vertical
+  // glyph-orientation-horizontal
+  // glyph-orientation-vertical
   &nsGkAtoms::gradientTransform, // gradientTransform
   &nsGkAtoms::gradientUnits, // gradientUnits
   &nsGkAtoms::height, // height
@@ -450,7 +447,7 @@ nsIAtom** const kAttributesSVG[] = {
   &nsGkAtoms::k2, // k2
   &nsGkAtoms::k3, // k3
   &nsGkAtoms::k4, // k4
-  &nsGkAtoms::kerning, // kerning
+  // kerning
   &nsGkAtoms::kernelMatrix, // kernelMatrix
   &nsGkAtoms::kernelUnitLength, // kernelUnitLength
   &nsGkAtoms::keyPoints, // keyPoints
@@ -580,7 +577,7 @@ nsIAtom** const kAttributesSVG[] = {
   &nsGkAtoms::width, // width
   // widths
   &nsGkAtoms::word_spacing, // word-spacing
-  // writing-mode
+  &nsGkAtoms::writing_mode, // writing-mode
   &nsGkAtoms::x, // x
   // x-height
   &nsGkAtoms::x1, // x1
@@ -596,6 +593,7 @@ nsIAtom** const kAttributesSVG[] = {
 };
 
 nsIAtom** const kURLAttributesSVG[] = {
+  &nsGkAtoms::href,
   nullptr
 };
 
@@ -1070,7 +1068,7 @@ nsTreeSanitizer::SanitizeStyleDeclaration(mozilla::css::Declaration* aDeclaratio
                                           nsAutoString& aRuleText)
 {
   bool didSanitize = aDeclaration->HasProperty(eCSSProperty_binding);
-  aDeclaration->RemoveProperty(eCSSProperty_binding);
+  aDeclaration->RemovePropertyByID(eCSSProperty_binding);
   aDeclaration->ToString(aRuleText);
   return didSanitize;
 }
@@ -1087,14 +1085,15 @@ nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
   // -moz-binding is blacklisted.
   bool didSanitize = false;
   // Create a sheet to hold the parsed CSS
-  RefPtr<CSSStyleSheet> sheet = new CSSStyleSheet(CORS_NONE, aDocument->GetReferrerPolicy());
+  RefPtr<CSSStyleSheet> sheet =
+    new CSSStyleSheet(mozilla::css::eAuthorSheetFeatures,
+                      CORS_NONE, aDocument->GetReferrerPolicy());
   sheet->SetURIs(aDocument->GetDocumentURI(), nullptr, aBaseURI);
   sheet->SetPrincipal(aDocument->NodePrincipal());
   // Create the CSS parser, and parse the CSS text.
   nsCSSParser parser(nullptr, sheet);
   rv = parser.ParseSheet(aOriginal, aDocument->GetDocumentURI(), aBaseURI,
-                         aDocument->NodePrincipal(), 0,
-                         mozilla::css::eAuthorSheetFeatures);
+                         aDocument->NodePrincipal(), 0);
   NS_ENSURE_SUCCESS(rv, true);
   // Mark the sheet as complete.
   MOZ_ASSERT(!sheet->IsModified(),
@@ -1331,7 +1330,7 @@ nsTreeSanitizer::Sanitize(nsIContent* aFragment)
   // in tree.
   NS_PRECONDITION(aFragment->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT),
       "Argument was not DOM fragment.");
-  NS_PRECONDITION(!aFragment->IsInDoc(), "The fragment is in doc?");
+  NS_PRECONDITION(!aFragment->IsInUncomposedDoc(), "The fragment is in doc?");
 
   mFullDocument = false;
   SanitizeChildren(aFragment);
@@ -1519,8 +1518,7 @@ nsTreeSanitizer::InitializeStatics()
     sAttributesMathML->PutEntry(*kAttributesMathML[i]);
   }
 
-  nsCOMPtr<nsIPrincipal> principal =
-      do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
+  nsCOMPtr<nsIPrincipal> principal = nsNullPrincipal::Create();
   principal.forget(&sNullPrincipal);
 }
 

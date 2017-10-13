@@ -35,6 +35,7 @@ public:
         mWasOffererLastTime(false),
         mIceControlling(false),
         mRemoteIsIceLite(false),
+        mRemoteIceIsRestarting(false),
         mBundlePolicy(kBundleBalanced),
         mSessionId(0),
         mSessionVersion(0),
@@ -53,12 +54,20 @@ public:
 
   virtual nsresult SetIceCredentials(const std::string& ufrag,
                                      const std::string& pwd) override;
+  virtual const std::string& GetUfrag() const override { return mIceUfrag; }
+  virtual const std::string& GetPwd() const override { return mIcePwd; }
   nsresult SetBundlePolicy(JsepBundlePolicy policy) override;
 
   virtual bool
   RemoteIsIceLite() const override
   {
     return mRemoteIsIceLite;
+  }
+
+  virtual bool
+  RemoteIceIsRestarting() const override
+  {
+    return mRemoteIceIsRestarting;
   }
 
   virtual std::vector<std::string>
@@ -70,11 +79,18 @@ public:
   virtual nsresult AddDtlsFingerprint(const std::string& algorithm,
                                       const std::vector<uint8_t>& value) override;
 
+  nsresult AddRtpExtension(std::vector<SdpExtmapAttributeList::Extmap>& extensions,
+                           const std::string& extensionName,
+                           SdpDirectionAttribute::Direction direction);
   virtual nsresult AddAudioRtpExtension(
-      const std::string& extensionName) override;
+      const std::string& extensionName,
+      SdpDirectionAttribute::Direction direction =
+      SdpDirectionAttribute::Direction::kSendrecv) override;
 
   virtual nsresult AddVideoRtpExtension(
-      const std::string& extensionName) override;
+      const std::string& extensionName,
+      SdpDirectionAttribute::Direction direction =
+      SdpDirectionAttribute::Direction::kSendrecv) override;
 
   virtual std::vector<JsepCodecDescription*>&
   Codecs() override
@@ -86,6 +102,16 @@ public:
                                 const std::string& oldTrackId,
                                 const std::string& newStreamId,
                                 const std::string& newTrackId) override;
+
+  virtual nsresult SetParameters(
+      const std::string& streamId,
+      const std::string& trackId,
+      const std::vector<JsepTrack::JsConstraints>& constraints) override;
+
+  virtual nsresult GetParameters(
+      const std::string& streamId,
+      const std::string& trackId,
+      std::vector<JsepTrack::JsConstraints>* outConstraints) override;
 
   virtual std::vector<RefPtr<JsepTrack>> GetLocalTracks() const override;
 
@@ -212,6 +238,7 @@ private:
   nsresult AddTransportAttributes(SdpMediaSection* msection,
                                   SdpSetupAttribute::Role dtlsRole);
   nsresult CopyPreviousTransportParams(const Sdp& oldAnswer,
+                                       const Sdp& offerersPreviousSdp,
                                        const Sdp& newOffer,
                                        Sdp* newLocal);
   nsresult SetupOfferMSections(const JsepOfferOptions& options, Sdp* sdp);
@@ -261,8 +288,7 @@ private:
                                    bool usingBundle,
                                    size_t transportLevel,
                                    JsepTrackPair* trackPairOut);
-  void UpdateTransport(const SdpMediaSection& msection,
-                       JsepTransport* transport);
+  void InitTransport(const SdpMediaSection& msection, JsepTransport* transport);
 
   nsresult FinalizeTransport(const SdpAttributeList& remote,
                              const SdpAttributeList& answer,
@@ -292,6 +318,7 @@ private:
   std::string mIceUfrag;
   std::string mIcePwd;
   bool mRemoteIsIceLite;
+  bool mRemoteIceIsRestarting;
   std::vector<std::string> mIceOptions;
   JsepBundlePolicy mBundlePolicy;
   std::vector<JsepDtlsFingerprint> mDtlsFingerprints;

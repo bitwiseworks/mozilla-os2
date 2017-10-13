@@ -1,40 +1,35 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* $Id: nsPKCS12Blob.cpp,v 1.49 2007/09/05 07:13:46 jwalden%mit.edu Exp $ */
 
 #include "nsPKCS12Blob.h"
 
-#include "pkix/pkixtypes.h"
-
-#include "prmem.h"
-#include "prprf.h"
-
-#include "nsIFile.h"
-#include "nsNetUtil.h"
-#include "nsIInputStream.h"
+#include "ScopedNSSTypes.h"
+#include "mozilla/Casting.h"
+#include "nsCRT.h"
+#include "nsCRTGlue.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsICertificateDialogs.h"
 #include "nsIDirectoryService.h"
-#include "nsThreadUtils.h"
-
+#include "nsIFile.h"
+#include "nsIInputStream.h"
+#include "nsKeygenHandler.h" // For GetSlotWithMechanism
+#include "nsNSSCertificate.h"
 #include "nsNSSComponent.h"
 #include "nsNSSHelper.h"
-#include "nsString.h"
-#include "nsReadableUtils.h"
-#include "nsXPIDLString.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsNSSHelper.h"
-#include "nsNSSCertificate.h"
-#include "nsKeygenHandler.h" //For GetSlotWithMechanism
-#include "nsPK11TokenDB.h"
-#include "nsICertificateDialogs.h"
 #include "nsNSSShutDown.h"
-#include "nsCRT.h"
-
+#include "nsNetUtil.h"
+#include "nsPK11TokenDB.h"
+#include "nsReadableUtils.h"
+#include "nsString.h"
+#include "nsThreadUtils.h"
+#include "pkix/pkixtypes.h"
+#include "prmem.h"
+#include "prprf.h"
 #include "secerr.h"
 
-extern PRLogModuleInfo* gPIPNSSLog;
-
 using namespace mozilla;
+extern LazyLogModule gPIPNSSLog;
 
 #define PIP_PKCS12_TMPFILENAME   NS_LITERAL_CSTRING(".pip_p12tmp")
 #define PIP_PKCS12_BUFFER_SIZE   2048
@@ -47,10 +42,8 @@ using namespace mozilla;
 #define PIP_PKCS12_NSS_ERROR           7
 
 // constructor
-nsPKCS12Blob::nsPKCS12Blob():mCertArray(0),
+nsPKCS12Blob::nsPKCS12Blob():mCertArray(nullptr),
                              mTmpFile(nullptr),
-                             mDigest(nullptr),
-                             mDigestIterator(nullptr),
                              mTokenSet(false)
 {
   mUIContext = new PipUIContext();
@@ -59,15 +52,12 @@ nsPKCS12Blob::nsPKCS12Blob():mCertArray(0),
 // destructor
 nsPKCS12Blob::~nsPKCS12Blob()
 {
-  delete mDigestIterator;
-  delete mDigest;
-
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown()) {
     return;
   }
 
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 // nsPKCS12Blob::SetToken
@@ -87,7 +77,7 @@ nsPKCS12Blob::SetToken(nsIPK11Token *token)
    PK11SlotInfo *slot;
    rv = GetSlotWithMechanism(CKM_RSA_PKCS, mUIContext, &slot, locker);
    if (NS_FAILED(rv)) {
-      mToken = 0;  
+      mToken = nullptr;
    } else {
      mToken = new nsPK11Token(slot);
      PK11_FreeSlot(slot);
@@ -152,10 +142,10 @@ nsPKCS12Blob::ImportFromFileHelper(nsIFile *file,
   SEC_PKCS12DecoderContext *dcx = nullptr;
   SECItem unicodePw;
 
-  PK11SlotInfo *slot=nullptr;
-  nsXPIDLString tokenName;
+  UniquePK11SlotInfo slot;
+  nsAutoCString tokenName;
   unicodePw.data = nullptr;
-  
+
   aWantRetry = rr_do_not_retry;
 
   if (aImportMode == im_try_zero_length_secitem)
@@ -172,22 +162,20 @@ nsPKCS12Blob::ImportFromFileHelper(nsIFile *file,
       return NS_OK;
     }
   }
-  
-  mToken->GetTokenName(getter_Copies(tokenName));
-  {
-    NS_ConvertUTF16toUTF8 tokenNameCString(tokenName);
-    slot = PK11_FindSlotByName(tokenNameCString.get());
+
+  rv = mToken->GetTokenName(tokenName);
+  if (NS_FAILED(rv)) {
+    goto finish;
   }
+  slot = UniquePK11SlotInfo(PK11_FindSlotByName(tokenName.get()));
   if (!slot) {
     srv = SECFailure;
     goto finish;
   }
 
   // initialize the decoder
-  dcx = SEC_PKCS12DecoderStart(&unicodePw, slot, nullptr,
-                               digest_open, digest_close,
-                               digest_read, digest_write,
-                               this);
+  dcx = SEC_PKCS12DecoderStart(&unicodePw, slot.get(), nullptr, nullptr,
+                               nullptr, nullptr, nullptr, nullptr);
   if (!dcx) {
     srv = SECFailure;
     goto finish;
@@ -234,11 +222,9 @@ finish:
     {
       handleError(PIP_PKCS12_NSS_ERROR);
     }
-  } else if (NS_FAILED(rv)) { 
+  } else if (NS_FAILED(rv)) {
     handleError(PIP_PKCS12_RESTORE_FAILED);
   }
-  if (slot)
-    PK11_FreeSlot(slot);
   // finish the decoder
   if (dcx)
     SEC_PKCS12DecoderFinish(dcx);
@@ -249,21 +235,20 @@ finish:
 static bool
 isExtractable(SECKEYPrivateKey *privKey)
 {
-  SECItem value;
-  bool    isExtractable = false;
-  SECStatus rv;
-
-  rv=PK11_ReadRawAttribute(PK11_TypePrivKey, privKey, CKA_EXTRACTABLE, &value);
+  ScopedAutoSECItem value;
+  SECStatus rv = PK11_ReadRawAttribute(PK11_TypePrivKey, privKey,
+                                       CKA_EXTRACTABLE, &value);
   if (rv != SECSuccess) {
     return false;
   }
+
+  bool isExtractable = false;
   if ((value.len == 1) && value.data) {
     isExtractable = !!(*(CK_BBOOL*)value.data);
   }
-  SECITEM_FreeItem(&value, false);
   return isExtractable;
 }
-  
+
 // nsPKCS12Blob::ExportToFile
 //
 // Having already loaded the certs, form them into a blob (loading the keys
@@ -316,7 +301,7 @@ nsPKCS12Blob::ExportToFile(nsIFile *file,
   for (i=0; i<numCerts; i++) {
     nsNSSCertificate *cert = (nsNSSCertificate *)certs[i];
     // get it as a CERTCertificate XXX
-    ScopedCERTCertificate nssCert(cert->GetCert());
+    UniqueCERTCertificate nssCert(cert->GetCert());
     if (!nssCert) {
       rv = NS_ERROR_FAILURE;
       goto finish;
@@ -419,22 +404,17 @@ finish:
 //
 // For the NSS PKCS#12 library, must convert PRUnichars (shorts) to
 // a buffer of octets.  Must handle byte order correctly.
-// TODO: Is there a mozilla way to do this?  In the string lib?
-void
+nsresult
 nsPKCS12Blob::unicodeToItem(const char16_t *uni, SECItem *item)
 {
-  int len = 0;
-  while (uni[len++] != 0);
-  SECITEM_AllocItem(nullptr, item, sizeof(char16_t) * len);
-#ifdef IS_LITTLE_ENDIAN
-  int i = 0;
-  for (i=0; i<len; i++) {
-    item->data[2*i  ] = (unsigned char )(uni[i] << 8);
-    item->data[2*i+1] = (unsigned char )(uni[i]);
+  uint32_t len = NS_strlen(uni) + 1;
+  if (!SECITEM_AllocItem(nullptr, item, sizeof(char16_t) * len)) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
-#else
-  memcpy(item->data, uni, item->len);
-#endif
+
+  mozilla::NativeEndian::copyAndSwapToBigEndian(item->data, uni, len);
+
+  return NS_OK;
 }
 
 // newPKCS12FilePassword
@@ -454,8 +434,7 @@ nsPKCS12Blob::newPKCS12FilePassword(SECItem *unicodePw)
   bool pressedOK;
   rv = certDialogs->SetPKCS12FilePassword(mUIContext, password, &pressedOK);
   if (NS_FAILED(rv) || !pressedOK) return rv;
-  unicodeToItem(password.get(), unicodePw);
-  return NS_OK;
+  return unicodeToItem(password.get(), unicodePw);
 }
 
 // getPKCS12FilePassword
@@ -475,8 +454,7 @@ nsPKCS12Blob::getPKCS12FilePassword(SECItem *unicodePw)
   bool pressedOK;
   rv = certDialogs->GetPKCS12FilePassword(mUIContext, password, &pressedOK);
   if (NS_FAILED(rv) || !pressedOK) return rv;
-  unicodeToItem(password.get(), unicodePw);
-  return NS_OK;
+  return unicodeToItem(password.get(), unicodePw);
 }
 
 // inputToDecoder
@@ -517,105 +495,6 @@ nsPKCS12Blob::inputToDecoder(SEC_PKCS12DecoderContext *dcx, nsIFile *file)
       break;
   }
   return NS_OK;
-}
-
-//
-// C callback methods
-//
-
-// digest_open
-// prepare a memory buffer for reading/writing digests
-SECStatus
-nsPKCS12Blob::digest_open(void *arg, PRBool reading)
-{
-  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
-  NS_ENSURE_TRUE(cx, SECFailure);
-  
-  if (reading) {
-    NS_ENSURE_TRUE(cx->mDigest, SECFailure);
-
-    delete cx->mDigestIterator;
-    cx->mDigestIterator = new nsCString::const_iterator;
-
-    if (!cx->mDigestIterator) {
-      PORT_SetError(SEC_ERROR_NO_MEMORY);
-      return SECFailure;
-    }
-
-    cx->mDigest->BeginReading(*cx->mDigestIterator);
-  }
-  else {
-    delete cx->mDigest;
-    cx->mDigest = new nsCString;
-
-    if (!cx->mDigest) {
-      PORT_SetError(SEC_ERROR_NO_MEMORY);
-      return SECFailure;
-    }
-  }
-
-  return SECSuccess;
-}
-
-// digest_close
-// destroy a possibly active iterator
-// remove the data buffer if requested
-SECStatus
-nsPKCS12Blob::digest_close(void *arg, PRBool remove_it)
-{
-  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
-  NS_ENSURE_TRUE(cx, SECFailure);
-
-  delete cx->mDigestIterator;
-  cx->mDigestIterator = nullptr;
-
-  if (remove_it) {  
-    delete cx->mDigest;
-    cx->mDigest = nullptr;
-  }
-  
-  return SECSuccess;
-}
-
-// digest_read
-// read bytes from the memory buffer
-int
-nsPKCS12Blob::digest_read(void *arg, unsigned char *buf, unsigned long len)
-{
-  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
-  NS_ENSURE_TRUE(cx, SECFailure);
-  NS_ENSURE_TRUE(cx->mDigest, SECFailure);
-
-  // iterator object must exist when digest has been opened in read mode
-  NS_ENSURE_TRUE(cx->mDigestIterator, SECFailure);
-
-  unsigned long available = cx->mDigestIterator->size_forward();
-  
-  if (len > available)
-    len = available;
-
-  memcpy(buf, cx->mDigestIterator->get(), len);
-  cx->mDigestIterator->advance(len);
-  
-  return len;
-}
-
-// digest_write
-// append bytes to the memory buffer
-int
-nsPKCS12Blob::digest_write(void *arg, unsigned char *buf, unsigned long len)
-{
-  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
-  NS_ENSURE_TRUE(cx, SECFailure);
-  NS_ENSURE_TRUE(cx->mDigest, SECFailure);
-
-  // make sure we are in write mode, read iterator has not yet been allocated
-  NS_ENSURE_FALSE(cx->mDigestIterator, SECFailure);
-  
-  cx->mDigest->Append(reinterpret_cast<char *>(buf),
-                     static_cast<uint32_t>(len));
-  
-  return len;
 }
 
 // nickname_collision
@@ -660,17 +539,15 @@ nsPKCS12Blob::nickname_collision(SECItem *oldNick, PRBool *cancel, void *wincx)
     // without a corresponding cert.
     //  XXX If a user imports *many* certs without the 'friendly name'
     //      attribute, then this may take a long time.  :(
+    nickname = nickFromPropC;
     if (count > 1) {
-      nickname.Adopt(PR_smprintf("%s #%d", nickFromPropC.get(), count));
-    } else {
-      nickname = nickFromPropC;
+      nickname.AppendPrintf(" #%d", count);
     }
-    CERTCertificate *cert = CERT_FindCertByNickname(CERT_GetDefaultCertDB(),
-                                           const_cast<char*>(nickname.get()));
+    UniqueCERTCertificate cert(CERT_FindCertByNickname(CERT_GetDefaultCertDB(),
+                                                       nickname.get()));
     if (!cert) {
       break;
     }
-    CERT_DestroyCertificate(cert);
     count++;
   }
   SECItem *newNick = new SECItem;

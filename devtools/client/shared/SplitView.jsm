@@ -5,6 +5,10 @@
 
 "use strict";
 
+const Cu = Components.utils;
+const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {KeyCodes} = require("devtools/client/shared/keycodes");
+
 this.EXPORTED_SYMBOLS = ["SplitView"];
 
 /* this must be kept in sync with CSS (ie. splitview.css) */
@@ -31,7 +35,7 @@ this.SplitView = function SplitView(aRoot)
   this._controller = aRoot.querySelector(".splitview-controller");
   this._nav = aRoot.querySelector(".splitview-nav");
   this._side = aRoot.querySelector(".splitview-side-details");
-  this._activeSummary = null
+  this._activeSummary = null;
 
   this._mql = aRoot.ownerDocument.defaultView.matchMedia(LANDSCAPE_MEDIA_QUERY);
 
@@ -56,16 +60,16 @@ this.SplitView = function SplitView(aRoot)
 
     // handle keyboard navigation within the items list
     let newFocusOrdinal;
-    if (aEvent.keyCode == aEvent.DOM_VK_PAGE_UP ||
-        aEvent.keyCode == aEvent.DOM_VK_HOME) {
+    if (aEvent.keyCode == KeyCodes.DOM_VK_PAGE_UP ||
+        aEvent.keyCode == KeyCodes.DOM_VK_HOME) {
       newFocusOrdinal = 0;
-    } else if (aEvent.keyCode == aEvent.DOM_VK_PAGE_DOWN ||
-               aEvent.keyCode == aEvent.DOM_VK_END) {
+    } else if (aEvent.keyCode == KeyCodes.DOM_VK_PAGE_DOWN ||
+               aEvent.keyCode == KeyCodes.DOM_VK_END) {
       newFocusOrdinal = this._nav.childNodes.length - 1;
-    } else if (aEvent.keyCode == aEvent.DOM_VK_UP) {
+    } else if (aEvent.keyCode == KeyCodes.DOM_VK_UP) {
       newFocusOrdinal = getFocusedItemWithin(this._nav).getAttribute("data-ordinal");
       newFocusOrdinal--;
-    } else if (aEvent.keyCode == aEvent.DOM_VK_DOWN) {
+    } else if (aEvent.keyCode == KeyCodes.DOM_VK_DOWN) {
       newFocusOrdinal = getFocusedItemWithin(this._nav).getAttribute("data-ordinal");
       newFocusOrdinal++;
     }
@@ -78,7 +82,7 @@ this.SplitView = function SplitView(aRoot)
       return false;
     }
   }, false);
-}
+};
 
 SplitView.prototype = {
   /**

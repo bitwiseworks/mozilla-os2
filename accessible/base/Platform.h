@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef mozilla_a11y_Platform_h
+#define mozilla_a11y_Platform_h
+
 #include <stdint.h>
 
 class nsString;
@@ -75,6 +78,11 @@ void ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset);
 void ProxyTextChangeEvent(ProxyAccessible* aTarget, const nsString& aStr,
                           int32_t aStart, uint32_t aLen, bool aIsInsert,
                           bool aFromUser);
+void ProxyShowHideEvent(ProxyAccessible* aTarget, ProxyAccessible* aParent,
+                        bool aInsert, bool aFromUser);
+void ProxySelectionEvent(ProxyAccessible* aTarget, ProxyAccessible* aWidget,
+                         uint32_t aType);
 } // namespace a11y
 } // namespace mozilla
 
+#endif // mozilla_a11y_Platform_h

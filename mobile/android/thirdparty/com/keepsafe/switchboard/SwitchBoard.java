@@ -20,25 +20,26 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.ProtocolException;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
-import java.util.UUID;
 import java.util.zip.CRC32;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
-import android.support.v4.content.LocalBroadcastManager;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
+
 
 /**
  * SwitchBoard is the core class of the KeepSafe Switchboard mobile A/B testing framework.
@@ -58,389 +59,332 @@ import android.util.Log;
  *
  */
 public class SwitchBoard {
-	
-	private static final String TAG = "SwitchBoard";
-	
-	/** Set if the application is run in debug mode. DynamicConfig runs against staging server when in debug and production when not */
-	public static boolean DEBUG = true;
-	
-	/** Production server to update the remote server URLs. http://staging.domain/path_to/SwitchboardURLs.php */
-	private static String DYNAMIC_CONFIG_SERVER_URL_UPDATE;
-	
-	/** Production server for getting the actual config file. http://staging.domain/path_to/SwitchboardDriver.php */
-	private static String DYNAMIC_CONFIG_SERVER_DEFAULT_URL;
-	
-	public static final String ACTION_CONFIG_FETCHED = ".SwitchBoard.CONFIG_FETCHED";
 
-	private static final String kUpdateServerUrl = "updateServerUrl";
-	private static final String kConfigServerUrl = "configServerUrl";
-	
-	private static final String IS_EXPERIMENT_ACTIVE = "isActive";
-	private static final String EXPERIMENT_VALUES = "values";
-	
-	
-	/**
-	 * Basic initialization with one server. 
-	 * @param configServerUpdateUrl Url to: http://staging.domain/path_to/SwitchboardURLs.php 
-	 * @param configServerUrl Url to: http://staging.domain/path_to/SwitchboardDriver.php - the acutall config
-	 * @param isDebug Is the application running in debug mode. This will add log messages.
-	 */
-	public static void initDefaultServerUrls(String configServerUpdateUrl, String configServerUrl,
-			boolean isDebug) {
-		
-		DYNAMIC_CONFIG_SERVER_URL_UPDATE = configServerUpdateUrl;
-		DYNAMIC_CONFIG_SERVER_DEFAULT_URL = configServerUrl;
-		DEBUG = isDebug;
-	}
-	
-	/**
-	 * Advanced initialization that supports a production and staging environment without changing the server URLs manually.
-	 * SwitchBoard will connect to the staging environment in debug mode. This makes it very simple to test new experiements
-	 * during development.
-	 * @param configServerUpdateUrlStaging Url to http://staging.domain/path_to/SwitchboardURLs.php in staging environment
-	 * @param configServerUrlStaging Url to: http://staging.domain/path_to/SwitchboardDriver.php in production - the acutall config
-	 * @param configServerUpdateUrl Url to http://staging.domain/path_to/SwitchboardURLs.php in production environment
-	 * @param configServerUrl Url to: http://staging.domain/path_to/SwitchboardDriver.php in production - the acutall config
-	 * @param isDebug Defines if the app runs in debug.
-	 */
-	public static void initDefaultServerUrls(String configServerUpdateUrlStaging, String configServerUrlStaging, 
-			String configServerUpdateUrl, String configServerUrl,
-			boolean isDebug) {
-		
-		if(isDebug) {
-			DYNAMIC_CONFIG_SERVER_URL_UPDATE = configServerUpdateUrlStaging;
-			DYNAMIC_CONFIG_SERVER_DEFAULT_URL = configServerUrlStaging;
-		} else {
-			DYNAMIC_CONFIG_SERVER_URL_UPDATE = configServerUpdateUrl;
-			DYNAMIC_CONFIG_SERVER_DEFAULT_URL = configServerUrl;	
-		}
-		
-		DEBUG = isDebug;
-	}
-	
-	/**
-	 * Updates the server URLs from remote and stores it locally in the app. This allows to move the server side
-	 * whith users already using Switchboard. 
-	 * When there is no internet connection it will continue to use the URLs from the last time or 
-	 * default URLS that have been set with <code>initDefaultServerUrls</code>.
-	 * 
-	 * This methode should always be executed in a background thread to not block the UI.
-	 * 
-	 * @param c Application context
-	 */
-	public static void updateConfigServerUrl(Context c) {
-		if(DEBUG) Log.d(TAG, "start initConfigServerUrl");
-		
-		if(DEBUG) {
-			//set default value that is set in code for debug mode.
-			Preferences.setDynamicConfigServerUrl(c, DYNAMIC_CONFIG_SERVER_URL_UPDATE, DYNAMIC_CONFIG_SERVER_DEFAULT_URL);
-			return;
-		}
-		
-		//lookup new config server url from the one that is in shared prefs
-		String updateServerUrl = Preferences.getDynamicUpdateServerUrl(c);
-		
-		//set to default when not set in preferences
-		if(updateServerUrl == null) 
-			updateServerUrl = DYNAMIC_CONFIG_SERVER_URL_UPDATE;
-		
-		try {
-			String result = readFromUrlGET(updateServerUrl, "");
-			if(DEBUG) Log.d(TAG, "Result String: " + result);
-			
-			if(result != null){
-				JSONObject a = new JSONObject(result);
-				
-				Preferences.setDynamicConfigServerUrl(c, (String)a.get(kUpdateServerUrl), (String)a.get(kConfigServerUrl));
-				
-				if(DEBUG) Log.d(TAG, "Update Server Url: " + (String)a.get(kUpdateServerUrl));
-				if(DEBUG) Log.d(TAG, "Config Server Url: " + (String)a.get(kConfigServerUrl));
-			} else {
-				storeDefaultUrlsInPreferences(c);
-			}
-			
-		} catch (JSONException e) {
-			e.printStackTrace();
-		}
-		
-		if(DEBUG) Log.d(TAG, "end initConfigServerUrl");
-	}
-	
-	/**
-	 * Loads a new config file for the specific user from current config server. Uses internal unique user ID.
-	 * Use this method only in background thread as network connections are involved that block UI thread.
-	 * Use AsyncConfigLoader() for easy background threading.
-	 * @param c ApplicationContext
-	 */
-	public static void loadConfig(Context c) {
-		loadConfig(c, null);
-	}
+    private static final String TAG = "SwitchBoard";
 
-	/**
-	 * Loads a new config for a user. This method allows you to pass your own unique user ID instead of using 
-	 * the SwitchBoard internal user ID.
-	 * Don't call method direct for background threading reasons. 
-	 * @param c ApplicationContext
-	 * @param uuid Custom unique user ID
-	 */
-	public static void loadConfig(Context c, String uuid) {
-		
-		try {
-			
-			//get uuid
-			if(uuid == null) {
-				DeviceUuidFactory df = new DeviceUuidFactory(c);
-				uuid = df.getDeviceUuid().toString();
-			}
-			
-			String device = Build.DEVICE;
-			String manufacturer = Build.MANUFACTURER;
-			String lang = "unknown";
-			try {
-				lang = Locale.getDefault().getISO3Language();
-			} catch (MissingResourceException e) {
-				e.printStackTrace();
-			}
-			String country = "unknown";
-			try {
-				country = Locale.getDefault().getISO3Country();
-			} catch (MissingResourceException e) {
-				e.printStackTrace();
-			}
-			String packageName = c.getPackageName();
-			String versionName = "none";
-			try {
-				versionName = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
-			} catch (NameNotFoundException e) {
-				e.printStackTrace();
-			}
-			
-			//load config, includes all experiments
-			String serverUrl = Preferences.getDynamicConfigServerUrl(c);
-			
-			if(serverUrl != null) {
-				String params = "uuid="+uuid+"&device="+device+"&lang="+lang+"&country="+country
-						+"&manufacturer="+manufacturer+"&appId="+packageName+"&version="+versionName;
-				if(DEBUG) Log.d(TAG, "Read from server URL: " + serverUrl + params);
-				String serverConfig = readFromUrlGET(serverUrl, params);
-				
-				if(DEBUG) Log.d(TAG, serverConfig);
-				
-				//store experiments in shared prefs (one variable)
-				if(serverConfig != null)
-					Preferences.setDynamicConfigJson(c, serverConfig);
-			}
-			
-		} catch (NullPointerException e) {
-			e.printStackTrace();
-		}
+    /** Set if the application is run in debug mode. */
+    public static boolean DEBUG = true;
 
-		//notify listeners that the config fetch has completed
-		Intent i = new Intent(ACTION_CONFIG_FETCHED);
-		LocalBroadcastManager.getInstance(c).sendBroadcast(i);
-	}
+    // Top-level experiment keys.
+    private static final String KEY_DATA = "data";
+    private static final String KEY_NAME = "name";
+    private static final String KEY_MATCH = "match";
+    private static final String KEY_BUCKETS = "buckets";
+    private static final String KEY_VALUES = "values";
 
-	public static boolean isInBucket(Context c, int low, int high) {
-		int userBucket = getUserBucket(c);
-		if (userBucket >= low && userBucket < high)
-			return true;
-		else
-			return false;
-	}
+    // Match keys.
+    private static final String KEY_APP_ID = "appId";
+    private static final String KEY_COUNTRY = "country";
+    private static final String KEY_DEVICE = "device";
+    private static final String KEY_LANG = "lang";
+    private static final String KEY_MANUFACTURER = "manufacturer";
+    private static final String KEY_VERSION = "version";
 
-	/**
-	 * Looks up in config if user is in certain experiment. Returns false as a default value when experiment
-	 * does not exist.
-	 * Experiment names are defined server side as Key in array for return values.
-	 * @param experimentName Name of the experiment to lookup
-	 * @return returns value for experiment or false if experiment does not exist.
-	 */
-	public static boolean isInExperiment(Context c, String experimentName) {
-		return isInExperiment(c, experimentName, false);
-	}
-	
-	/**
-	 * Looks up in config if user is in certain experiment.
-	 * Experiment names are defined server side as Key in array for return values.
-	 * @param experimentName Name of the experiment to lookup
-	 * @param defaultReturnVal The return value that should be return when experiment does not exist
-	 * @return returns value for experiment or defaultReturnVal if experiment does not exist.
-	 */
-	public static boolean isInExperiment(Context c, String experimentName, boolean defaultReturnVal) {
-		//lookup experiment in config
-		String config = Preferences.getDynamicConfigJson(c);
-		
-		//if it does not exist
-		if(config == null)
-			return false;
-		else {
-			
-			try {
-				JSONObject experiment = (JSONObject) new JSONObject(config).get(experimentName);
-				if(DEBUG) Log.d(TAG, "experiment " + experimentName + " JSON object: " + experiment.toString());
-				if(experiment == null)
-					return defaultReturnVal;
-				
-				boolean returnValue = defaultReturnVal;
-				returnValue = experiment.getBoolean(IS_EXPERIMENT_ACTIVE);
-				
-				return returnValue;
-			} catch (JSONException e) {
-				Log.e(TAG, "Config: " + config);
-				e.printStackTrace();
-				
-			}
-		
-			//return false when JSON fails
-			return defaultReturnVal;
-		}
-		
-	}
-	
-	/**
-	 * @returns a list of all active experiments.
-	 */
-	public static List<String> getActiveExperiments(Context c) {
-		ArrayList<String> returnList = new ArrayList<String>();
+    // Bucket keys.
+    private static final String KEY_MIN = "min";
+    private static final String KEY_MAX = "max";
 
-		// lookup experiment in config
-		String config = Preferences.getDynamicConfigJson(c);
+    /**
+     * Loads a new config for a user. This method does network I/O, so it
+     * should not be called on the main thread.
+     *
+     * @param c ApplicationContext
+     * @param serverUrl Server URL endpoint.
+     */
+    static void loadConfig(Context c, @NonNull String serverUrl) {
+        final URL url;
+        try {
+            url = new URL(serverUrl);
+        } catch (MalformedURLException e) {
+            Log.e(TAG, "Exception creating server URL", e);
+            return;
+        }
 
-		// if it does not exist
-		if (config == null) {
-			return returnList;
-		}
+        final String result = readFromUrlGET(url);
+        if (DEBUG) Log.d(TAG, "Result: " + result);
+        if (result == null) {
+            return;
+        }
 
-		try {
-			JSONObject experiments = new JSONObject(config);
-			Iterator<?> iter = experiments.keys();
-			while (iter.hasNext()) {
-				String key = (String)iter.next();
-				JSONObject experiment = experiments.getJSONObject(key);
-				if (experiment.getBoolean(IS_EXPERIMENT_ACTIVE)) {
-					returnList.add(key);
-				}
-			}
-		} catch (JSONException e) {
-			// Something went wrong!
-		}
+        // Cache result locally in shared preferences.
+        Preferences.setDynamicConfigJson(c, result);
+    }
 
-		return returnList;
-	}
+    public static boolean isInBucket(Context c, int low, int high) {
+        final int userBucket = getUserBucket(c);
+        return (userBucket >= low) && (userBucket < high);
+    }
 
-	/**
-	 * Checks if a certain experiment exists. 
-	 * @param c ApplicationContext
-	 * @param experimentName Name of the experiment
-	 * @return true when experiment exists
-	 */
-	public static boolean hasExperimentValues(Context c, String experimentName) {
-		if(getExperimentValueFromJson(c, experimentName) == null)
-			return false;
-		else
-			return true;
-	}
-	
-	/**
-	 * Returns the experiment value as a JSONObject. Depending on what experiment is has to be converted to the right type.
-	 * Typcasting is by convention. You have to know what it's in there. Use <code>hasExperiment()</code>
-	 * before this to avoid NullPointerExceptions. 
-	 * @param experimentName Name of the experiment to lookup
-	 * @return Experiment value as String, null if experiment does not exist.
-	 */
-	public static JSONObject getExperimentValueFromJson(Context c, String experimentName) {
-		String config = Preferences.getDynamicConfigJson(c);
-		
-		if(config == null)
-			return null;
-		
-		try {
-			JSONObject experiment = (JSONObject) new JSONObject(config).get(experimentName);
-			JSONObject values = experiment.getJSONObject(EXPERIMENT_VALUES);
-			
-			return values;
-			
-		} catch (JSONException e) {
-			Log.e(TAG, "Config: " + config);
-			e.printStackTrace();
-			Log.e(TAG, "Could not create JSON object from config string", e);
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Sets config server URLs in shared prefs to defaul when not set already. It keeps
-	 * URLs when already set in shared preferences.
-	 * @param c
-	 */
-	private static void storeDefaultUrlsInPreferences(Context c) {
-		String configUrl = Preferences.getDynamicConfigServerUrl(c);
-		String updateUrl = Preferences.getDynamicUpdateServerUrl(c);
-			
-		if(configUrl == null)
-			configUrl = DYNAMIC_CONFIG_SERVER_DEFAULT_URL;
-		
-		if(updateUrl == null)
-			updateUrl = DYNAMIC_CONFIG_SERVER_URL_UPDATE;
-		
-		Preferences.setDynamicConfigServerUrl(c, updateUrl, configUrl);
-	}
-	
-	/**
-	 * Returns a String containing the server response from a GET request
-	 * @param address Valid http addess.
-	 * @param params String of params. Multiple params seperated with &. No leading ? in string
-	 * @return Returns String from server or null when failed.
-	 */
-	private static String readFromUrlGET(String address, String params) {
-		if(address == null || params == null)
-			return null;
-		
-		String completeUrl = address + "?" + params;
-		if(DEBUG) Log.d(TAG, "readFromUrl(): " + completeUrl);
-		
-		try {
-			URL url = new URL(completeUrl);
-			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-			connection.setRequestMethod("GET");
-			connection.setUseCaches(false);
+    /**
+     * Looks up in config if user is in certain experiment. Returns false as a default value when experiment
+     * does not exist.
+     * Experiment names are defined server side as Key in array for return values.
+     * @param experimentName Name of the experiment to lookup
+     * @return returns value for experiment or false if experiment does not exist.
+     */
+    public static boolean isInExperiment(Context c, String experimentName) {
+        final Boolean override = Preferences.getOverrideValue(c, experimentName);
+        if (override != null) {
+            return override;
+        }
 
-			// get response
-			InputStream is = connection.getInputStream();
-			InputStreamReader inputStreamReader = new InputStreamReader(is);
-			BufferedReader bufferReader = new BufferedReader(inputStreamReader, 8192);
-			String line = "";
-			StringBuffer resultContent = new StringBuffer();
-			while ((line = bufferReader.readLine()) != null) {
-				if(DEBUG) Log.d(TAG, line);
-				resultContent.append(line);
-			}
-			bufferReader.close();
-			
-			if(DEBUG) Log.d(TAG, "readFromUrl() result: " + resultContent.toString());
-			
-			return resultContent.toString();
-		} catch (ProtocolException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+        final String config = Preferences.getDynamicConfigJson(c);
+        if (config == null) {
+            return false;
+        }
 
-		return null;
-	}
+        try {
+            // TODO: cache the array into a mapping so we don't do a loop everytime we are looking for a experiment key
+            final JSONArray experiments = new JSONObject(config).getJSONArray(KEY_DATA);
+            JSONObject experiment = null;
 
-	/**
-	 * Return the bucket number of the user. There are 100 possible buckets.
-	 */
-	private static int getUserBucket(Context c) {
-		//get uuid
-		DeviceUuidFactory df = new DeviceUuidFactory(c);
-		String uuid = df.getDeviceUuid().toString();
+            for (int i = 0; i < experiments.length(); i++) {
+                JSONObject entry = experiments.getJSONObject(i);
+                final String name = entry.getString(KEY_NAME);
+                if (name.equals(experimentName)) {
+                    experiment = entry;
+                    break;
+                }
+            }
 
-		CRC32 crc = new CRC32();
-		crc.update(uuid.getBytes());
-		long checksum = crc.getValue();
-		return (int)(checksum % 100L);
-	}
+            if (experiment == null) {
+                return false;
+            }
+
+            if (!isMatch(c, experiment.optJSONObject(KEY_MATCH))) {
+                return false;
+            }
+
+            final JSONObject buckets = experiment.getJSONObject(KEY_BUCKETS);
+            final boolean inExperiment = isInBucket(c, buckets.getInt(KEY_MIN), buckets.getInt(KEY_MAX));
+
+            if (DEBUG) {
+                Log.d(TAG, experimentName + " = " + inExperiment);
+            }
+            return inExperiment;
+        } catch (JSONException e) {
+            // If the experiment name is not found in the JSON, just return false.
+            // There is no need to log an error, since we don't really care if an
+            // inactive experiment is missing from the config.
+            return false;
+        }
+    }
+
+    private static List<String> getExperimentNames(Context c) throws JSONException {
+        // TODO: cache the array into a mapping so we don't do a loop everytime we are looking for a experiment key
+        final List<String> returnList = new ArrayList<>();
+        final String config = Preferences.getDynamicConfigJson(c);
+        final JSONArray experiments = new JSONObject(config).getJSONArray(KEY_DATA);
+
+        for (int i = 0; i < experiments.length(); i++) {
+            JSONObject entry = experiments.getJSONObject(i);
+            returnList.add(entry.getString(KEY_NAME));
+        }
+        return returnList;
+    }
+
+    @Nullable
+    private static JSONObject getExperiment(Context c, String experimentName) throws JSONException {
+        // TODO: cache the array into a mapping so we don't do a loop everytime we are looking for a experiment key
+        final String config = Preferences.getDynamicConfigJson(c);
+        final JSONArray experiments = new JSONObject(config).getJSONArray(KEY_DATA);
+        JSONObject experiment = null;
+
+        for (int i = 0; i < experiments.length(); i++) {
+            JSONObject entry = experiments.getJSONObject(i);
+            if (entry.getString(KEY_NAME).equals(experimentName)) {
+                experiment = entry;
+                break;
+            }
+        }
+        return experiment;
+    }
+
+    private static boolean isMatch(Context c, @Nullable JSONObject matchKeys) {
+        // If no match keys are specified, default to enabling the experiment.
+        if (matchKeys == null) {
+            return true;
+        }
+
+        if (matchKeys.has(KEY_APP_ID)) {
+            final String packageName = c.getPackageName();
+            try {
+                if (!packageName.matches(matchKeys.getString(KEY_APP_ID))) {
+                    return false;
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "Exception matching appId", e);
+            }
+        }
+
+        if (matchKeys.has(KEY_COUNTRY)) {
+            try {
+                final String country = Locale.getDefault().getISO3Country();
+                if (!country.matches(matchKeys.getString(KEY_COUNTRY))) {
+                    return false;
+                }
+            } catch (MissingResourceException|JSONException e) {
+                Log.e(TAG, "Exception matching country", e);
+            }
+        }
+
+        if (matchKeys.has(KEY_DEVICE)) {
+            final String device = Build.DEVICE;
+            try {
+                if (!device.matches(matchKeys.getString(KEY_DEVICE))) {
+                    return false;
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "Exception matching device", e);
+            }
+
+        }
+        if (matchKeys.has(KEY_LANG)) {
+            try {
+                final String lang = Locale.getDefault().getISO3Language();
+                if (!lang.matches(matchKeys.getString(KEY_LANG))) {
+                    return false;
+                }
+            } catch (MissingResourceException|JSONException e) {
+                Log.e(TAG, "Exception matching lang", e);
+            }
+        }
+        if (matchKeys.has(KEY_MANUFACTURER)) {
+            final String manufacturer = Build.MANUFACTURER;
+            try {
+                if (!manufacturer.matches(matchKeys.getString(KEY_MANUFACTURER))) {
+                    return false;
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "Exception matching manufacturer", e);
+            }
+        }
+
+        if (matchKeys.has(KEY_VERSION)) {
+            try {
+                final String version = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+                if (!version.matches(matchKeys.getString(KEY_VERSION))) {
+                    return false;
+                }
+            } catch (NameNotFoundException|JSONException e) {
+                Log.e(TAG, "Exception matching version", e);
+            }
+        }
+
+        // Default to return true if no matches failed.
+        return true;
+    }
+
+    /**
+     * @return a list of all active experiments.
+     */
+    public static List<String> getActiveExperiments(Context c) {
+        final List<String> returnList = new ArrayList<>();
+
+        final String config = Preferences.getDynamicConfigJson(c);
+        if (config == null) {
+            return returnList;
+        }
+
+        try {
+            final JSONObject data = new JSONObject(config);
+            final List<String> experiments = getExperimentNames(c);
+
+            for (int i = 0; i < experiments.size(); i++)  {
+                final String name = experiments.get(i);
+
+                // Check override value before reading saved JSON.
+                Boolean isActive = Preferences.getOverrideValue(c, name);
+                if (isActive == null) {
+                    // TODO: This is inefficient because it will check all the match cases on all experiments.
+                    isActive = isInExperiment(c, name);
+                }
+                if (isActive) {
+                    returnList.add(name);
+                }
+            }
+        } catch (JSONException e) {
+            // Something went wrong!
+        }
+
+        return returnList;
+    }
+
+    /**
+     * Checks if a certain experiment has additional values.
+     * @param c ApplicationContext
+     * @param experimentName Name of the experiment
+     * @return true when experiment exists
+     */
+    public static boolean hasExperimentValues(Context c, String experimentName) {
+        return getExperimentValuesFromJson(c, experimentName) != null;
+    }
+
+    /**
+     * Returns the experiment value as a JSONObject.
+     * @param experimentName Name of the experiment
+     * @return Experiment value as String, null if experiment does not exist.
+     */
+    @Nullable
+    public static JSONObject getExperimentValuesFromJson(Context c, String experimentName) {
+        final String config = Preferences.getDynamicConfigJson(c);
+
+        if (config == null) {
+            return null;
+        }
+
+        try {
+            final JSONObject experiment = getExperiment(c, experimentName);
+            if (experiment == null) {
+                return null;
+            }
+            return experiment.getJSONObject(KEY_VALUES);
+        } catch (JSONException e) {
+            Log.e(TAG, "Could not create JSON object from config string", e);
+        }
+
+        return null;
+    }
+
+    /**
+     * Returns a String containing the server response from a GET request
+     * @param url URL for GET request.
+     * @return Returns String from server or null when failed.
+     */
+    @Nullable private static String readFromUrlGET(URL url) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setUseCaches(false);
+
+            InputStream is = connection.getInputStream();
+            InputStreamReader inputStreamReader = new InputStreamReader(is);
+            BufferedReader bufferReader = new BufferedReader(inputStreamReader, 8192);
+            String line;
+            StringBuilder resultContent = new StringBuilder();
+            while ((line = bufferReader.readLine()) != null) {
+                resultContent.append(line);
+            }
+            bufferReader.close();
+
+            return resultContent.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    /**
+     * Return the bucket number of the user. There are 100 possible buckets.
+     */
+    private static int getUserBucket(Context c) {
+        final DeviceUuidFactory df = new DeviceUuidFactory(c);
+        final String uuid = df.getDeviceUuid().toString();
+
+        CRC32 crc = new CRC32();
+        crc.update(uuid.getBytes());
+        long checksum = crc.getValue();
+        return (int)(checksum % 100L);
+    }
 }

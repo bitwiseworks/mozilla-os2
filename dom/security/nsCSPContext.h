@@ -81,6 +81,10 @@ class nsCSPContext : public nsIContentSecurityPolicy
       mLoadingPrincipal = nullptr;
     }
 
+    nsWeakPtr GetLoadingContext(){
+      return mLoadingContext;
+    }
+
   private:
     bool permitsInternal(CSPDirective aDir,
                          nsIURI* aContentLocation,
@@ -90,7 +94,8 @@ class nsCSPContext : public nsIContentSecurityPolicy
                          bool aIsPreload,
                          bool aSpecific,
                          bool aSendViolationReports,
-                         bool aSendContentLocationInViolationReports);
+                         bool aSendContentLocationInViolationReports,
+                         bool aParserCreated);
 
     // helper to report inline script/style violations
     void reportInlineViolation(nsContentPolicyType aContentType,

@@ -57,8 +57,7 @@ struct PlaceholderMapEntry : public PLDHashEntryHdr {
 };
 
 static bool
-PlaceholderMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                         const void *key)
+PlaceholderMapMatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   const PlaceholderMapEntry *entry =
     static_cast<const PlaceholderMapEntry*>(hdr);
@@ -172,21 +171,17 @@ nsFrameManager::GetPlaceholderFrameFor(const nsIFrame* aFrame)
   return nullptr;
 }
 
-nsresult
+void
 nsFrameManager::RegisterPlaceholderFrame(nsPlaceholderFrame* aPlaceholderFrame)
 {
-  NS_PRECONDITION(aPlaceholderFrame, "null param unexpected");
-  NS_PRECONDITION(nsGkAtoms::placeholderFrame == aPlaceholderFrame->GetType(),
-                  "unexpected frame type");
+  MOZ_ASSERT(aPlaceholderFrame, "null param unexpected");
+  MOZ_ASSERT(nsGkAtoms::placeholderFrame == aPlaceholderFrame->GetType(),
+             "unexpected frame type");
   auto entry = static_cast<PlaceholderMapEntry*>
-    (mPlaceholderMap.Add(aPlaceholderFrame->GetOutOfFlowFrame(), fallible));
-  if (!entry)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  NS_ASSERTION(!entry->placeholderFrame, "Registering a placeholder for a frame that already has a placeholder!");
+    (mPlaceholderMap.Add(aPlaceholderFrame->GetOutOfFlowFrame()));
+  MOZ_ASSERT(!entry->placeholderFrame,
+             "Registering a placeholder for a frame that already has a placeholder!");
   entry->placeholderFrame = aPlaceholderFrame;
-
-  return NS_OK;
 }
 
 void
@@ -217,7 +212,8 @@ nsFrameManager::GetStyleContextInMap(UndisplayedMap* aMap, nsIContent* aContent)
   if (!aContent) {
     return nullptr;
   }
-  nsIContent* parent = aContent->GetParent();
+  nsIContent* parent = aContent->GetParentElementCrossingShadowRoot();
+  MOZ_ASSERT(parent || !aContent->GetParent(), "no non-elements");
   for (UndisplayedNode* node = aMap->GetFirstNode(parent);
          node; node = node->mNext) {
     if (node->mContent == aContent)
@@ -256,7 +252,8 @@ nsFrameManager::SetStyleContextInMap(UndisplayedMap* aMap,
   NS_ASSERTION(!GetStyleContextInMap(aMap, aContent),
                "Already have an entry for aContent");
 
-  nsIContent* parent = aContent->GetParent();
+  nsIContent* parent = aContent->GetParentElementCrossingShadowRoot();
+  MOZ_ASSERT(parent || !aContent->GetParent(), "no non-elements");
 #ifdef DEBUG
   nsIPresShell* shell = aStyleContext->PresContext()->PresShell();
   NS_ASSERTION(parent || (shell && shell->GetDocument() &&
@@ -552,8 +549,8 @@ nsFrameManager::CaptureFrameStateFor(nsIFrame* aFrame,
   // Exit early if we get empty key
   nsAutoCString stateKey;
   nsIContent* content = aFrame->GetContent();
-  nsIDocument* doc = content ? content->GetCurrentDoc() : nullptr;
-  rv = nsContentUtils::GenerateStateKey(content, doc, stateKey);
+  nsIDocument* doc = content ? content->GetUncomposedDoc() : nullptr;
+  rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
   if(NS_FAILED(rv) || stateKey.IsEmpty()) {
     return;
   }
@@ -615,8 +612,8 @@ nsFrameManager::RestoreFrameStateFor(nsIFrame* aFrame,
   }
 
   nsAutoCString stateKey;
-  nsIDocument* doc = content->GetCurrentDoc();
-  nsresult rv = nsContentUtils::GenerateStateKey(content, doc, stateKey);
+  nsIDocument* doc = content->GetUncomposedDoc();
+  nsresult rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
   if (NS_FAILED(rv) || stateKey.IsEmpty()) {
     return;
   }

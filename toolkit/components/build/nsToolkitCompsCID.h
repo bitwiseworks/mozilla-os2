@@ -39,9 +39,6 @@
 #define NS_GLOBALHISTORY_DATASOURCE_CONTRACTID \
   "@mozilla.org/rdf/datasource;1?name=history"
 
-#define NS_GLOBALHISTORY_AUTOCOMPLETE_CONTRACTID \
-    "@mozilla.org/autocomplete/search;1?name=history"
-
 #define NS_TYPEAHEADFIND_CONTRACTID \
     "@mozilla.org/typeaheadfind;1"
 
@@ -96,6 +93,9 @@
     "@mozilla.org/addon-path-service;1"
 
 /////////////////////////////////////////////////////////////////////////////
+
+#define ALERT_NOTIFICATION_CID \
+{ 0x9a7b7a41, 0x0b47, 0x47f7, { 0xb6, 0x1b, 0x15, 0xa2, 0x10, 0xd6, 0xf0, 0x20 } }
 
 // {A0CCAAF8-09DA-44D8-B250-9AC3E93C8117}
 #define NS_ALERTSSERVICE_CID \

@@ -134,6 +134,12 @@ JSRuntime::initializeAtoms(JSContext* cx)
 #define COMMON_NAME_INFO(name, code, init, clasp) { js_##name##_str, sizeof(#name) - 1 },
         JS_FOR_EACH_PROTOTYPE(COMMON_NAME_INFO)
 #undef COMMON_NAME_INFO
+#define COMMON_NAME_INFO(name) { #name, sizeof(#name) - 1 },
+        JS_FOR_EACH_WELL_KNOWN_SYMBOL(COMMON_NAME_INFO)
+#undef COMMON_NAME_INFO
+#define COMMON_NAME_INFO(name) { "Symbol." #name, sizeof("Symbol." #name) - 1 },
+        JS_FOR_EACH_WELL_KNOWN_SYMBOL(COMMON_NAME_INFO)
+#undef COMMON_NAME_INFO
     };
 
     commonNames = cx->new_<JSAtomState>();
@@ -191,10 +197,14 @@ JSRuntime::finishAtoms()
 }
 
 void
-js::MarkAtoms(JSTracer* trc)
+js::MarkAtoms(JSTracer* trc, AutoLockForExclusiveAccess& lock)
 {
     JSRuntime* rt = trc->runtime();
-    for (AtomSet::Enum e(rt->atoms()); !e.empty(); e.popFront()) {
+
+    if (rt->atomsAreFinished())
+        return;
+
+    for (AtomSet::Enum e(rt->atoms(lock)); !e.empty(); e.popFront()) {
         const AtomStateEntry& entry = e.front();
         if (!entry.isPinned())
             continue;
@@ -222,7 +232,7 @@ js::MarkPermanentAtoms(JSTracer* trc)
         for (FrozenAtomSet::Range r(rt->permanentAtoms->all()); !r.empty(); r.popFront()) {
             const AtomStateEntry& entry = r.front();
 
-            JSAtom* atom = entry.asPtr();
+            JSAtom* atom = entry.asPtrUnbarriered();
             TraceProcessGlobalRoot(trc, atom, "permanent_table");
         }
     }
@@ -266,7 +276,7 @@ JSRuntime::transformToPermanentAtoms(JSContext* cx)
 
     for (FrozenAtomSet::Range r(permanentAtoms->all()); !r.empty(); r.popFront()) {
         AtomStateEntry entry = r.front();
-        JSAtom* atom = entry.asPtr();
+        JSAtom* atom = entry.asPtr(cx);
         atom->morphIntoPermanentAtom();
     }
 
@@ -290,7 +300,7 @@ AtomIsPinned(JSContext* cx, JSAtom* atom)
 
     AutoLockForExclusiveAccess lock(cx);
 
-    p = cx->runtime()->atoms().lookup(lookup);
+    p = cx->runtime()->atoms(lock).lookup(lookup);
     if (!p)
         return false;
 
@@ -316,20 +326,20 @@ AtomizeAndCopyChars(ExclusiveContext* cx, const CharT* tbchars, size_t length, P
     if (cx->isPermanentAtomsInitialized()) {
         AtomSet::Ptr pp = cx->permanentAtoms().readonlyThreadsafeLookup(lookup);
         if (pp)
-            return pp->asPtr();
+            return pp->asPtr(cx);
     }
 
     AutoLockForExclusiveAccess lock(cx);
 
-    AtomSet& atoms = cx->atoms();
+    AtomSet& atoms = cx->atoms(lock);
     AtomSet::AddPtr p = atoms.lookupForAdd(lookup);
     if (p) {
-        JSAtom* atom = p->asPtr();
+        JSAtom* atom = p->asPtr(cx);
         p->setPinned(bool(pin));
         return atom;
     }
 
-    AutoCompartment ac(cx, cx->atomsCompartment());
+    AutoCompartment ac(cx, cx->atomsCompartment(lock), &lock);
 
     JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
     if (!flat) {
@@ -380,9 +390,9 @@ js::AtomizeString(ExclusiveContext* cx, JSString* str,
 
         AutoLockForExclusiveAccess lock(cx);
 
-        p = cx->atoms().lookup(lookup);
+        p = cx->atoms(lock).lookup(lookup);
         MOZ_ASSERT(p); /* Non-static atom must exist in atom state set. */
-        MOZ_ASSERT(p->asPtr() == &atom);
+        MOZ_ASSERT(p->asPtrUnbarriered() == &atom);
         MOZ_ASSERT(pin == PinAtom);
         p->setPinned(bool(pin));
         return &atom;
@@ -428,6 +438,23 @@ js::AtomizeChars(ExclusiveContext* cx, const Latin1Char* chars, size_t length, P
 template JSAtom*
 js::AtomizeChars(ExclusiveContext* cx, const char16_t* chars, size_t length, PinningBehavior pin);
 
+JSAtom*
+js::AtomizeUTF8Chars(JSContext* cx, const char* utf8Chars, size_t utf8ByteLength)
+{
+    // This could be optimized to hand the char16_t's directly to the JSAtom
+    // instead of making a copy. UTF8CharsToNewTwoByteCharsZ should be
+    // refactored to take an ExclusiveContext so that this function could also.
+
+    UTF8Chars utf8(utf8Chars, utf8ByteLength);
+
+    size_t length;
+    UniqueTwoByteChars chars(JS::UTF8CharsToNewTwoByteCharsZ(cx, utf8, &length).get());
+    if (!chars)
+        return nullptr;
+
+    return AtomizeChars(cx, chars.get(), length);
+}
+
 bool
 js::IndexToIdSlow(ExclusiveContext* cx, uint32_t index, MutableHandleId idp)
 {
@@ -461,12 +488,24 @@ ToAtomSlow(ExclusiveContext* cx, typename MaybeRooted<Value, allowGC>::HandleTyp
         v = v2;
     }
 
-    if (v.isString())
-        return AtomizeString(cx, v.toString());
-    if (v.isInt32())
-        return Int32ToAtom(cx, v.toInt32());
-    if (v.isDouble())
-        return NumberToAtom(cx, v.toDouble());
+    if (v.isString()) {
+        JSAtom* atom = AtomizeString(cx, v.toString());
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
+    if (v.isInt32()) {
+        JSAtom* atom = Int32ToAtom(cx, v.toInt32());
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
+    if (v.isDouble()) {
+        JSAtom* atom = NumberToAtom(cx, v.toDouble());
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
     if (v.isBoolean())
         return v.toBoolean() ? cx->names().true_ : cx->names().false_;
     if (v.isNull())
@@ -497,7 +536,7 @@ template JSAtom*
 js::ToAtom<CanGC>(ExclusiveContext* cx, HandleValue v);
 
 template JSAtom*
-js::ToAtom<NoGC>(ExclusiveContext* cx, Value v);
+js::ToAtom<NoGC>(ExclusiveContext* cx, const Value& v);
 
 template<XDRMode mode>
 bool
@@ -527,12 +566,16 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
     JSContext* cx = xdr->cx();
     JSAtom* atom;
     if (latin1) {
-        const Latin1Char* chars = reinterpret_cast<const Latin1Char*>(xdr->buf.read(length));
+        const Latin1Char* chars = nullptr;
+        if (length)
+            chars = reinterpret_cast<const Latin1Char*>(xdr->buf.read(length));
         atom = AtomizeChars(cx, chars, length);
     } else {
-#if IS_LITTLE_ENDIAN
+#if MOZ_LITTLE_ENDIAN
         /* Directly access the little endian chars in the XDR buffer. */
-        const char16_t* chars = reinterpret_cast<const char16_t*>(xdr->buf.read(length * sizeof(char16_t)));
+        const char16_t* chars = nullptr;
+        if (length)
+            chars = reinterpret_cast<const char16_t*>(xdr->buf.read(length * sizeof(char16_t)));
         atom = AtomizeChars(cx, chars, length);
 #else
         /*
@@ -558,7 +601,7 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
         atom = AtomizeChars(cx, chars, length);
         if (chars != stackChars)
             js_free(chars);
-#endif /* !IS_LITTLE_ENDIAN */
+#endif /* !MOZ_LITTLE_ENDIAN */
     }
 
     if (!atom)
@@ -572,4 +615,3 @@ js::XDRAtom(XDRState<XDR_ENCODE>* xdr, MutableHandleAtom atomp);
 
 template bool
 js::XDRAtom(XDRState<XDR_DECODE>* xdr, MutableHandleAtom atomp);
-

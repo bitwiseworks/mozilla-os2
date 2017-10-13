@@ -13,6 +13,7 @@
 #include "mozilla/layers/LayersSurfaces.h"
 #include "mozilla/layers/ShadowLayerUtilsX11.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "mozilla/X11Util.h"
 
 namespace mozilla {
@@ -29,7 +30,7 @@ SharedSurface_GLXDrawable::Create(GLContext* prodGL,
     UniquePtr<SharedSurface_GLXDrawable> ret;
     Display* display = DefaultXDisplay();
     Screen* screen = XDefaultScreenOfDisplay(display);
-    Visual* visual = gfxXlibSurface::FindVisual(screen, gfxImageFormat::ARGB32);
+    Visual* visual = gfxXlibSurface::FindVisual(screen, gfx::SurfaceFormat::A8R8G8B8_UINT32);
 
     RefPtr<gfxXlibSurface> surf = gfxXlibSurface::Create(screen, visual, size);
     if (!deallocateClient)
@@ -55,7 +56,7 @@ SharedSurface_GLXDrawable::SharedSurface_GLXDrawable(GLContext* gl,
 {}
 
 void
-SharedSurface_GLXDrawable::Fence()
+SharedSurface_GLXDrawable::ProducerReleaseImpl()
 {
     mGL->MakeCurrent();
     mGL->fFlush();
@@ -120,7 +121,7 @@ SharedSurface_GLXDrawable::ReadbackBySharedHandle(gfx::DataSourceSurface* out_su
 UniquePtr<SurfaceFactory_GLXDrawable>
 SurfaceFactory_GLXDrawable::Create(GLContext* prodGL,
                                    const SurfaceCaps& caps,
-                                   const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                   const RefPtr<layers::LayersIPCChannel>& allocator,
                                    const layers::TextureFlags& flags)
 {
     MOZ_ASSERT(caps.alpha, "GLX surfaces require an alpha channel!");

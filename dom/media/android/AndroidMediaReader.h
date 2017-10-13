@@ -10,7 +10,6 @@
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
 #include "ImageContainer.h"
-#include "nsAutoPtr.h"
 #include "mozilla/layers/SharedRGBImage.h"
 
 #include "MPAPI.h"
@@ -37,23 +36,21 @@ class AndroidMediaReader : public MediaDecoderReader
   int64_t mAudioSeekTimeUs;
   RefPtr<VideoData> mLastVideoFrame;
   MozPromiseHolder<MediaDecoderReader::SeekPromise> mSeekPromise;
-  MozPromiseRequestHolder<MediaDecoderReader::VideoDataPromise> mSeekRequest;
+  MozPromiseRequestHolder<MediaDecoderReader::MediaDataPromise> mSeekRequest;
 public:
   AndroidMediaReader(AbstractMediaDecoder* aDecoder,
                      const nsACString& aContentType);
 
-  virtual nsresult ResetDecode();
+  nsresult ResetDecode(TrackSet aTracks = TrackSet(TrackInfo::kAudioTrack,
+                                                   TrackInfo::kVideoTrack)) override;
 
-  virtual bool DecodeAudioData();
-  virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
-                                int64_t aTimeThreshold);
+  bool DecodeAudioData() override;
+  bool DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold) override;
 
-  virtual nsresult ReadMetadata(MediaInfo* aInfo,
-                                MetadataTags** aTags);
-  virtual RefPtr<SeekPromise>
-  Seek(int64_t aTime, int64_t aEndTime) override;
+  nsresult ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags) override;
+  RefPtr<SeekPromise> Seek(SeekTarget aTarget, int64_t aEndTime) override;
 
-  virtual RefPtr<ShutdownPromise> Shutdown() override;
+  RefPtr<ShutdownPromise> Shutdown() override;
 
   class ImageBufferCallback : public MPAPI::BufferCallback {
     typedef mozilla::layers::Image Image;

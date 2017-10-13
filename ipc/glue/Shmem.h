@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,7 +14,6 @@
 
 #include "nscore.h"
 #include "nsDebug.h"
-#include "nsAutoPtr.h"
 
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/ipc/SharedMemory.h"
@@ -36,7 +34,7 @@
  *  means is OS specific.)
  *
  *  (4a) The child receives the special IPC message, and using the
- *  |SharedMemory{SysV,Basic}::Handle| it was passed, creates a
+ *  |SharedMemory{Basic}::Handle| it was passed, creates a
  *  |mozilla::ipc::SharedMemory| in the child
  *  process.
  *
@@ -125,13 +123,7 @@ public:
 
   bool operator==(const Shmem& aRhs) const
   {
-    // need to compare IDs because of AdoptShmem(); two Shmems might
-    // refer to the same segment but with different IDs for different
-    // protocol trees.  (NB: it's possible for this method to
-    // spuriously return true if AdoptShmem() gives the same ID for
-    // two protocol trees, but I don't think that can cause any
-    // problems since the Shmems really would be indistinguishable.)
-    return mSegment == aRhs.mSegment && mId == aRhs.mId;
+    return mSegment == aRhs.mSegment;
   }
 
   // Returns whether this Shmem is writable by you, and thus whether you can
@@ -174,8 +166,6 @@ public:
 
     return mSize / sizeof(T);
   }
-
-  int GetSysVID() const;
 
   // These shouldn't be used directly, use the IPDL interface instead.
   id_t Id(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead) const {
@@ -265,7 +255,7 @@ private:
   void AssertInvariants() const;
 #endif
 
-  SharedMemory* MOZ_NON_OWNING_REF mSegment;
+  RefPtr<SharedMemory> mSegment;
   void* mData;
   size_t mSize;
   id_t mId;
@@ -292,7 +282,7 @@ struct ParamTraits<mozilla::ipc::Shmem>
     WriteParam(aMsg, aParam.mId);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     paramType::id_t id;
     if (!ReadParam(aMsg, aIter, &id))

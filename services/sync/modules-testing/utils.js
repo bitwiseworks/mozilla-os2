@@ -11,6 +11,7 @@ this.EXPORTED_SYMBOLS = [
   "ensureLegacyIdentityManager",
   "setBasicCredentials",
   "makeIdentityConfig",
+  "makeFxAccountsInternalMock",
   "configureFxAccountIdentity",
   "configureIdentity",
   "SyncTestingInfrastructure",
@@ -61,7 +62,7 @@ MockFxaStorageManager.prototype = {
   },
 
   updateAccountData(updatedFields) {
-    for (let [name, value] of Iterator(updatedFields)) {
+    for (let [name, value] of Object.entries(updatedFields)) {
       if (value == null) {
         delete this.accountData[name];
       } else {
@@ -144,7 +145,7 @@ this.makeIdentityConfig = function(overrides) {
         kA: 'kA',
         kB: 'kB',
         sessionToken: 'sessionToken',
-        uid: 'user_uid',
+        uid: "a".repeat(32),
         verified: true,
       },
       token: {
@@ -152,6 +153,7 @@ this.makeIdentityConfig = function(overrides) {
         duration: 300,
         id: "id",
         key: "key",
+        hashed_fxa_uid: "f".repeat(32), // used during telemetry validation
         // uid will be set to the username.
       }
     },
@@ -179,16 +181,8 @@ this.makeIdentityConfig = function(overrides) {
   return result;
 }
 
-// Configure an instance of an FxAccount identity provider with the specified
-// config (or the default config if not specified).
-this.configureFxAccountIdentity = function(authService,
-                                           config = makeIdentityConfig()) {
-  // until we get better test infrastructure for bid_identity, we set the
-  // signedin user's "email" to the username, simply as many tests rely on this.
-  config.fxaccount.user.email = config.username;
-
-  let fxa;
-  let MockInternal = {
+this.makeFxAccountsInternalMock = function(config) {
+  return {
     newAccountState(credentials) {
       // We only expect this to be called with null indicating the (mock)
       // storage should be read.
@@ -203,9 +197,19 @@ this.configureFxAccountIdentity = function(authService,
     _getAssertion(audience) {
       return Promise.resolve("assertion");
     },
-
   };
-  fxa = new FxAccounts(MockInternal);
+};
+
+// Configure an instance of an FxAccount identity provider with the specified
+// config (or the default config if not specified).
+this.configureFxAccountIdentity = function(authService,
+                                           config = makeIdentityConfig(),
+                                           fxaInternal = makeFxAccountsInternalMock(config)) {
+  // until we get better test infrastructure for bid_identity, we set the
+  // signedin user's "email" to the username, simply as many tests rely on this.
+  config.fxaccount.user.email = config.username;
+
+  let fxa = new FxAccounts(fxaInternal);
 
   let MockFxAccountsClient = function() {
     FxAccountsClient.apply(this);
@@ -316,7 +320,7 @@ this.add_identity_test = function(test, testFunction) {
   let ns = {};
   Cu.import("resource://services-sync/service.js", ns);
   // one task for the "old" identity manager.
-  test.add_task(function() {
+  test.add_task(function* () {
     note("sync");
     let oldIdentity = Status._authManager;
     ensureLegacyIdentityManager();
@@ -324,7 +328,7 @@ this.add_identity_test = function(test, testFunction) {
     Status.__authManager = ns.Service.identity = oldIdentity;
   });
   // another task for the FxAccounts identity manager.
-  test.add_task(function() {
+  test.add_task(function* () {
     note("FxAccounts");
     let oldIdentity = Status._authManager;
     Status.__authManager = ns.Service.identity = new BrowserIDManager();

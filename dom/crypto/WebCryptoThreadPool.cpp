@@ -28,7 +28,7 @@ WebCryptoThreadPool::Initialize()
   MOZ_ASSERT(!gInstance, "More than one instance!");
 
   gInstance = new WebCryptoThreadPool();
-  NS_WARN_IF_FALSE(gInstance, "Failed create thread pool!");
+  NS_WARNING_ASSERTION(gInstance, "Failed create thread pool!");
 
   if (gInstance && NS_FAILED(gInstance->Init())) {
     NS_WARNING("Failed to initialize thread pool!");
@@ -65,6 +65,8 @@ WebCryptoThreadPool::DispatchInternal(nsIRunnable* aRunnable)
   MutexAutoLock lock(mMutex);
 
   if (!mPool) {
+    NS_ENSURE_TRUE(EnsureNSSInitializedChromeOrContent(), NS_ERROR_FAILURE);
+
     nsCOMPtr<nsIThreadPool> pool(do_CreateInstance(NS_THREADPOOL_CONTRACTID));
     NS_ENSURE_TRUE(pool, NS_ERROR_FAILURE);
 
@@ -88,7 +90,7 @@ WebCryptoThreadPool::Shutdown()
   }
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  NS_WARN_IF_FALSE(obs, "Failed to retrieve observer service!");
+  NS_WARNING_ASSERTION(obs, "Failed to retrieve observer service!");
 
   if (obs) {
     if (NS_FAILED(obs->RemoveObserver(this,

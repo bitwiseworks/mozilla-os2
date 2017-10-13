@@ -28,9 +28,9 @@ class nsStyleContext;
 namespace mozilla {
 class WritingMode;
 class LogicalMargin;
+struct TableReflowInput;
 } // namespace mozilla
 
-struct nsTableReflowState;
 struct BCPropertyData;
 
 static inline bool IS_TABLE_CELL(nsIAtom* frameType) {
@@ -48,9 +48,11 @@ static inline bool FrameHasBorderOrBackground(nsIFrame* f) {
 class nsDisplayTableItem : public nsDisplayItem
 {
 public:
-  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame) :
+  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                     bool aDrawsBackground = true) :
       nsDisplayItem(aBuilder, aFrame),
-      mPartHasFixedBackground(false) {}
+      mPartHasFixedBackground(false),
+      mDrawsBackground(aDrawsBackground) {}
 
   // With collapsed borders, parts of the collapsed border can extend outside
   // the table part frames, so allow this display element to blow out to our
@@ -67,6 +69,7 @@ public:
 
 private:
   bool mPartHasFixedBackground;
+  bool mDrawsBackground;
 };
 
 class nsAutoPushCurrentTableItem
@@ -118,7 +121,7 @@ enum nsTableColType {
 
 /**
   * nsTableFrame maps the inner portion of a table (everything except captions.)
-  * Used as a pseudo-frame within nsTableOuterFrame, it may also be used
+  * Used as a pseudo-frame within nsTableWrapperFrame, it may also be used
   * stand-alone as the top-level frame.
   *
   * The principal child list contains row group frames. There is also an
@@ -129,16 +132,17 @@ class nsTableFrame : public nsContainerFrame
   typedef mozilla::image::DrawResult DrawResult;
   typedef mozilla::WritingMode WritingMode;
   typedef mozilla::LogicalMargin LogicalMargin;
+  typedef mozilla::TableReflowInput TableReflowInput;
 
 public:
   NS_DECL_QUERYFRAME_TARGET(nsTableFrame)
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_DECLARE_FRAME_PROPERTY(PositionedTablePartArray,
-                            DeleteValue<nsTArray<nsIFrame*>>)
+  typedef nsTArray<nsIFrame*> FrameTArray;
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(PositionedTablePartArray, FrameTArray)
 
-  /** nsTableOuterFrame has intimate knowledge of the inner table frame */
-  friend class nsTableOuterFrame;
+  /** nsTableWrapperFrame has intimate knowledge of the inner table frame */
+  friend class nsTableWrapperFrame;
 
   /** instantiate a new instance of nsTableRowFrame.
     * @param aPresShell the pres shell for this frame
@@ -157,17 +161,17 @@ public:
 
   static float GetTwipsToPixels(nsPresContext* aPresContext);
 
-  // Return true if aParentReflowState.frame or any of its ancestors within
+  // Return true if aParentReflowInput.frame or any of its ancestors within
   // the containing table have non-auto bsize. (e.g. pct or fixed bsize)
-  static bool AncestorsHaveStyleBSize(const nsHTMLReflowState& aParentReflowState);
+  static bool AncestorsHaveStyleBSize(const ReflowInput& aParentReflowInput);
 
   // See if a special bsize reflow will occur due to having a pct bsize when
   // the pct bsize basis may not yet be valid.
-  static void CheckRequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState);
+  static void CheckRequestSpecialBSizeReflow(const ReflowInput& aReflowInput);
 
   // Notify the frame and its ancestors (up to the containing table) that a special
   // height reflow will occur.
-  static void RequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState);
+  static void RequestSpecialBSizeReflow(const ReflowInput& aReflowInput);
 
   static void RePositionViews(nsIFrame* aFrame);
 
@@ -183,7 +187,7 @@ public:
   static void UnregisterPositionedTablePart(nsIFrame* aFrame,
                                             nsIFrame* aDestructRoot);
 
-  nsPoint GetFirstSectionOrigin(const nsHTMLReflowState& aReflowState) const;
+  nsPoint GetFirstSectionOrigin(const ReflowInput& aReflowInput) const;
   /*
    * Notification that aAttribute has changed for content inside a table (cell, row, etc)
    */
@@ -213,16 +217,17 @@ public:
 
   // Get the offset from the border box to the area where the row groups fit
   LogicalMargin GetChildAreaOffset(const WritingMode aWM,
-                                   const nsHTMLReflowState* aReflowState) const;
+                                   const ReflowInput* aReflowInput) const;
 
   /** helper method to find the table parent of any table frame object */
   static nsTableFrame* GetTableFrame(nsIFrame* aSourceFrame);
 
-  /* Like GetTableFrame, but will return nullptr if we don't pass through
-   * aMustPassThrough on the way to the table.
+  /* Like GetTableFrame, but will set *aDidPassThrough to false if we don't
+   * pass through aMustPassThrough on the way to the table.
    */
   static nsTableFrame* GetTableFramePassingThrough(nsIFrame* aMustPassThrough,
-                                                   nsIFrame* aSourceFrame);
+                                                   nsIFrame* aSourceFrame,
+                                                   bool* aDidPassThrough);
 
   typedef void (* DisplayGenericTablePartTraversal)
       (nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
@@ -258,7 +263,7 @@ public:
   /** @return true if aDisplayType represents a rowgroup of any sort
     * (header, footer, or body)
     */
-  bool IsRowGroup(int32_t aDisplayType) const;
+  bool IsRowGroup(mozilla::StyleDisplay aDisplayType) const;
 
   virtual const nsFrameList& GetChildList(ChildListID aListID) const override;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const override;
@@ -312,8 +317,7 @@ public:
   void AddBCDamageArea(const mozilla::TableArea& aValue);
   bool BCRecalcNeeded(nsStyleContext* aOldStyleContext,
                         nsStyleContext* aNewStyleContext);
-  void PaintBCBorders(nsRenderingContext& aRenderingContext,
-                      const nsRect&        aDirtyRect);
+  void PaintBCBorders(DrawTarget& aDrawTarget, const nsRect& aDirtyRect);
 
   virtual void MarkIntrinsicISizesDirty() override;
   // For border-collapse tables, the caller must not add padding and
@@ -323,24 +327,24 @@ public:
   virtual IntrinsicISizeOffsetData IntrinsicISizeOffsets() override;
 
   virtual mozilla::LogicalSize
-  ComputeSize(nsRenderingContext *aRenderingContext,
-              mozilla::WritingMode aWritingMode,
+  ComputeSize(nsRenderingContext*         aRenderingContext,
+              mozilla::WritingMode        aWM,
               const mozilla::LogicalSize& aCBSize,
-              nscoord aAvailableISize,
+              nscoord                     aAvailableISize,
               const mozilla::LogicalSize& aMargin,
               const mozilla::LogicalSize& aBorder,
               const mozilla::LogicalSize& aPadding,
-              ComputeSizeFlags aFlags) override;
+              ComputeSizeFlags            aFlags) override;
 
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   /**
    * A copy of nsFrame::ShrinkWidthToFit that calls a different
@@ -365,12 +369,12 @@ public:
     * @see nsIFrame::Reflow
     */
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
-  void ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
-                   const nsHTMLReflowState& aReflowState,
+  void ReflowTable(ReflowOutput&     aDesiredSize,
+                   const ReflowInput& aReflowInput,
                    nscoord                  aAvailBSize,
                    nsIFrame*&               aLastChildReflowed,
                    nsReflowStatus&          aStatus);
@@ -468,6 +472,10 @@ private:
 
 public:
   virtual nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const override;
+  bool GetNaturalBaselineBOffset(mozilla::WritingMode aWM,
+                                 BaselineSharingGroup aBaselineGroup,
+                                 nscoord*             aBaseline) const override;
+
   /** return the row span of a cell, taking into account row span magic at the bottom
     * of a table. The row span equals the number of rows spanned by aCell starting at
     * aStartRowIndex, and can be smaller if aStartRowIndex is greater than the row
@@ -598,7 +606,7 @@ public:
                                    const nsRect& aOrigVisualOverflow,
                                    bool aIsFirstReflow);
 
-  virtual bool UpdateOverflow() override;
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
 
 protected:
 
@@ -610,9 +618,9 @@ protected:
   /** destructor, responsible for mColumnLayoutData */
   virtual ~nsTableFrame();
 
-  void InitChildReflowState(nsHTMLReflowState& aReflowState);
+  void InitChildReflowInput(ReflowInput& aReflowInput);
 
-  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
+  virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
 public:
   bool IsRowInserted() const;
@@ -623,11 +631,11 @@ protected:
   // A helper function to reflow a header or footer with unconstrained height
   // to see if it should be made repeatable and also to determine its desired
   // height.
-  nsresult SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
+  nsresult SetupHeaderFooterChild(const TableReflowInput& aReflowInput,
                                   nsTableRowGroupFrame* aFrame,
                                   nscoord* aDesiredHeight);
 
-  void ReflowChildren(nsTableReflowState&  aReflowState,
+  void ReflowChildren(TableReflowInput&  aReflowInput,
                       nsReflowStatus&      aStatus,
                       nsIFrame*&           aLastChildReflowed,
                       nsOverflowAreas&     aOverflowAreas);
@@ -650,7 +658,7 @@ protected:
     * @param aDesiredSize    the metrics of the table
     * @param aBorderPadding  the border and padding of the table
     */
-  void AdjustForCollapsingRowsCols(nsHTMLReflowMetrics& aDesiredSize,
+  void AdjustForCollapsingRowsCols(ReflowOutput& aDesiredSize,
                                    const WritingMode aWM,
                                    const LogicalMargin& aBorderPadding);
 
@@ -660,8 +668,8 @@ protected:
    *  been reflowed (e.g. in AdjustForCollapsingRowsCols).
    */
   void FixupPositionedTableParts(nsPresContext*           aPresContext,
-                                 nsHTMLReflowMetrics&     aDesiredSize,
-                                 const nsHTMLReflowState& aReflowState);
+                                 ReflowOutput&     aDesiredSize,
+                                 const ReflowInput& aReflowInput);
 
   // Clears the list of positioned table parts.
   void ClearAllPositionedTableParts();
@@ -686,34 +694,34 @@ public:
 
   // calculate the computed block-size of aFrame including its border and
   // padding given its reflow state.
-  nscoord CalcBorderBoxBSize(const nsHTMLReflowState& aReflowState);
+  nscoord CalcBorderBoxBSize(const ReflowInput& aReflowInput);
 
 protected:
 
   // update the  desired block-size of this table taking into account the current
   // reflow state, the table attributes and the content driven rowgroup bsizes
   // this function can change the overflow area
-  void CalcDesiredBSize(const nsHTMLReflowState& aReflowState,
-                        nsHTMLReflowMetrics& aDesiredSize);
+  void CalcDesiredBSize(const ReflowInput& aReflowInput,
+                        ReflowOutput& aDesiredSize);
 
   // The following is a helper for CalcDesiredBSize
 
-  void DistributeBSizeToRows(const nsHTMLReflowState& aReflowState,
+  void DistributeBSizeToRows(const ReflowInput& aReflowInput,
                              nscoord                  aAmount);
 
-  void PlaceChild(nsTableReflowState&  aReflowState,
+  void PlaceChild(TableReflowInput&  aReflowInput,
                   nsIFrame*            aKidFrame,
                   nsPoint              aKidPosition,
-                  nsHTMLReflowMetrics& aKidDesiredSize,
+                  ReflowOutput& aKidDesiredSize,
                   const nsRect&        aOriginalKidRect,
                   const nsRect&        aOriginalKidVisualOverflow);
-   void PlaceRepeatedFooter(nsTableReflowState& aReflowState,
+   void PlaceRepeatedFooter(TableReflowInput& aReflowInput,
                             nsTableRowGroupFrame *aTfoot,
                             nscoord aFooterHeight);
 
   nsIFrame* GetFirstBodyRowGroupFrame();
 public:
-  typedef nsAutoTArray<nsTableRowGroupFrame*, 8> RowGroupArray;
+  typedef AutoTArray<nsTableRowGroupFrame*, 8> RowGroupArray;
   /**
    * Push all our child frames from the aRowGroups array, in order, starting
    * from the frame at aPushFrom to the end of the array. The frames are put on
@@ -762,12 +770,6 @@ public:
 
   bool NeedToCollapse() const;
   void SetNeedToCollapse(bool aValue);
-
-  bool HasZeroColSpans() const;
-  void SetHasZeroColSpans(bool aValue);
-
-  bool NeedColSpanExpansion() const;
-  void SetNeedColSpanExpansion(bool aValue);
 
   /** The GeometryDirty bit is similar to the NS_FRAME_IS_DIRTY frame
     * state bit, which implies that all descendants are dirty.  The
@@ -864,7 +866,7 @@ protected:
   void DumpRowGroup(nsIFrame* aChildFrame);
 #endif
   // DATA MEMBERS
-  nsAutoTArray<nsTableColFrame*, 8> mColFrames;
+  AutoTArray<nsTableColFrame*, 8> mColFrames;
 
   struct TableBits {
     uint32_t mHaveReflowedColGroups:1; // have the col groups gotten their initial reflow
@@ -875,9 +877,7 @@ protected:
     uint32_t mNeedToCalcBCBorders:1;
     uint32_t mGeometryDirty:1;
     uint32_t mIStartContBCBorder:8;
-    uint32_t mNeedToCollapse:1;    // rows, cols that have visibility:collapse need to be collapsed
-    uint32_t mHasZeroColSpans:1;
-    uint32_t mNeedColSpanExpansion:1;
+    uint32_t mNeedToCollapse:1;        // rows, cols that have visibility:collapse need to be collapsed
     uint32_t mResizedColumns:1;        // have we resized columns since last reflow?
   } mBits;
 
@@ -887,11 +887,11 @@ protected:
 };
 
 
-inline bool nsTableFrame::IsRowGroup(int32_t aDisplayType) const
+inline bool nsTableFrame::IsRowGroup(mozilla::StyleDisplay aDisplayType) const
 {
-  return bool((NS_STYLE_DISPLAY_TABLE_HEADER_GROUP == aDisplayType) ||
-                (NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP == aDisplayType) ||
-                (NS_STYLE_DISPLAY_TABLE_ROW_GROUP    == aDisplayType));
+  return mozilla::StyleDisplay::TableHeaderGroup == aDisplayType ||
+         mozilla::StyleDisplay::TableFooterGroup == aDisplayType ||
+         mozilla::StyleDisplay::TableRowGroup    == aDisplayType;
 }
 
 inline void nsTableFrame::SetHaveReflowedColGroups(bool aValue)
@@ -943,27 +943,6 @@ inline bool nsTableFrame::NeedToCollapse() const
 {
   return (bool) static_cast<nsTableFrame*>(FirstInFlow())->mBits.mNeedToCollapse;
 }
-
-inline void nsTableFrame::SetHasZeroColSpans(bool aValue)
-{
-  mBits.mHasZeroColSpans = (unsigned)aValue;
-}
-
-inline bool nsTableFrame::HasZeroColSpans() const
-{
-  return (bool)mBits.mHasZeroColSpans;
-}
-
-inline void nsTableFrame::SetNeedColSpanExpansion(bool aValue)
-{
-  mBits.mNeedColSpanExpansion = (unsigned)aValue;
-}
-
-inline bool nsTableFrame::NeedColSpanExpansion() const
-{
-  return (bool)mBits.mNeedColSpanExpansion;
-}
-
 
 inline nsFrameList& nsTableFrame::GetColGroups()
 {

@@ -107,6 +107,7 @@ enum {
 };
 
 const int kTimeout = 1000;
+const int kLongTimeout = 60 * kTimeout;
 
 pid_t gParentPid = 0;
 
@@ -499,17 +500,19 @@ SharedMemoryBasic::SharedMemoryBasic()
 {
 }
 
-SharedMemoryBasic::SharedMemoryBasic(Handle aHandle)
-  : mPort(MACH_PORT_NULL)
-  , mMemory(nullptr)
-{
-  mPort = aHandle;
-}
-
 SharedMemoryBasic::~SharedMemoryBasic()
 {
   Unmap();
-  Destroy();
+  CloseHandle();
+}
+
+bool
+SharedMemoryBasic::SetHandle(const Handle& aHandle)
+{
+  MOZ_ASSERT(mPort == MACH_PORT_NULL, "already initialized");
+
+  mPort = aHandle;
+  return true;
 }
 
 static inline void*
@@ -616,8 +619,13 @@ SharedMemoryBasic::ShareToProcess(base::ProcessId pid,
   MachReceiveMessage msg;
   err = ports->mReceiver->WaitForMessage(&msg, kTimeout);
   if (err != KERN_SUCCESS) {
-    LOG_ERROR("didn't get an id %s %x\n", mach_error_string(err), err);
-    return false;
+    LOG_ERROR("short timeout didn't get an id %s %x\n", mach_error_string(err), err);
+    err = ports->mReceiver->WaitForMessage(&msg, kLongTimeout);
+
+    if (err != KERN_SUCCESS) {
+      LOG_ERROR("long timeout didn't get an id %s %x\n", mach_error_string(err), err);
+      return false;
+    }
   }
   if (msg.GetDataLength() != sizeof(SharePortsReply)) {
     LOG_ERROR("Improperly formatted reply\n");
@@ -650,13 +658,16 @@ SharedMemoryBasic::Unmap()
 }
 
 void
-SharedMemoryBasic::Destroy()
+SharedMemoryBasic::CloseHandle()
 {
-  mach_port_deallocate(mach_task_self(), mPort);
+  if (mPort != MACH_PORT_NULL) {
+    mach_port_deallocate(mach_task_self(), mPort);
+    mPort = MACH_PORT_NULL;
+  }
 }
 
 bool
-SharedMemoryBasic::IsHandleValid(const Handle& aHandle)
+SharedMemoryBasic::IsHandleValid(const Handle& aHandle) const
 {
   return aHandle > 0;
 }

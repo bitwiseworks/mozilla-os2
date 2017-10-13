@@ -5,17 +5,19 @@
 
 // Tests the Filter Editor Widget's drag-drop re-ordering
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 const LIST_ITEM_HEIGHT = 32;
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = `data:text/html,<div id="filter-container" />`;
 
-  const container = doc.querySelector("#container");
+add_task(function* () {
+  let [,, doc] = yield createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
+
+  const container = doc.querySelector("#filter-container");
   const initialValue = "blur(2px) contrast(200%) brightness(200%)";
-  let widget = new CSSFilterEditorWidget(container, initialValue);
+  let widget = new CSSFilterEditorWidget(container, initialValue, cssIsValid);
 
   const filters = widget.el.querySelector("#filters");
   function first() {
@@ -27,7 +29,6 @@ add_task(function*() {
   function last() {
     return filters.children[2];
   }
-
 
   info("Test re-ordering neighbour filters");
   widget._mouseDown({

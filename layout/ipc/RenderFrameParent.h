@@ -24,7 +24,6 @@ namespace mozilla {
 class InputEvent;
 
 namespace layers {
-class APZCTreeManager;
 class AsyncDragMetrics;
 class TargetConfig;
 struct TextureFactoryIdentifier;
@@ -32,8 +31,6 @@ struct ScrollableLayerGuid;
 } // namespace layers
 
 namespace layout {
-
-class RemoteContentController;
 
 class RenderFrameParent : public PRenderFrameParent
 {
@@ -58,11 +55,11 @@ public:
    * chosen, then RenderFrameParent will watch input events and use
    * them to asynchronously pan and zoom.
    */
-  RenderFrameParent(nsFrameLoader* aFrameLoader,
-                    TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                    uint64_t* aId, bool* aSuccess);
+  RenderFrameParent(nsFrameLoader* aFrameLoader, bool* aSuccess);
   virtual ~RenderFrameParent();
 
+  bool Init(nsFrameLoader* aFrameLoader);
+  bool IsInitted();
   void Destroy();
 
   void BuildDisplayList(nsDisplayListBuilder* aBuilder,
@@ -79,23 +76,7 @@ public:
 
   void OwnerContentChanged(nsIContent* aContent);
 
-  void ZoomToRect(uint32_t aPresShellId, ViewID aViewId, const CSSRect& aRect);
-
-  void ContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
-                                 uint64_t aInputBlockId,
-                                 bool aPreventDefault);
-  void SetTargetAPZC(uint64_t aInputBlockId,
-                     const nsTArray<ScrollableLayerGuid>& aTargets);
-  void SetAllowedTouchBehavior(uint64_t aInputBlockId,
-                               const nsTArray<TouchBehaviorFlags>& aFlags);
-
-  void UpdateZoomConstraints(uint32_t aPresShellId,
-                             ViewID aViewId,
-                             const Maybe<ZoomConstraints>& aConstraints);
-
   bool HitTest(const nsRect& aRect);
-
-  void StartScrollbarDrag(const AsyncDragMetrics& aDragMetrics);
 
   void GetTextureFactoryIdentifier(TextureFactoryIdentifier* aTextureFactoryIdentifier);
 
@@ -103,12 +84,12 @@ public:
 
   void TakeFocusForClickFromTap();
 
+  void EnsureLayersConnected();
+
 protected:
   void ActorDestroy(ActorDestroyReason why) override;
 
   virtual bool RecvNotifyCompositorTransaction() override;
-
-  virtual bool RecvUpdateHitRegion(const nsRegion& aRegion) override;
 
 private:
   void TriggerRepaint();
@@ -123,13 +104,6 @@ private:
 
   RefPtr<nsFrameLoader> mFrameLoader;
   RefPtr<ContainerLayer> mContainer;
-  // When our scrolling behavior is ASYNC_PAN_ZOOM, we have a nonnull
-  // APZCTreeManager. It's used to manipulate the shadow layer tree
-  // on the compositor thread.
-  RefPtr<layers::APZCTreeManager> mApzcTreeManager;
-  RefPtr<RemoteContentController> mContentController;
-
-  layers::APZCTreeManager* GetApzcTreeManager();
 
   // True after Destroy() has been called, which is triggered
   // originally by nsFrameLoader::Destroy().  After this point, we can
@@ -147,9 +121,8 @@ private:
   // mFrameLoaderDestroyed==false.
   bool mFrameLoaderDestroyed;
 
-  nsRegion mTouchRegion;
-
   bool mAsyncPanZoomEnabled;
+  bool mInitted;
 };
 
 } // namespace layout
@@ -176,9 +149,6 @@ public:
   virtual already_AddRefed<Layer>
   BuildLayer(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
              const ContainerLayerParameters& aContainerParameters) override;
-
-  void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-               HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) override;
 
   NS_DISPLAY_DECL_NAME("Remote", TYPE_REMOTE)
 

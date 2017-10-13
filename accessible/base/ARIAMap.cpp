@@ -16,6 +16,7 @@
 #include "nsWhitespaceTokenizer.h"
 
 #include "mozilla/BinarySearch.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -34,7 +35,7 @@ static const uint32_t kGenericAccType = 0;
  *  via the object attribute "xml-roles".
  */
 
-static nsRoleMapEntry sWAIRoleMaps[] =
+static const nsRoleMapEntry sWAIRoleMaps[] =
 {
   { // alert
     &nsGkAtoms::alert,
@@ -43,7 +44,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    kGenericAccType,
+    eAlert,
     kNoReqStates
   },
   { // alertdialog
@@ -195,6 +196,16 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     kGenericAccType,
     kNoReqStates,
     eReadonlyUntilEditable
+  },
+  { // feed
+    &nsGkAtoms::feed,
+    roles::GROUPING,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+    kNoReqStates
   },
   { // form
     &nsGkAtoms::form,
@@ -759,7 +770,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
   }
 };
 
-static nsRoleMapEntry sLandmarkRoleMap = {
+static const nsRoleMapEntry sLandmarkRoleMap = {
   &nsGkAtoms::_empty,
   roles::NOTHING,
   kUseNativeRole,
@@ -816,8 +827,10 @@ static const AttrCharacteristics gWAIUnivAttrMap[] = {
   {&nsGkAtoms::aria_checked,           ATTR_BYPASSOBJ | ATTR_VALTOKEN               }, /* exposes checkable obj attr */
   {&nsGkAtoms::aria_controls,          ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_describedby,       ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
+  {&nsGkAtoms::aria_details,           ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_disabled,          ATTR_BYPASSOBJ | ATTR_VALTOKEN | ATTR_GLOBAL },
   {&nsGkAtoms::aria_dropeffect,                         ATTR_VALTOKEN | ATTR_GLOBAL },
+  {&nsGkAtoms::aria_errormessage,      ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_expanded,          ATTR_BYPASSOBJ | ATTR_VALTOKEN               },
   {&nsGkAtoms::aria_flowto,            ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_grabbed,                            ATTR_VALTOKEN | ATTR_GLOBAL },
@@ -860,16 +873,20 @@ struct RoleComparator
 
 }
 
-nsRoleMapEntry*
-aria::GetRoleMap(nsINode* aNode)
+const nsRoleMapEntry*
+aria::GetRoleMap(dom::Element* aEl)
 {
-  nsIContent* content = nsCoreUtils::GetRoleContent(aNode);
+  return GetRoleMapFromIndex(GetRoleMapIndex(aEl));
+}
+
+uint8_t
+aria::GetRoleMapIndex(dom::Element* aEl)
+{
   nsAutoString roles;
-  if (!content ||
-      !content->GetAttr(kNameSpaceID_None, nsGkAtoms::role, roles) ||
+  if (!aEl || !aEl->GetAttr(kNameSpaceID_None, nsGkAtoms::role, roles) ||
       roles.IsEmpty()) {
     // We treat role="" as if the role attribute is absent (per aria spec:8.1.1)
-    return nullptr;
+    return NO_ROLE_MAP_ENTRY_INDEX;
   }
 
   nsWhitespaceTokenizer tokenizer(roles);
@@ -879,13 +896,43 @@ aria::GetRoleMap(nsINode* aNode)
     size_t idx;
     if (BinarySearchIf(sWAIRoleMaps, 0, ArrayLength(sWAIRoleMaps),
                        RoleComparator(role), &idx)) {
-      return sWAIRoleMaps + idx;
+      return idx;
     }
   }
 
-  // Always use some entry if there is a non-empty role string
+  // Always use some entry index if there is a non-empty role string
   // To ensure an accessible object is created
-  return &sLandmarkRoleMap;
+  return LANDMARK_ROLE_MAP_ENTRY_INDEX;
+}
+
+
+const nsRoleMapEntry*
+aria::GetRoleMapFromIndex(uint8_t aRoleMapIndex)
+{
+  switch (aRoleMapIndex) {
+    case NO_ROLE_MAP_ENTRY_INDEX:
+      return nullptr;
+    case EMPTY_ROLE_MAP_ENTRY_INDEX:
+      return &gEmptyRoleMap;
+    case LANDMARK_ROLE_MAP_ENTRY_INDEX:
+      return &sLandmarkRoleMap;
+    default:
+      return sWAIRoleMaps + aRoleMapIndex;
+  }
+}
+
+uint8_t
+aria::GetIndexFromRoleMap(const nsRoleMapEntry* aRoleMapEntry)
+{
+  if (aRoleMapEntry == nullptr) {
+    return NO_ROLE_MAP_ENTRY_INDEX;
+  } else if (aRoleMapEntry == &gEmptyRoleMap) {
+    return EMPTY_ROLE_MAP_ENTRY_INDEX;
+  } else if (aRoleMapEntry == &sLandmarkRoleMap) {
+      return LANDMARK_ROLE_MAP_ENTRY_INDEX;
+  } else {
+    return aRoleMapEntry - sWAIRoleMaps;
+  }
 }
 
 uint64_t

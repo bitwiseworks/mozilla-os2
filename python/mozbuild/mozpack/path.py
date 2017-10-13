@@ -22,12 +22,18 @@ def normsep(path):
     '''
     if os.sep != '/':
         path = path.replace(os.sep, '/')
+    if os.altsep and os.altsep != '/':
+        path = path.replace(os.altsep, '/')
     return path
 
 
 def relpath(path, start):
     rel = normsep(os.path.relpath(path, start))
     return '' if rel == '.' else rel
+
+
+def realpath(path):
+    return normsep(os.path.realpath(path))
 
 
 def abspath(path):

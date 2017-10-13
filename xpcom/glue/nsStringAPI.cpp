@@ -11,11 +11,9 @@
 #include "nsXPCOMStrings.h"
 #include "nsDebug.h"
 
-#include <stdio.h>
+#include "mozilla/Sprintf.h"
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
+#include <stdio.h>
 
 // nsAString
 
@@ -522,12 +520,10 @@ nsAString::AppendInt(int aInt, int32_t aRadix)
     default:
       NS_ERROR("Unrecognized radix");
       fmt = "";
-  };
+  }
 
   char buf[20];
-  int len = snprintf(buf, sizeof(buf), fmt, aInt);
-  buf[sizeof(buf) - 1] = '\0';
-
+  int len = SprintfLiteral(buf, fmt, aInt);
   Append(NS_ConvertASCIItoUTF16(buf, len));
 }
 
@@ -1002,12 +998,10 @@ nsACString::AppendInt(int aInt, int32_t aRadix)
     default:
       NS_ERROR("Unrecognized radix");
       fmt = "";
-  };
+  }
 
   char buf[20];
-  int len = snprintf(buf, sizeof(buf), fmt, aInt);
-  buf[sizeof(buf) - 1] = '\0';
-
+  int len = SprintfLiteral(buf, fmt, aInt);
   Append(buf, len);
 }
 
@@ -1308,5 +1302,3 @@ ParseString(const nsACString& aSource, char aDelimiter,
 
   return true;
 }
-
-#undef snprintf

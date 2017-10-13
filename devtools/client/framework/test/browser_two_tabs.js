@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Check regression when opening two tabs
@@ -28,31 +30,28 @@ function test() {
 
 function openTabs() {
   // Open two tabs, select the second
-  gTab1 = gBrowser.addTab(TAB_URL_1);
-  gTab1.linkedBrowser.addEventListener("load", function onLoad1(evt) {
-    gTab1.linkedBrowser.removeEventListener("load", onLoad1);
-
-    gTab2 = gBrowser.selectedTab = gBrowser.addTab(TAB_URL_2);
-    gTab2.linkedBrowser.addEventListener("load", function onLoad2(evt) {
-      gTab2.linkedBrowser.removeEventListener("load", onLoad2);
+  addTab(TAB_URL_1).then(tab1 => {
+    gTab1 = tab1;
+    addTab(TAB_URL_2).then(tab2 => {
+      gTab2 = tab2;
 
       connect();
-    }, true);
-  }, true);
+    });
+  });
 }
 
 function connect() {
   // Connect to debugger server to fetch the two tab actors
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect(() => {
-    gClient.listTabs(response => {
+  gClient.connect()
+    .then(() => gClient.listTabs())
+    .then(response => {
       // Fetch the tab actors for each tab
       gTabActor1 = response.tabs.filter(a => a.url === TAB_URL_1)[0];
       gTabActor2 = response.tabs.filter(a => a.url === TAB_URL_2)[0];
 
       checkGetTab();
     });
-  });
 }
 
 function checkGetTab() {
@@ -144,7 +143,7 @@ function cleanup() {
   container.addEventListener("TabClose", function onTabClose() {
     container.removeEventListener("TabClose", onTabClose);
 
-    gClient.close(finish);
+    gClient.close().then(finish);
   });
   gBrowser.removeTab(gTab1);
 }

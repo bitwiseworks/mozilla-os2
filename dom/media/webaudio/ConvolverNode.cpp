@@ -6,6 +6,8 @@
 
 #include "ConvolverNode.h"
 #include "mozilla/dom/ConvolverNodeBinding.h"
+#include "nsAutoPtr.h"
+#include "AlignmentUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "blink/Reverb.h"
@@ -41,7 +43,7 @@ public:
     SAMPLE_RATE,
     NORMALIZE
   };
-  virtual void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
+  void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
   {
     switch (aIndex) {
     case BUFFER_LENGTH:
@@ -62,7 +64,7 @@ public:
       NS_ERROR("Bad ConvolverNodeEngine Int32Parameter");
     }
   }
-  virtual void SetDoubleParameter(uint32_t aIndex, double aParam) override
+  void SetDoubleParameter(uint32_t aIndex, double aParam) override
   {
     switch (aIndex) {
     case SAMPLE_RATE:
@@ -73,7 +75,7 @@ public:
       NS_ERROR("Bad ConvolverNodeEngine DoubleParameter");
     }
   }
-  virtual void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
+  void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
   {
     mBuffer = aBuffer;
     AdjustReverb();
@@ -100,11 +102,11 @@ public:
                                   mNormalize, mSampleRate);
   }
 
-  virtual void ProcessBlock(AudioNodeStream* aStream,
-                            GraphTime aFrom,
-                            const AudioBlock& aInput,
-                            AudioBlock* aOutput,
-                            bool* aFinished) override
+  void ProcessBlock(AudioNodeStream* aStream,
+                    GraphTime aFrom,
+                    const AudioBlock& aInput,
+                    AudioBlock* aOutput,
+                    bool* aFinished) override
   {
     if (!mReverb) {
       aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
@@ -155,12 +157,12 @@ public:
     mReverb->process(&input, aOutput);
   }
 
-  virtual bool IsActive() const override
+  bool IsActive() const override
   {
     return mLeftOverData != INT32_MIN;
   }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
     if (mBuffer && !mBuffer->IsShared()) {
@@ -174,7 +176,7 @@ public:
     return amount;
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -198,7 +200,8 @@ ConvolverNode::ConvolverNode(AudioContext* aContext)
 {
   ConvolverNodeEngine* engine = new ConvolverNodeEngine(this, mNormalize);
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
 ConvolverNode::~ConvolverNode()
@@ -261,11 +264,13 @@ ConvolverNode::SetBuffer(JSContext* aCx, AudioBuffer* aBuffer, ErrorResult& aRv)
       length = WEBAUDIO_BLOCK_SIZE;
       RefPtr<ThreadSharedFloatArrayBufferList> paddedBuffer =
         new ThreadSharedFloatArrayBufferList(data->GetChannels());
-      float* channelData = (float*) malloc(sizeof(float) * length * data->GetChannels());
+      void* channelData = malloc(sizeof(float) * length * data->GetChannels() + 15);
+      float* alignedChannelData = ALIGNED16(channelData);
+      ASSERT_ALIGNED16(alignedChannelData);
       for (uint32_t i = 0; i < data->GetChannels(); ++i) {
-        PodCopy(channelData + length * i, data->GetData(i), mBuffer->Length());
-        PodZero(channelData + length * i + mBuffer->Length(), WEBAUDIO_BLOCK_SIZE - mBuffer->Length());
-        paddedBuffer->SetData(i, (i == 0) ? channelData : nullptr, free, channelData);
+        PodCopy(alignedChannelData + length * i, data->GetData(i), mBuffer->Length());
+        PodZero(alignedChannelData + length * i + mBuffer->Length(), WEBAUDIO_BLOCK_SIZE - mBuffer->Length());
+        paddedBuffer->SetData(i, (i == 0) ? channelData : nullptr, free, alignedChannelData);
       }
       data = paddedBuffer;
     }

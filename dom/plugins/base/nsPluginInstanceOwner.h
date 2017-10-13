@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "npapi.h"
 #include "nsCOMPtr.h"
+#include "nsIKeyEventInPluginCallback.h"
 #include "nsIPluginInstanceOwner.h"
 #include "nsIPrivacyTransitionObserver.h"
 #include "nsIDOMEventListener.h"
@@ -28,7 +29,12 @@ class nsPluginDOMContextMenuListener;
 class nsPluginFrame;
 class nsDisplayListBuilder;
 
+#if defined(MOZ_X11) || defined(ANDROID)
+class gfxContext;
+#endif
+
 namespace mozilla {
+class TextComposition;
 namespace dom {
 struct MozPluginParameter;
 } // namespace dom
@@ -40,11 +46,7 @@ class PuppetWidget;
 using mozilla::widget::PuppetWidget;
 
 #ifdef MOZ_X11
-#ifdef MOZ_WIDGET_QT
-#include "gfxQtNativeRenderer.h"
-#else
 #include "gfxXlibNativeRenderer.h"
-#endif
 #endif
 
 #ifdef XP_OS2
@@ -53,12 +55,15 @@ using mozilla::widget::PuppetWidget;
 #include <os2.h>
 #endif
 
-class nsPluginInstanceOwner final : public nsIPluginInstanceOwner,
-                                    public nsIDOMEventListener,
-                                    public nsIPrivacyTransitionObserver,
-                                    public nsSupportsWeakReference
+class nsPluginInstanceOwner final : public nsIPluginInstanceOwner
+                                  , public nsIDOMEventListener
+                                  , public nsIPrivacyTransitionObserver
+                                  , public nsIKeyEventInPluginCallback
+                                  , public nsSupportsWeakReference
 {
 public:
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+
   nsPluginInstanceOwner();
   
   NS_DECL_ISUPPORTS
@@ -126,6 +131,10 @@ public:
 
   nsEventStatus ProcessEvent(const mozilla::WidgetGUIEvent& anEvent);
 
+  static void GeneratePluginEvent(
+                const mozilla::WidgetCompositionEvent* aSrcCompositionEvent,
+                mozilla::WidgetCompositionEvent* aDistCompositionEvent);
+
 #if defined(XP_WIN) || defined(XP_OS2)
   void SetWidgetWindowAsParent(HWND aWindowToAdopt);
   nsresult SetNetscapeWindowAsParent(HWND aWindowToAdopt);
@@ -135,13 +144,12 @@ public:
   enum { ePluginPaintEnable, ePluginPaintDisable };
 
   void WindowFocusMayHaveChanged();
-  void ResolutionMayHaveChanged();
 
   bool WindowIsActive();
   void SendWindowFocusChanged(bool aIsActive);
   NPDrawingModel GetDrawingModel();
   bool IsRemoteDrawingCoreAnimation();
-  nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
+
   NPEventModel GetEventModel();
   static void CARefresh(nsITimer *aTimer, void *aClosure);
   void AddToCARefreshTimer();
@@ -156,6 +164,11 @@ public:
   void UpdateWindowPositionAndClipRect(bool aSetWindow);
   void UpdateWindowVisibility(bool aVisible);
 #endif // XP_MACOSX
+
+  void ResolutionMayHaveChanged();
+#if defined(XP_MACOSX) || defined(XP_WIN)
+  nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
+#endif
 
   void UpdateDocumentActiveState(bool aIsActive);
 
@@ -225,6 +238,9 @@ public:
 
   // Returns the image container that has our currently displayed image.
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainer();
+  // Returns true if this is windowed plugin that can return static captures
+  // for scroll operations.
+  bool NeedsScrollImageLayer();
 
   void DidComposite();
 
@@ -239,9 +255,9 @@ public:
   // The eventual target of these operations is PluginInstanceParent,
   // but it takes several hops to get there.
   void SetBackgroundUnknown();
-  already_AddRefed<gfxContext> BeginUpdateBackground(const nsIntRect& aRect);
-  void EndUpdateBackground(gfxContext* aContext, const nsIntRect& aRect);
-  
+  already_AddRefed<DrawTarget> BeginUpdateBackground(const nsIntRect& aRect);
+  void EndUpdateBackground(const nsIntRect& aRect);
+
   bool UseAsyncRendering();
 
   already_AddRefed<nsIURI> GetBaseURI() const;
@@ -252,11 +268,12 @@ public:
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInfo* aVideoInfo);
 
   void Invalidate();
+  void Recomposite();
 
   void RequestFullScreen();
   void ExitFullScreen();
 
-  // Called from AndroidJNI when we removed the fullscreen view.
+  // Called from nsAppShell when we removed the fullscreen view.
   static void ExitFullScreen(jobject view);
 #endif
 
@@ -264,11 +281,28 @@ public:
   void NotifyHostCreateWidget();
   void NotifyDestroyPending();
 
-#if defined(XP_WIN)
-  // See QUIRK_FLASH_FIXUP_MOUSE_CURSOR
-  void ResetWidgetCursorCaching();
-#endif
+  bool GetCompositionString(uint32_t aIndex, nsTArray<uint8_t>* aString,
+                            int32_t* aLength);
+  bool SetCandidateWindow(
+           const mozilla::widget::CandidateWindowPosition& aPosition);
+  bool RequestCommitOrCancel(bool aCommitted);
 
+  // See nsIKeyEventInPluginCallback
+  virtual void HandledWindowedPluginKeyEvent(
+                 const mozilla::NativeEventData& aKeyEventData,
+                 bool aIsConsumed) override;
+
+  /**
+   * OnWindowedPluginKeyEvent() is called when the plugin process receives
+   * native key event directly.
+   *
+   * @param aNativeKeyData      The key event which was received by the
+   *                            plugin process directly.
+   */
+  void OnWindowedPluginKeyEvent(
+         const mozilla::NativeEventData& aNativeKeyData);
+
+  void GetCSSZoomFactor(float *result);
 private:
   virtual ~nsPluginInstanceOwner();
 
@@ -291,6 +325,13 @@ private:
 
 #if defined(XP_WIN) || defined(XP_OS2)
   nsIWidget* GetContainingWidgetIfOffset();
+  already_AddRefed<mozilla::TextComposition> GetTextComposition();
+  void HandleNoConsumedCompositionMessage(
+    mozilla::WidgetCompositionEvent* aCompositionEvent,
+    const NPEvent* aPluginEvent);
+  bool mGotCompositionData;
+  bool mSentStartComposition;
+  bool mPluginDidNotHandleIMEComposition;
 #endif
  
   nsPluginNativeWindow       *mPluginWindow;
@@ -308,11 +349,11 @@ private:
   bool                                      mSentInitialTopLevelWindowEvent;
   bool                                      mLastWindowIsActive;
   bool                                      mLastContentFocused;
-  double                                    mLastScaleFactor;
   // True if, the next time the window is activated, we should blur ourselves.
   bool                                      mShouldBlurOnActivate;
 #endif
-
+  double                                    mLastScaleFactor;
+  double                                    mLastCSSZoomFactor;
   // Initially, the event loop nesting level we were created on, it's updated
   // if we detect the appshell is on a lower level as long as we're not stopped.
   // We delay DoStopPlugin() until the appshell reaches this level or lower.
@@ -342,6 +383,11 @@ private:
   nsresult DispatchMouseToPlugin(nsIDOMEvent* aMouseEvent,
                                  bool aAllowPropagate = false);
   nsresult DispatchFocusToPlugin(nsIDOMEvent* aFocusEvent);
+  nsresult DispatchCompositionToPlugin(nsIDOMEvent* aEvent);
+
+#ifdef XP_WIN
+  void CallDefaultProc(const mozilla::WidgetGUIEvent* aEvent);
+#endif
 
 #ifdef XP_MACOSX
   static NPBool ConvertPointPuppet(PuppetWidget *widget, nsPluginFrame* pluginFrame,
@@ -356,12 +402,7 @@ private:
   int mLastMouseDownButtonType;
 
 #ifdef MOZ_X11
-  class Renderer
-#if defined(MOZ_WIDGET_QT)
-  : public gfxQtNativeRenderer
-#else
-  : public gfxXlibNativeRenderer
-#endif
+  class Renderer : public gfxXlibNativeRenderer
   {
   public:
     Renderer(NPWindow* aWindow, nsPluginInstanceOwner* aInstanceOwner,

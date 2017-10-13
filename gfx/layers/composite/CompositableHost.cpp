@@ -148,8 +148,7 @@ CompositableHost::SetCompositor(Compositor* aCompositor)
 
 bool
 CompositableHost::AddMaskEffect(EffectChain& aEffects,
-                                const gfx::Matrix4x4& aTransform,
-                                bool aIs3D)
+                                const gfx::Matrix4x4& aTransform)
 {
   CompositableTextureSourceRef source;
   RefPtr<TextureHost> host = GetAsTextureHost();
@@ -174,7 +173,6 @@ CompositableHost::AddMaskEffect(EffectChain& aEffects,
   RefPtr<EffectMask> effect = new EffectMask(source,
                                              source->GetSize(),
                                              aTransform);
-  effect->mIs3D = aIs3D;
   aEffects.mSecondaryEffects[EffectTypes::MASK] = effect;
   return true;
 }
@@ -202,11 +200,6 @@ CompositableHost::Create(const TextureInfo& aTextureInfo)
   case CompositableType::IMAGE:
     result = new ImageHost(aTextureInfo);
     break;
-#ifdef MOZ_WIDGET_GONK
-  case CompositableType::IMAGE_OVERLAY:
-    result = new ImageHostOverlay(aTextureInfo);
-    break;
-#endif
   case CompositableType::CONTENT_SINGLE:
     result = new ContentHostSingleBuffered(aTextureInfo);
     break;
@@ -230,6 +223,12 @@ CompositableHost::DumpTextureHost(std::stringstream& aStream, TextureHost* aText
     return;
   }
   aStream << gfxUtils::GetAsDataURI(dSurf).get();
+}
+
+void
+CompositableHost::ReceivedDestroy(PCompositableParent* aActor)
+{
+  static_cast<CompositableParent*>(aActor)->RecvDestroy();
 }
 
 namespace CompositableMap {

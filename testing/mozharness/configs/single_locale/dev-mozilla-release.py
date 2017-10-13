@@ -2,7 +2,6 @@ config = {
     "branch": "jamun",
     "nightly_build": True,
     "update_channel": "release-dev",
-    "latest_mar_dir": 'fake_kill_me',
 
     # l10n
     "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-release",
@@ -13,17 +12,14 @@ config = {
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
     }, {
-        "vcs": "hgtool",
+        "vcs": "hg",
         "repo": "https://hg.mozilla.org/projects/jamun",
-        "revision": "default",
+        "branch": "%(revision)s",
         "dest": "jamun",
-    }, {
-        "vcs": "hgtool",
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
+        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
     }],
     # purge options
     'purge_minsize': 12,
@@ -31,6 +27,7 @@ config = {
     'default_actions': [
         "clobber",
         "pull",
+        "clone-locales",
         "list-locales",
         "setup",
         "repack",

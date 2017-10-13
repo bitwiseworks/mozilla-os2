@@ -36,7 +36,9 @@ class FunctionsGL
     StandardGL standard;
     GLint profile;
     bool isAtLeastGL(const gl::Version &glVersion) const;
+    bool isAtMostGL(const gl::Version &glVersion) const;
     bool isAtLeastGLES(const gl::Version &glesVersion) const;
+    bool isAtMostGLES(const gl::Version &glesVersion) const;
 
     // Extensions
     std::vector<std::string> extensions;
@@ -392,6 +394,31 @@ class FunctionsGL
     PFNGLTEXIMAGE3DMULTISAMPLEPROC texImage3DMultisample;
     PFNGLWAITSYNCPROC waitSync;
 
+    // NV_path_rendering (originally written against 3.2 compatibility profile)
+    PFNGLMATRIXLOADFEXTPROC matrixLoadEXT;
+    PFNGLGENPATHSNVPROC genPathsNV;
+    PFNGLDELETEPATHSNVPROC delPathsNV;
+    PFNGLPATHCOMMANDSNVPROC pathCommandsNV;
+    PFNGLISPATHNVPROC isPathNV;
+    PFNGLPATHPARAMETERFNVPROC setPathParameterfNV;
+    PFNGLPATHPARAMETERINVPROC setPathParameteriNV;
+    PFNGLGETPATHPARAMETERFVNVPROC getPathParameterfNV;
+    PFNGLGETPATHPARAMETERIVNVPROC getPathParameteriNV;
+    PFNGLPATHSTENCILFUNCNVPROC pathStencilFuncNV;
+    PFNGLSTENCILFILLPATHNVPROC stencilFillPathNV;
+    PFNGLSTENCILSTROKEPATHNVPROC stencilStrokePathNV;
+    PFNGLCOVERFILLPATHNVPROC coverFillPathNV;
+    PFNGLCOVERSTROKEPATHNVPROC coverStrokePathNV;
+    PFNGLSTENCILTHENCOVERFILLPATHNVPROC stencilThenCoverFillPathNV;
+    PFNGLSTENCILTHENCOVERSTROKEPATHNVPROC stencilThenCoverStrokePathNV;
+    PFNGLCOVERFILLPATHINSTANCEDNVPROC coverFillPathInstancedNV;
+    PFNGLCOVERSTROKEPATHINSTANCEDNVPROC coverStrokePathInstancedNV;
+    PFNGLSTENCILFILLPATHINSTANCEDNVPROC stencilFillPathInstancedNV;
+    PFNGLSTENCILSTROKEPATHINSTANCEDNVPROC stencilStrokePathInstancedNV;
+    PFNGLSTENCILTHENCOVERFILLPATHINSTANCEDNVPROC stencilThenCoverFillPathInstancedNV;
+    PFNGLSTENCILTHENCOVERSTROKEPATHINSTANCEDNVPROC stencilThenCoverStrokePathInstancedNV;
+    PFNGLPROGRAMPATHFRAGMENTINPUTGENNVPROC programPathFragmentInputGenNV;
+
     // 3.3
     PFNGLBINDFRAGDATALOCATIONINDEXEDPROC bindFragDataLocationIndexed;
     PFNGLBINDSAMPLERPROC bindSampler;
@@ -619,6 +646,7 @@ class FunctionsGL
     PFNGLVERTEXATTRIBIFORMATPROC vertexAttribIFormat;
     PFNGLVERTEXATTRIBLFORMATPROC vertexAttribLFormat;
     PFNGLVERTEXBINDINGDIVISORPROC vertexBindingDivisor;
+    PFNGLCOVERAGEMODULATIONNVPROC coverageModulationNV;
 
     // 4.4
     PFNGLBINDBUFFERSBASEPROC bindBuffersBase;
@@ -743,7 +771,18 @@ class FunctionsGL
     PFNGLVERTEXARRAYVERTEXBUFFERPROC vertexArrayVertexBuffer;
     PFNGLVERTEXARRAYVERTEXBUFFERSPROC vertexArrayVertexBuffers;
 
+    // ES 3.2
+    PFNGLBLENDBARRIERPROC blendBarrier;
+    PFNGLPRIMITIVEBOUNDINGBOXPROC primitiveBoundingBox;
+
+    // ES extensions
+    PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC eglImageTargetRenderbufferStorageOES;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC eglImageTargetTexture2DOES;
+
   private:
+    void initializeProcsDesktopGL();
+    void initializeProcsGLES();
+
     virtual void *loadProcAddress(const std::string &function) = 0;
 };
 

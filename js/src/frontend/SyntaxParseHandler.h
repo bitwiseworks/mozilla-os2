@@ -42,10 +42,14 @@ class SyntaxParseHandler
         NodeGetProp,
         NodeStringExprStatement,
         NodeReturn,
-        NodeHoistableDeclaration,
         NodeBreak,
         NodeThrow,
         NodeEmptyStatement,
+
+        NodeVarDeclaration,
+        NodeLexicalDeclaration,
+
+        NodeFunctionDefinition,
 
         // This is needed for proper assignment-target handling.  ES6 formally
         // requires function calls *not* pass IsValidSimpleAssignmentTarget,
@@ -90,6 +94,7 @@ class SyntaxParseHandler
 
         // Nodes representing unparenthesized names.
         NodeUnparenthesizedArgumentsName,
+        NodeUnparenthesizedAsyncName,
         NodeUnparenthesizedEvalName,
         NodeUnparenthesizedName,
 
@@ -112,14 +117,6 @@ class SyntaxParseHandler
         // yields |b| each time it's resumed.
         NodeUnparenthesizedCommaExpr,
 
-        // Yield expressions currently (but not in ES6 -- a SpiderMonkey bug to
-        // fix) must generally be parenthesized.  (See the uses of
-        // isUnparenthesizedYieldExpression in Parser.cpp for the rare
-        // exceptions.)  Thus we need this to treat |yield 1, 2;| as a syntax
-        // error and |(yield 1), 2;| as a comma expression that will yield 1,
-        // then evaluate to 2.
-        NodeUnparenthesizedYieldExpr,
-
         // Assignment expressions in condition contexts could be typos for
         // equality checks.  (Think |if (x = y)| versus |if (x == y)|.)  Thus
         // we need this to treat |if (x = y)| as a possible typo and
@@ -131,11 +128,15 @@ class SyntaxParseHandler
         // eventually enforce extraWarnings and will require this then.)
         NodeUnparenthesizedAssignment,
 
+        // This node is necessary to determine if the base operand in an
+        // exponentiation operation is an unparenthesized unary expression.
+        // We want to reject |-2 ** 3|, but still need to allow |(-2) ** 3|.
+        NodeUnparenthesizedUnary,
+
         // This node is necessary to determine if the LHS of a property access is
         // super related.
         NodeSuperBase
     };
-    typedef Definition::Kind DefinitionNode;
 
     bool isPropertyAccess(Node node) {
         return node == NodeDottedProperty || node == NodeElement;
@@ -178,10 +179,12 @@ class SyntaxParseHandler
 
     void trace(JSTracer* trc) {}
 
-    Node newName(PropertyName* name, uint32_t blockid, const TokenPos& pos, ExclusiveContext* cx) {
+    Node newName(PropertyName* name, const TokenPos& pos, ExclusiveContext* cx) {
         lastAtom = name;
         if (name == cx->names().arguments)
             return NodeUnparenthesizedArgumentsName;
+        if (name == cx->names().async)
+            return NodeUnparenthesizedAsyncName;
         if (name == cx->names().eval)
             return NodeUnparenthesizedEvalName;
         return NodeUnparenthesizedName;
@@ -189,10 +192,6 @@ class SyntaxParseHandler
 
     Node newComputedName(Node expr, uint32_t start, uint32_t end) {
         return NodeGeneric;
-    }
-
-    DefinitionNode newPlaceholder(JSAtom* atom, uint32_t blockid, const TokenPos& pos) {
-        return Definition::PLACEHOLDER;
     }
 
     Node newObjectLiteralPropertyName(JSAtom* atom, const TokenPos& pos) {
@@ -216,9 +215,7 @@ class SyntaxParseHandler
         return NodeGeneric;
     }
 
-    bool addToCallSiteObject(Node callSiteObj, Node rawNode, Node cookedNode) {
-        return true;
-    }
+    void addToCallSiteObject(Node callSiteObj, Node rawNode, Node cookedNode) {}
 
     Node newThisLiteral(const TokenPos& pos, Node thisName) { return NodeGeneric; }
     Node newNullLiteral(const TokenPos& pos) { return NodeGeneric; }
@@ -230,19 +227,27 @@ class SyntaxParseHandler
 
     Node newElision() { return NodeGeneric; }
 
-    void markAsSetCall(Node node) {
-        MOZ_ASSERT(node == NodeFunctionCall);
-    }
-
     Node newDelete(uint32_t begin, Node expr) {
-        return NodeGeneric;
+        return NodeUnparenthesizedUnary;
     }
 
     Node newTypeof(uint32_t begin, Node kid) {
-        return NodeGeneric;
+        return NodeUnparenthesizedUnary;
     }
 
     Node newUnary(ParseNodeKind kind, JSOp op, uint32_t begin, Node kid) {
+        return NodeUnparenthesizedUnary;
+    }
+
+    Node newUpdate(ParseNodeKind kind, uint32_t begin, Node kid) {
+        return NodeGeneric;
+    }
+
+    Node newSpread(uint32_t begin, Node kid) {
+        return NodeGeneric;
+    }
+
+    Node newArrayPush(uint32_t begin, Node kid) {
         return NodeGeneric;
     }
 
@@ -252,7 +257,7 @@ class SyntaxParseHandler
         return NodeGeneric;
     }
     Node appendOrCreateList(ParseNodeKind kind, Node left, Node right,
-                            ParseContext<SyntaxParseHandler>* pc, JSOp op = JSOP_NOP) {
+                            ParseContext* pc, JSOp op = JSOP_NOP) {
         return NodeGeneric;
     }
 
@@ -264,8 +269,8 @@ class SyntaxParseHandler
 
     Node newArrayComprehension(Node body, const TokenPos& pos) { return NodeGeneric; }
     Node newArrayLiteral(uint32_t begin) { return NodeUnparenthesizedArray; }
-    bool addElision(Node literal, const TokenPos& pos) { return true; }
-    bool addSpreadElement(Node literal, uint32_t begin, Node inner) { return true; }
+    MOZ_MUST_USE bool addElision(Node literal, const TokenPos& pos) { return true; }
+    MOZ_MUST_USE bool addSpreadElement(Node literal, uint32_t begin, Node inner) { return true; }
     void addArrayElement(Node literal, Node element) { }
 
     Node newCall() { return NodeFunctionCall; }
@@ -273,24 +278,28 @@ class SyntaxParseHandler
 
     Node newObjectLiteral(uint32_t begin) { return NodeUnparenthesizedObject; }
     Node newClassMethodList(uint32_t begin) { return NodeGeneric; }
+    Node newClassNames(Node outer, Node inner, const TokenPos& pos) { return NodeGeneric; }
+    Node newClass(Node name, Node heritage, Node methodBlock) { return NodeGeneric; }
 
     Node newNewTarget(Node newHolder, Node targetHolder) { return NodeGeneric; }
     Node newPosHolder(const TokenPos& pos) { return NodeGeneric; }
     Node newSuperBase(Node thisName, const TokenPos& pos) { return NodeSuperBase; }
 
-    bool addPrototypeMutation(Node literal, uint32_t begin, Node expr) { return true; }
-    bool addPropertyDefinition(Node literal, Node name, Node expr) { return true; }
-    bool addShorthand(Node literal, Node name, Node expr) { return true; }
-    bool addObjectMethodDefinition(Node literal, Node name, Node fn, JSOp op) { return true; }
-    bool addClassMethodDefinition(Node literal, Node name, Node fn, JSOp op, bool isStatic) { return true; }
-    Node newYieldExpression(uint32_t begin, Node value, Node gen) { return NodeUnparenthesizedYieldExpr; }
+    MOZ_MUST_USE bool addPrototypeMutation(Node literal, uint32_t begin, Node expr) { return true; }
+    MOZ_MUST_USE bool addPropertyDefinition(Node literal, Node name, Node expr) { return true; }
+    MOZ_MUST_USE bool addShorthand(Node literal, Node name, Node expr) { return true; }
+    MOZ_MUST_USE bool addObjectMethodDefinition(Node literal, Node name, Node fn, JSOp op) { return true; }
+    MOZ_MUST_USE bool addClassMethodDefinition(Node literal, Node name, Node fn, JSOp op, bool isStatic) { return true; }
+    Node newYieldExpression(uint32_t begin, Node value, Node gen) { return NodeGeneric; }
     Node newYieldStarExpression(uint32_t begin, Node value, Node gen) { return NodeGeneric; }
+    Node newAwaitExpression(uint32_t begin, Node value, Node gen) { return NodeGeneric; }
 
     // Statements
 
-    Node newStatementList(unsigned blockid, const TokenPos& pos) { return NodeGeneric; }
-    void addStatementToList(Node list, Node stmt, ParseContext<SyntaxParseHandler>* pc) {}
-    bool prependInitialYield(Node stmtList, Node gen) { return true; }
+    Node newStatementList(const TokenPos& pos) { return NodeGeneric; }
+    void addStatementToList(Node list, Node stmt) {}
+    void addCaseStatementToList(Node list, Node stmt) {}
+    MOZ_MUST_USE bool prependInitialYield(Node stmtList, Node gen) { return true; }
     Node newEmptyStatement(const TokenPos& pos) { return NodeEmptyStatement; }
 
     Node newSetThis(Node thisName, Node value) { return value; }
@@ -307,6 +316,7 @@ class SyntaxParseHandler
     Node newContinueStatement(PropertyName* label, const TokenPos& pos) { return NodeGeneric; }
     Node newBreakStatement(PropertyName* label, const TokenPos& pos) { return NodeBreak; }
     Node newReturnStatement(Node expr, const TokenPos& pos) { return NodeReturn; }
+    Node newWithStatement(uint32_t begin, Node expr, Node body) { return NodeGeneric; }
 
     Node newLabeledStatement(PropertyName* label, Node stmt, uint32_t begin) {
         return NodeGeneric;
@@ -325,15 +335,16 @@ class SyntaxParseHandler
 
     Node newPropertyByValue(Node pn, Node kid, uint32_t end) { return NodeElement; }
 
-    bool addCatchBlock(Node catchList, Node letBlock,
-                       Node catchName, Node catchGuard, Node catchBody) { return true; }
+    MOZ_MUST_USE bool addCatchBlock(Node catchList, Node letBlock, Node catchName,
+                                    Node catchGuard, Node catchBody) { return true; }
 
-    bool setLastFunctionArgumentDefault(Node funcpn, Node pn) { return true; }
-    void setLastFunctionArgumentDestructuring(Node funcpn, Node pn) {}
-    Node newFunctionDefinition() { return NodeHoistableDeclaration; }
+    MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(Node funcpn, Node pn) { return true; }
+    Node newFunctionDefinition() { return NodeFunctionDefinition; }
+    bool setComprehensionLambdaBody(Node pn, Node body) { return true; }
+    void setFunctionFormalParametersAndBody(Node pn, Node kid) {}
     void setFunctionBody(Node pn, Node kid) {}
     void setFunctionBox(Node pn, FunctionBox* funbox) {}
-    void addFunctionArgument(Node pn, Node argpn) {}
+    void addFunctionFormalParameter(Node pn, Node argpn) {}
 
     Node newForStatement(uint32_t begin, Node forHead, Node body, unsigned iflags) {
         return NodeGeneric;
@@ -343,27 +354,29 @@ class SyntaxParseHandler
         return NodeGeneric;
     }
 
-    Node newForHead(ParseNodeKind kind, Node decls, Node lhs, Node rhs, const TokenPos& pos) {
+    Node newComprehensionBinding(Node kid) {
+        // Careful: we're asking this well after the name was parsed, so the
+        // value returned may not correspond to |kid|'s actual name.  But it
+        // *will* be truthy iff |kid| was a name, so we're safe.
+        MOZ_ASSERT(isUnparenthesizedName(kid));
         return NodeGeneric;
     }
 
-    Node newLexicalScope(ObjectBox* blockbox) { return NodeGeneric; }
-    void setLexicalScopeBody(Node block, Node body) {}
-
-    Node newLetBlock(Node vars, Node block, const TokenPos& pos) {
+    Node newForHead(Node init, Node test, Node update, const TokenPos& pos) {
         return NodeGeneric;
     }
 
-    bool finishInitializerAssignment(Node pn, Node init, JSOp op) { return true; }
-    void setLexicalDeclarationOp(Node pn, JSOp op) {}
+    Node newForInOrOfHead(ParseNodeKind kind, Node target, Node iteratedExpr, const TokenPos& pos) {
+        return NodeGeneric;
+    }
+
+    MOZ_MUST_USE bool finishInitializerAssignment(Node pn, Node init) { return true; }
 
     void setBeginPosition(Node pn, Node oth) {}
     void setBeginPosition(Node pn, uint32_t begin) {}
 
     void setEndPosition(Node pn, Node oth) {}
     void setEndPosition(Node pn, uint32_t end) {}
-
-    void setDerivedClassConstructor(Node pn) {}
 
     void setPosition(Node pn, const TokenPos& pos) {}
     TokenPos getPosition(Node pn) {
@@ -372,22 +385,49 @@ class SyntaxParseHandler
 
     Node newList(ParseNodeKind kind, JSOp op = JSOP_NOP) {
         MOZ_ASSERT(kind != PNK_VAR);
+        MOZ_ASSERT(kind != PNK_LET);
+        MOZ_ASSERT(kind != PNK_CONST);
         return NodeGeneric;
     }
     Node newList(ParseNodeKind kind, uint32_t begin, JSOp op = JSOP_NOP) {
-        return NodeGeneric;
-    }
-    Node newDeclarationList(ParseNodeKind kind, JSOp op = JSOP_NOP) {
-        MOZ_ASSERT(kind == PNK_VAR || kind == PNK_CONST || kind == PNK_LET);
-        return kind == PNK_VAR ? NodeHoistableDeclaration : NodeGeneric;
+        return newList(kind, op);
     }
     Node newList(ParseNodeKind kind, Node kid, JSOp op = JSOP_NOP) {
-        MOZ_ASSERT(kind != PNK_VAR);
-        return NodeGeneric;
+        return newList(kind, op);
+    }
+
+    Node newDeclarationList(ParseNodeKind kind, JSOp op = JSOP_NOP) {
+        if (kind == PNK_VAR)
+            return NodeVarDeclaration;
+        MOZ_ASSERT(kind == PNK_LET || kind == PNK_CONST);
+        return NodeLexicalDeclaration;
     }
     Node newDeclarationList(ParseNodeKind kind, Node kid, JSOp op = JSOP_NOP) {
-        MOZ_ASSERT(kind == PNK_VAR || kind == PNK_CONST || kind == PNK_LET);
-        return kind == PNK_VAR ? NodeHoistableDeclaration : NodeGeneric;
+        return newDeclarationList(kind, op);
+    }
+
+    bool isDeclarationList(Node node) {
+        return node == NodeVarDeclaration || node == NodeLexicalDeclaration;
+    }
+
+    Node singleBindingFromDeclaration(Node decl) {
+        MOZ_ASSERT(isDeclarationList(decl));
+
+        // This is, unfortunately, very dodgy.  Obviously NodeVarDeclaration
+        // and NodeLexicalDeclaration can store no info on the arbitrary
+        // number of bindings it could contain.
+        //
+        // But this method is called only for cloning for-in/of declarations
+        // as initialization targets.  That context simplifies matters.  If the
+        // binding is a single name, it'll always syntax-parse (or it would
+        // already have been rejected as assigning/binding a forbidden name).
+        // Otherwise the binding is a destructuring pattern.  But syntax
+        // parsing would *already* have aborted when it saw a destructuring
+        // pattern.  So we can just say any old thing here, because the only
+        // time we'll be wrong is a case that syntax parsing has already
+        // rejected.  Use NodeUnparenthesizedName so the SyntaxParseHandler
+        // Parser::cloneLeftHandSide can assert it sees only this.
+        return NodeUnparenthesizedName;
     }
 
     Node newCatchList() {
@@ -403,20 +443,15 @@ class SyntaxParseHandler
                    list == NodeUnparenthesizedArray ||
                    list == NodeUnparenthesizedObject ||
                    list == NodeUnparenthesizedCommaExpr ||
-                   list == NodeHoistableDeclaration ||
+                   list == NodeVarDeclaration ||
+                   list == NodeLexicalDeclaration ||
                    list == NodeFunctionCall);
     }
 
-    Node newAssignment(ParseNodeKind kind, Node lhs, Node rhs,
-                       ParseContext<SyntaxParseHandler>* pc, JSOp op)
-    {
+    Node newAssignment(ParseNodeKind kind, Node lhs, Node rhs, JSOp op) {
         if (kind == PNK_ASSIGN)
             return NodeUnparenthesizedAssignment;
         return newBinary(kind, lhs, rhs, op);
-    }
-
-    bool isUnparenthesizedYieldExpression(Node node) {
-        return node == NodeUnparenthesizedYieldExpr;
     }
 
     bool isUnparenthesizedCommaExpression(Node node) {
@@ -427,12 +462,18 @@ class SyntaxParseHandler
         return node == NodeUnparenthesizedAssignment;
     }
 
+    bool isUnparenthesizedUnaryExpression(Node node) {
+        return node == NodeUnparenthesizedUnary;
+    }
+
     bool isReturnStatement(Node node) {
         return node == NodeReturn;
     }
 
     bool isStatementPermittedAfterReturnStatement(Node pn) {
-        return pn == NodeHoistableDeclaration || pn == NodeBreak || pn == NodeThrow ||
+        return pn == NodeFunctionDefinition || pn == NodeVarDeclaration ||
+               pn == NodeBreak ||
+               pn == NodeThrow ||
                pn == NodeEmptyStatement;
     }
 
@@ -441,10 +482,8 @@ class SyntaxParseHandler
     }
 
     void setOp(Node pn, JSOp op) {}
-    void setBlockId(Node pn, unsigned blockid) {}
-    void setFlag(Node pn, unsigned flag) {}
     void setListFlag(Node pn, unsigned flag) {}
-    MOZ_WARN_UNUSED_RESULT Node parenthesize(Node node) {
+    MOZ_MUST_USE Node parenthesize(Node node) {
         // A number of nodes have different behavior upon parenthesization, but
         // only in some circumstances.  Convert these nodes to special
         // parenthesized forms.
@@ -452,7 +491,7 @@ class SyntaxParseHandler
             return NodeParenthesizedArgumentsName;
         if (node == NodeUnparenthesizedEvalName)
             return NodeParenthesizedEvalName;
-        if (node == NodeUnparenthesizedName)
+        if (node == NodeUnparenthesizedName || node == NodeUnparenthesizedAsyncName)
             return NodeParenthesizedName;
 
         if (node == NodeUnparenthesizedArray)
@@ -464,8 +503,8 @@ class SyntaxParseHandler
         // them to a generic node.
         if (node == NodeUnparenthesizedString ||
             node == NodeUnparenthesizedCommaExpr ||
-            node == NodeUnparenthesizedYieldExpr ||
-            node == NodeUnparenthesizedAssignment)
+            node == NodeUnparenthesizedAssignment ||
+            node == NodeUnparenthesizedUnary)
         {
             return NodeGeneric;
         }
@@ -474,37 +513,49 @@ class SyntaxParseHandler
         // to the unparenthesized form: return |node| unchanged.
         return node;
     }
-    MOZ_WARN_UNUSED_RESULT Node setLikelyIIFE(Node pn) {
+    MOZ_MUST_USE Node setLikelyIIFE(Node pn) {
         return pn; // Remain in syntax-parse mode.
     }
     void setPrologue(Node pn) {}
 
     bool isConstant(Node pn) { return false; }
 
-    PropertyName* maybeUnparenthesizedName(Node node) {
-        if (node == NodeUnparenthesizedName ||
-            node == NodeUnparenthesizedArgumentsName ||
-            node == NodeUnparenthesizedEvalName)
-        {
-            return lastAtom->asPropertyName();
-        }
+    bool isUnparenthesizedName(Node node) {
+        return node == NodeUnparenthesizedArgumentsName ||
+               node == NodeUnparenthesizedAsyncName ||
+               node == NodeUnparenthesizedEvalName ||
+               node == NodeUnparenthesizedName;
+    }
+
+    bool isNameAnyParentheses(Node node) {
+        if (isUnparenthesizedName(node))
+            return true;
+        return node == NodeParenthesizedArgumentsName ||
+               node == NodeParenthesizedEvalName ||
+               node == NodeParenthesizedName;
+    }
+
+    bool nameIsEvalAnyParentheses(Node node, ExclusiveContext* cx) {
+        MOZ_ASSERT(isNameAnyParentheses(node),
+                   "must only call this function on known names");
+        return node == NodeUnparenthesizedEvalName || node == NodeParenthesizedEvalName;
+    }
+
+    const char* nameIsArgumentsEvalAnyParentheses(Node node, ExclusiveContext* cx) {
+        MOZ_ASSERT(isNameAnyParentheses(node),
+                   "must only call this method on known names");
+
+        if (nameIsEvalAnyParentheses(node, cx))
+            return js_eval_str;
+        if (node == NodeUnparenthesizedArgumentsName || node == NodeParenthesizedArgumentsName)
+            return js_arguments_str;
         return nullptr;
     }
 
-    PropertyName* maybeParenthesizedName(Node node) {
-        if (node == NodeParenthesizedName ||
-            node == NodeParenthesizedArgumentsName ||
-            node == NodeParenthesizedEvalName)
-        {
-            return lastAtom->asPropertyName();
-        }
-        return nullptr;
-    }
-
-    PropertyName* maybeNameAnyParentheses(Node node) {
-        if (PropertyName* name = maybeUnparenthesizedName(node))
-            return name;
-        return maybeParenthesizedName(node);
+    bool nameIsUnparenthesizedAsync(Node node, ExclusiveContext* cx) {
+        MOZ_ASSERT(isNameAnyParentheses(node),
+                   "must only call this function on known names");
+        return node == NodeUnparenthesizedAsyncName;
     }
 
     PropertyName* maybeDottedProperty(Node node) {
@@ -526,37 +577,18 @@ class SyntaxParseHandler
         return nullptr;
     }
 
-    void markAsAssigned(Node node) {}
+    bool canSkipLazyInnerFunctions() {
+        return false;
+    }
+    bool canSkipLazyClosedOverBindings() {
+        return false;
+    }
+    JSAtom* nextLazyClosedOverBinding() {
+        MOZ_CRASH("SyntaxParseHandler::canSkipLazyClosedOverBindings must return false");
+    }
+
     void adjustGetToSet(Node node) {}
-    void maybeDespecializeSet(Node node) {}
 
-    Node makeAssignment(Node pn, Node rhs) { return NodeGeneric; }
-
-    static Node getDefinitionNode(DefinitionNode dn) { return NodeGeneric; }
-    static Definition::Kind getDefinitionKind(DefinitionNode dn) { return dn; }
-    static bool isPlaceholderDefinition(DefinitionNode dn) { return dn == Definition::PLACEHOLDER; }
-    void linkUseToDef(Node pn, DefinitionNode dn) {}
-    DefinitionNode resolve(DefinitionNode dn) { return dn; }
-    void deoptimizeUsesWithin(DefinitionNode dn, const TokenPos& pos) {}
-    bool dependencyCovered(Node pn, unsigned blockid, bool functionScope) {
-        // Only resolve lexical dependencies in cases where a definition covers
-        // the entire function. Not enough information is kept to compare the
-        // dependency location with blockid.
-        return functionScope;
-    }
-    void markMaybeUninitializedLexicalUseInSwitch(Node pn, DefinitionNode dn,
-                                                  uint16_t firstDominatingLexicalSlot) {}
-
-    static uintptr_t definitionToBits(DefinitionNode dn) {
-        // Use a shift, as DefinitionList tags the lower bit of its associated union.
-        return uintptr_t(dn << 1);
-    }
-    static DefinitionNode definitionFromBits(uintptr_t bits) {
-        return (DefinitionNode) (bits >> 1);
-    }
-    static DefinitionNode nullDefinition() {
-        return Definition::MISSING;
-    }
     void disableSyntaxParser() {
     }
 };

@@ -15,34 +15,14 @@ function testSteps()
   const tempStorageLimitKB = 1024;
   const checkpointSleepTimeSec = 5;
 
-  function setLimit(limit) {
-    const pref = "dom.quotaManager.temporaryStorage.fixedLimit";
-    if (limit) {
-      info("Setting temporary storage limit to " + limit);
-      SpecialPowers.setIntPref(pref, limit);
-    } else {
-      info("Removing temporary storage limit");
-      SpecialPowers.clearUserPref(pref);
-    }
-  }
-
   function getSpec(index) {
     return "http://foo" + index + ".com";
-  }
-
-  function getPrincipal(url) {
-    let uri = Cc["@mozilla.org/network/io-service;1"]
-                .getService(Ci.nsIIOService)
-                .newURI(url, null, null);
-    let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
-                .getService(Ci.nsIScriptSecurityManager);
-    return ssm.createCodebasePrincipal(uri, {});
   }
 
   for (let temporary of [true, false]) {
     info("Testing '" + (temporary ? "temporary" : "default") + "' storage");
 
-    setLimit(tempStorageLimitKB);
+    setTemporaryStorageLimit(tempStorageLimitKB);
 
     clearAllDatabases(continueToNextStepSync);
     yield undefined;
@@ -60,17 +40,26 @@ function testSteps()
 
       info("Opening database for " + spec + " with version " + options.version);
 
-      let gotUpgradeNeeded = false;
+      let gotUpgradeIncomplete = false;
+      let gotUpgradeComplete = false;
 
       let request =
         indexedDB.openForPrincipal(getPrincipal(spec), name, options);
       request.onerror = function(event) {
-        is(request.error.name, "QuotaExceededError", "Reached quota limit");
+        is(request.error.name,
+           gotUpgradeIncomplete ? "AbortError" : "QuotaExceededError",
+           "Reached quota limit");
         event.preventDefault();
         testGenerator.send(false);
       }
       request.onupgradeneeded = function(event) {
-        gotUpgradeNeeded = true;
+        event.target.transaction.onabort = function(e) {
+          gotUpgradeIncomplete = true;
+          is(e.target.error.name, "QuotaExceededError", "Reached quota limit");
+        }
+        event.target.transaction.oncomplete = function() {
+          gotUpgradeComplete = true;
+        }
       }
       request.onsuccess = function(event) {
         let db = event.target.result;
@@ -81,7 +70,7 @@ function testSteps()
 
       let shouldContinue = yield undefined;
       if (shouldContinue) {
-        is(gotUpgradeNeeded, true, "Got upgradeneeded event");
+        is(gotUpgradeComplete, true, "Got upgradeneeded event");
         ok(true, "Got success event");
       } else {
         break;
@@ -98,17 +87,26 @@ function testSteps()
 
       info("Opening database for " + spec + " with version " + options.version);
 
-      let gotUpgradeNeeded = false;
+      let gotUpgradeIncomplete = false;
+      let gotUpgradeComplete = false;
 
       let request =
         indexedDB.openForPrincipal(getPrincipal(spec), name, options);
       request.onerror = function(event) {
-        is(request.error.name, "QuotaExceededError", "Reached quota limit");
+        is(request.error.name,
+           gotUpgradeIncomplete ? "AbortError" : "QuotaExceededError",
+           "Reached quota limit");
         event.preventDefault();
         testGenerator.send(false);
       }
       request.onupgradeneeded = function(event) {
-        gotUpgradeNeeded = true;
+        event.target.transaction.onabort = function(e) {
+          gotUpgradeIncomplete = true;
+          is(e.target.error.name, "QuotaExceededError", "Reached quota limit");
+        }
+        event.target.transaction.oncomplete = function() {
+          gotUpgradeComplete = true;
+        }
       }
       request.onsuccess = function(event) {
         let db = event.target.result;
@@ -119,7 +117,7 @@ function testSteps()
 
       let shouldContinue = yield undefined;
       if (shouldContinue) {
-        is(gotUpgradeNeeded, true, "Got upgradeneeded event");
+        is(gotUpgradeComplete, true, "Got upgradeneeded event");
         ok(true, "Got success event");
       } else {
         break;
@@ -165,7 +163,7 @@ function testSteps()
     db.close();
     db = null;
 
-    setLimit(tempStorageLimitKB * 2);
+    setTemporaryStorageLimit(tempStorageLimitKB * 2);
 
     resetAllDatabases(continueToNextStepSync);
     yield undefined;
@@ -197,7 +195,7 @@ function testSteps()
     info("Stage 3 - " +
          "Cutting storage limit in half to force deletion of some databases");
 
-    setLimit(tempStorageLimitKB / 2);
+    setTemporaryStorageLimit(tempStorageLimitKB / 2);
 
     resetAllDatabases(continueToNextStepSync);
     yield undefined;
@@ -220,7 +218,7 @@ function testSteps()
     db.close();
     db = null;
 
-    setLimit(tempStorageLimitKB * 2);
+    setTemporaryStorageLimit(tempStorageLimitKB * 2);
 
     resetAllDatabases(continueToNextStepSync);
     yield undefined;

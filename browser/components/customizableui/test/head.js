@@ -8,10 +8,11 @@
 var tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
 Cu.import("resource:///modules/CustomizableUI.jsm", tmp);
-var {Promise, CustomizableUI} = tmp;
+Cu.import("resource://gre/modules/AppConstants.jsm", tmp);
+var {Promise, CustomizableUI, AppConstants} = tmp;
 
-var ChromeUtils = {};
-Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
+var EventUtils = {};
+Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
 
 Services.prefs.setBoolPref("browser.uiCustomization.skipSourceNodeCheck", true);
 registerCleanupFunction(() => Services.prefs.clearUserPref("browser.uiCustomization.skipSourceNodeCheck"));
@@ -21,7 +22,7 @@ registerCleanupFunction(() => Services.prefs.clearUserPref("browser.uiCustomizat
 CustomizableUI.destroyWidget("e10s-button");
 CustomizableUI.removeWidgetFromArea("e10s-button");
 
-var {synthesizeDragStart, synthesizeDrop} = ChromeUtils;
+var {synthesizeDragStart, synthesizeDrop} = EventUtils;
 
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const kTabEventFailureTimeoutInMs = 20000;
@@ -113,12 +114,8 @@ function resetCustomization() {
   return CustomizableUI.reset();
 }
 
-XPCOMUtils.defineLazyGetter(this, 'gDeveloperButtonInNavbar', function() {
-  return getAreaWidgetIds(CustomizableUI.AREA_NAVBAR).indexOf("developer-button") != -1;
-});
-
 function isInDevEdition() {
-  return gDeveloperButtonInNavbar;
+  return AppConstants.MOZ_DEV_EDITION;
 }
 
 function removeDeveloperButtonIfDevEdition(areaPanelPlacements) {
@@ -143,7 +140,7 @@ function placementArraysEqual(areaId, actualPlacements, expectedPlacements) {
     } else if (expectedPlacements[i] instanceof RegExp) {
       ok(expectedPlacements[i].test(actualPlacements[i]),
          "Item " + i + " (" + actualPlacements[i] + ") in " +
-         areaId + " should match " + expectedPlacements[i]); 
+         areaId + " should match " + expectedPlacements[i]);
     } else {
       ok(false, "Unknown type of expected placement passed to " +
                 " assertAreaPlacements. Is your test broken?");
@@ -191,32 +188,12 @@ function endCustomizing(aWindow=window) {
   aWindow.gNavToolbox.addEventListener("aftercustomization", onCustomizationEnds);
   aWindow.gCustomizeMode.exit();
 
-  return deferredEndCustomizing.promise.then(function() {
-    let deferredLoadNewTab = Promise.defer();
-
-    //XXXgijs so some tests depend on this tab being about:blank. Make it so.
-    let newTabBrowser = aWindow.gBrowser.selectedBrowser;
-    newTabBrowser.stop();
-
-    // If we stop early enough, this might actually be about:blank.
-    if (newTabBrowser.contentDocument.location.href == "about:blank") {
-      return;
-    }
-
-    // Otherwise, make it be about:blank, and wait for that to be done.
-    function onNewTabLoaded(e) {
-      newTabBrowser.removeEventListener("load", onNewTabLoaded, true);
-      deferredLoadNewTab.resolve();
-    }
-    newTabBrowser.addEventListener("load", onNewTabLoaded, true);
-    newTabBrowser.contentDocument.location.replace("about:blank");
-    return deferredLoadNewTab.promise;
-  });
+  return deferredEndCustomizing.promise;
 }
 
 function startCustomizing(aWindow=window) {
   if (aWindow.document.documentElement.getAttribute("customizing") == "true") {
-    return;
+    return null;
   }
   Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", true);
   let deferred = Promise.defer();
@@ -289,7 +266,7 @@ function promisePanelElementShown(win, aPanel) {
     aPanel.removeEventListener("popupshown", onPanelOpen);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  };
+  }
   aPanel.addEventListener("popupshown", onPanelOpen);
   return deferred.promise;
 }
@@ -324,7 +301,7 @@ function isPanelUIOpen() {
 
 function subviewShown(aSubview) {
   let deferred = Promise.defer();
-  let win = aSubview.ownerDocument.defaultView;
+  let win = aSubview.ownerGlobal;
   let timeoutId = win.setTimeout(() => {
     deferred.reject("Subview (" + aSubview.id + ") did not show within 20 seconds.");
   }, 20000);
@@ -332,14 +309,14 @@ function subviewShown(aSubview) {
     aSubview.removeEventListener("ViewShowing", onViewShowing);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  };
+  }
   aSubview.addEventListener("ViewShowing", onViewShowing);
   return deferred.promise;
 }
 
 function subviewHidden(aSubview) {
   let deferred = Promise.defer();
-  let win = aSubview.ownerDocument.defaultView;
+  let win = aSubview.ownerGlobal;
   let timeoutId = win.setTimeout(() => {
     deferred.reject("Subview (" + aSubview.id + ") did not hide within 20 seconds.");
   }, 20000);
@@ -347,7 +324,7 @@ function subviewHidden(aSubview) {
     aSubview.removeEventListener("ViewHiding", onViewHiding);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  };
+  }
   aSubview.addEventListener("ViewHiding", onViewHiding);
   return deferred.promise;
 }
@@ -386,29 +363,11 @@ function waitFor(aTimeout=100) {
  * @param aEventType The load event type to wait for.  Defaults to "load".
  * @return {Promise} resolved when the event is handled.
  */
-function promiseTabLoadEvent(aTab, aURL, aEventType="load") {
-  let deferred = Promise.defer();
-  info("Wait for tab event: " + aEventType);
+function promiseTabLoadEvent(aTab, aURL) {
+  let browser = aTab.linkedBrowser;
 
-  let timeoutId = setTimeout(() => {
-    aTab.linkedBrowser.removeEventListener(aEventType, onTabLoad, true);
-    deferred.reject("TabSelect did not happen within " + kTabEventFailureTimeoutInMs + "ms");
-  }, kTabEventFailureTimeoutInMs);
-
-  function onTabLoad(event) {
-    if (event.originalTarget != aTab.linkedBrowser.contentDocument ||
-        event.target.location.href == "about:blank") {
-      info("skipping spurious load event");
-      return;
-    }
-    clearTimeout(timeoutId);
-    aTab.linkedBrowser.removeEventListener(aEventType, onTabLoad, true);
-    info("Tab event received: " + aEventType);
-    deferred.resolve();
-  }
-  aTab.linkedBrowser.addEventListener(aEventType, onTabLoad, true, true);
-  aTab.linkedBrowser.loadURI(aURL);
-  return deferred.promise;
+  BrowserTestUtils.loadURI(browser, aURL);
+  return BrowserTestUtils.browserLoaded(browser);
 }
 
 /**
@@ -499,13 +458,12 @@ function popupHidden(aPopup) {
  */
 function promisePopupEvent(aPopup, aEventSuffix) {
   let deferred = Promise.defer();
-  let win = aPopup.ownerDocument.defaultView;
   let eventType = "popup" + aEventSuffix;
 
   function onPopupEvent(e) {
     aPopup.removeEventListener(eventType, onPopupEvent);
     deferred.resolve();
-  };
+  }
 
   aPopup.addEventListener(eventType, onPopupEvent);
   return deferred.promise;

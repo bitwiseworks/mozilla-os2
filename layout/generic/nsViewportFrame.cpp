@@ -18,6 +18,7 @@
 #include "nsIMozBrowserFrame.h"
 
 using namespace mozilla;
+typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
 
 ViewportFrame*
 NS_NewViewportFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -35,7 +36,7 @@ ViewportFrame::Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow)
 {
-  Super::Init(aContent, aParent, aPrevInFlow);
+  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
   nsIFrame* parent = nsLayoutUtils::GetCrossDocParentFrame(this);
   if (parent) {
@@ -98,10 +99,15 @@ BuildDisplayListForTopLayerFrame(nsDisplayListBuilder* aBuilder,
                                  nsDisplayList* aList)
 {
   nsRect dirty;
+  DisplayListClipState::AutoClipMultiple clipState(aBuilder);
   nsDisplayListBuilder::OutOfFlowDisplayData*
     savedOutOfFlowData = nsDisplayListBuilder::GetOutOfFlowData(aFrame);
   if (savedOutOfFlowData) {
     dirty = savedOutOfFlowData->mDirtyRect;
+    clipState.SetClipForContainingBlockDescendants(
+      &savedOutOfFlowData->mContainingBlockClip);
+    clipState.SetScrollClipForContainingBlockDescendants(
+      aBuilder, savedOutOfFlowData->mContainingBlockScrollClip);
   }
   nsDisplayList list;
   aFrame->BuildDisplayListForStackingContext(aBuilder, dirty, &list);
@@ -139,7 +145,14 @@ ViewportFrame::BuildDisplayListForTopLayer(nsDisplayListBuilder* aBuilder,
                    "should always be out-of-flow if in the top layer");
         continue;
       }
-      MOZ_ASSERT(frame->GetParent() == this);
+      if (nsIFrame* backdropPh =
+          frame->GetChildList(kBackdropList).FirstChild()) {
+        MOZ_ASSERT(backdropPh->GetType() == nsGkAtoms::placeholderFrame);
+        nsIFrame* backdropFrame =
+          static_cast<nsPlaceholderFrame*>(backdropPh)->GetOutOfFlowFrame();
+        MOZ_ASSERT(backdropFrame);
+        BuildDisplayListForTopLayerFrame(aBuilder, backdropFrame, aList);
+      }
       BuildDisplayListForTopLayerFrame(aBuilder, frame, aList);
     }
   }
@@ -155,14 +168,6 @@ ViewportFrame::BuildDisplayListForTopLayer(nsDisplayListBuilder* aBuilder,
 }
 
 #ifdef DEBUG
-void
-ViewportFrame::SetInitialChildList(ChildListID     aListID,
-                                   nsFrameList&    aChildList)
-{
-  nsFrame::VerifyDirtyBitSet(aChildList);
-  nsContainerFrame::SetInitialChildList(aListID, aChildList);
-}
-
 void
 ViewportFrame::AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList)
@@ -218,31 +223,32 @@ ViewportFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 }
 
 nsPoint
-ViewportFrame::AdjustReflowStateForScrollbars(nsHTMLReflowState* aReflowState) const
+ViewportFrame::AdjustReflowInputForScrollbars(ReflowInput* aReflowInput) const
 {
   // Get our prinicpal child frame and see if we're scrollable
   nsIFrame* kidFrame = mFrames.FirstChild();
   nsIScrollableFrame* scrollingFrame = do_QueryFrame(kidFrame);
 
   if (scrollingFrame) {
-    nsMargin scrollbars = scrollingFrame->GetActualScrollbarSizes();
-    aReflowState->SetComputedWidth(aReflowState->ComputedWidth() -
-                                   scrollbars.LeftRight());
-    aReflowState->AvailableWidth() -= scrollbars.LeftRight();
-    aReflowState->SetComputedHeightWithoutResettingResizeFlags(
-      aReflowState->ComputedHeight() - scrollbars.TopBottom());
-    return nsPoint(scrollbars.left, scrollbars.top);
+    WritingMode wm = aReflowInput->GetWritingMode();
+    LogicalMargin scrollbars(wm, scrollingFrame->GetActualScrollbarSizes());
+    aReflowInput->SetComputedISize(aReflowInput->ComputedISize() -
+                                   scrollbars.IStartEnd(wm));
+    aReflowInput->AvailableISize() -= scrollbars.IStartEnd(wm);
+    aReflowInput->SetComputedBSizeWithoutResettingResizeFlags(
+      aReflowInput->ComputedBSize() - scrollbars.BStartEnd(wm));
+    return nsPoint(scrollbars.Left(wm), scrollbars.Top(wm));
   }
   return nsPoint(0, 0);
 }
 
 nsRect
-ViewportFrame::AdjustReflowStateAsContainingBlock(nsHTMLReflowState* aReflowState) const
+ViewportFrame::AdjustReflowInputAsContainingBlock(ReflowInput* aReflowInput) const
 {
 #ifdef DEBUG
   nsPoint offset =
 #endif
-    AdjustReflowStateForScrollbars(aReflowState);
+    AdjustReflowInputForScrollbars(aReflowInput);
 
   NS_ASSERTION(GetAbsoluteContainingBlock()->GetChildList().IsEmpty() ||
                (offset.x == 0 && offset.y == 0),
@@ -251,7 +257,7 @@ ViewportFrame::AdjustReflowStateAsContainingBlock(nsHTMLReflowState* aReflowStat
 
   // If a scroll position clamping scroll-port size has been set, layout
   // fixed position elements to this size instead of the computed size.
-  nsRect rect(0, 0, aReflowState->ComputedWidth(), aReflowState->ComputedHeight());
+  nsRect rect(0, 0, aReflowInput->ComputedWidth(), aReflowInput->ComputedHeight());
   nsIPresShell* ps = PresContext()->PresShell();
   if (ps->IsScrollPositionClampingScrollPortSizeSet()) {
     rect.SizeTo(ps->GetScrollPositionClampingScrollPortSize());
@@ -262,13 +268,13 @@ ViewportFrame::AdjustReflowStateAsContainingBlock(nsHTMLReflowState* aReflowStat
 
 void
 ViewportFrame::Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("ViewportFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   NS_FRAME_TRACE_REFLOW_IN("ViewportFrame::Reflow");
 
   // Initialize OUT parameters
@@ -281,31 +287,31 @@ ViewportFrame::Reflow(nsPresContext*           aPresContext,
   // Set our size up front, since some parts of reflow depend on it
   // being already set.  Note that the computed height may be
   // unconstrained; that's ok.  Consumers should watch out for that.
-  SetSize(nsSize(aReflowState.ComputedWidth(), aReflowState.ComputedHeight()));
+  SetSize(nsSize(aReflowInput.ComputedWidth(), aReflowInput.ComputedHeight()));
 
   // Reflow the main content first so that the placeholders of the
   // fixed-position frames will be in the right places on an initial
   // reflow.
   nscoord kidBSize = 0;
-  WritingMode wm = aReflowState.GetWritingMode();
+  WritingMode wm = aReflowInput.GetWritingMode();
 
   if (mFrames.NotEmpty()) {
     // Deal with a non-incremental reflow or an incremental reflow
     // targeted at our one-and-only principal child frame.
-    if (aReflowState.ShouldReflowAllKids() ||
-        aReflowState.IsVResize() ||
+    if (aReflowInput.ShouldReflowAllKids() ||
+        aReflowInput.IsBResize() ||
         NS_SUBTREE_DIRTY(mFrames.FirstChild())) {
       // Reflow our one-and-only principal child frame
       nsIFrame*           kidFrame = mFrames.FirstChild();
-      nsHTMLReflowMetrics kidDesiredSize(aReflowState);
+      ReflowOutput kidDesiredSize(aReflowInput);
       WritingMode         wm = kidFrame->GetWritingMode();
-      LogicalSize         availableSpace = aReflowState.AvailableSize(wm);
-      nsHTMLReflowState   kidReflowState(aPresContext, aReflowState,
+      LogicalSize         availableSpace = aReflowInput.AvailableSize(wm);
+      ReflowInput   kidReflowInput(aPresContext, aReflowInput,
                                          kidFrame, availableSpace);
 
       // Reflow the frame
-      kidReflowState.SetComputedBSize(aReflowState.ComputedBSize());
-      ReflowChild(kidFrame, aPresContext, kidDesiredSize, kidReflowState,
+      kidReflowInput.SetComputedBSize(aReflowInput.ComputedBSize());
+      ReflowChild(kidFrame, aPresContext, kidDesiredSize, kidReflowInput,
                   0, 0, 0, aStatus);
       kidBSize = kidDesiredSize.BSize(wm);
 
@@ -315,15 +321,15 @@ ViewportFrame::Reflow(nsPresContext*           aPresContext,
     }
   }
 
-  NS_ASSERTION(aReflowState.AvailableISize() != NS_UNCONSTRAINEDSIZE,
+  NS_ASSERTION(aReflowInput.AvailableISize() != NS_UNCONSTRAINEDSIZE,
                "shouldn't happen anymore");
 
   // Return the max size as our desired size
-  LogicalSize maxSize(wm, aReflowState.AvailableISize(),
+  LogicalSize maxSize(wm, aReflowInput.AvailableISize(),
                       // Being flowed initially at an unconstrained block size
                       // means we should return our child's intrinsic size.
-                      aReflowState.ComputedBSize() != NS_UNCONSTRAINEDSIZE
-                        ? aReflowState.ComputedBSize()
+                      aReflowInput.ComputedBSize() != NS_UNCONSTRAINEDSIZE
+                        ? aReflowInput.ComputedBSize()
                         : kidBSize);
   aDesiredSize.SetSize(wm, maxSize);
   aDesiredSize.SetOverflowAreasToDesiredBounds();
@@ -331,29 +337,29 @@ ViewportFrame::Reflow(nsPresContext*           aPresContext,
   if (HasAbsolutelyPositionedChildren()) {
     // Make a copy of the reflow state and change the computed width and height
     // to reflect the available space for the fixed items
-    nsHTMLReflowState reflowState(aReflowState);
+    ReflowInput reflowInput(aReflowInput);
 
-    if (reflowState.AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
+    if (reflowInput.AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
       // We have an intrinsic-height document with abs-pos/fixed-pos children.
       // Set the available height and mComputedHeight to our chosen height.
-      reflowState.AvailableBSize() = maxSize.BSize(wm);
+      reflowInput.AvailableBSize() = maxSize.BSize(wm);
       // Not having border/padding simplifies things
-      NS_ASSERTION(reflowState.ComputedPhysicalBorderPadding() == nsMargin(0,0,0,0),
+      NS_ASSERTION(reflowInput.ComputedPhysicalBorderPadding() == nsMargin(0,0,0,0),
                    "Viewports can't have border/padding");
-      reflowState.SetComputedBSize(maxSize.BSize(wm));
+      reflowInput.SetComputedBSize(maxSize.BSize(wm));
     }
 
-    nsRect rect = AdjustReflowStateAsContainingBlock(&reflowState);
+    nsRect rect = AdjustReflowInputAsContainingBlock(&reflowInput);
     nsOverflowAreas* overflowAreas = &aDesiredSize.mOverflowAreas;
     nsIScrollableFrame* rootScrollFrame =
                     aPresContext->PresShell()->GetRootScrollFrameAsScrollable();
     if (rootScrollFrame && !rootScrollFrame->IsIgnoringViewportClipping()) {
       overflowAreas = nullptr;
     }
-    GetAbsoluteContainingBlock()->Reflow(this, aPresContext, reflowState, aStatus,
-                                         rect,
-                                         false, true, true, // XXX could be optimized
-                                         overflowAreas);
+    AbsPosReflowFlags flags =
+      AbsPosReflowFlags::eCBWidthAndHeightChanged; // XXX could be optimized
+    GetAbsoluteContainingBlock()->Reflow(this, aPresContext, reflowInput, aStatus,
+                                         rect, flags, overflowAreas);
   }
 
   if (mFrames.NotEmpty()) {
@@ -380,11 +386,11 @@ ViewportFrame::Reflow(nsPresContext*           aPresContext,
   }
 
   NS_FRAME_TRACE_REFLOW_OUT("ViewportFrame::Reflow", aStatus);
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 bool
-ViewportFrame::UpdateOverflow()
+ViewportFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
   nsIScrollableFrame* rootScrollFrame =
     PresContext()->PresShell()->GetRootScrollFrameAsScrollable();
@@ -392,7 +398,7 @@ ViewportFrame::UpdateOverflow()
     return false;
   }
 
-  return nsFrame::UpdateOverflow();
+  return nsContainerFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 nsIAtom*

@@ -24,27 +24,29 @@
 
 #include "SelfHostingDefines.h"
 
-// Assertions, defined here instead of in the header above to make `assert`
-// invisible to C++.
+// Assertions and debug printing, defined here instead of in the header above
+// to make `assert` invisible to C++.
 #ifdef DEBUG
 #define assert(b, info) if (!(b)) AssertionFailed(__FILE__ + ":" + __LINE__ + ": " + info)
+#define dbg(msg) DumpMessage(callFunction(std_Array_pop, \
+                                          StringSplitString(__FILE__, '/')) \
+                             + '#' + __LINE__ + ': ' + msg)
 #else
 #define assert(b, info) // Elided assertion.
+#define dbg(msg) // Elided debugging output.
 #endif
 
 // All C++-implemented standard builtins library functions used in self-hosted
 // code are installed via the std_functions JSFunctionSpec[] in
 // SelfHosting.cpp.
 //
-// The few items below here are either self-hosted or installing them under a
-// std_Foo name would require ugly contortions, so they just get aliased here.
-var std_Array_indexOf = ArrayIndexOf;
-var std_String_substring = String_substring;
+// Do not create an alias to a self-hosted builtin, otherwise it will be cloned
+// twice.
+//
 // WeakMap is a bare constructor without properties or methods.
 var std_WeakMap = WeakMap;
 // StopIteration is a bare constructor without properties or methods.
 var std_StopIteration = StopIteration;
-var std_Map_iterator_next = MapIteratorNext;
 
 
 /********** List specification type **********/
@@ -109,23 +111,23 @@ function SameValueZero(x, y) {
     return x === y || (x !== x && y !== y);
 }
 
-/* Spec: ECMAScript Draft, 6th edition Dec 24, 2014, 7.3.8 */
-function GetMethod(O, P) {
+// ES 2017 draft (April 6, 2016) 7.3.9
+function GetMethod(V, P) {
     // Step 1.
     assert(IsPropertyKey(P), "Invalid property key");
 
-    // Steps 2-3.
-    var func = ToObject(O)[P];
+    // Step 2.
+    var func = V[P];
 
-    // Step 4.
+    // Step 3.
     if (func === undefined || func === null)
         return undefined;
 
-    // Step 5.
+    // Step 4.
     if (!IsCallable(func))
         ThrowTypeError(JSMSG_NOT_FUNCTION, typeof func);
 
-    // Step 6.
+    // Step 5.
     return func;
 }
 
@@ -142,47 +144,80 @@ function GetIterator(obj, method) {
         method = GetMethod(obj, std_iterator);
 
     // Steps 3-4.
-    var iterator = callFunction(method, obj);
+    var iterator = callContentFunction(method, obj);
 
     // Step 5.
     if (!IsObject(iterator))
-        ThrowTypeError(JSMSG_NOT_ITERABLE, ToString(iterator));
+        ThrowTypeError(JSMSG_NOT_ITERATOR, ToString(iterator));
 
     // Step 6.
     return iterator;
 }
 
-// ES6 draft 20150317 7.3.20.
+var _builtinCtorsCache = {__proto__: null};
+
+function GetBuiltinConstructor(builtinName) {
+    var ctor = _builtinCtorsCache[builtinName] ||
+               (_builtinCtorsCache[builtinName] = GetBuiltinConstructorImpl(builtinName));
+    assert(ctor, `No builtin with name "${builtinName}" found`);
+    return ctor;
+}
+
+function GetBuiltinPrototype(builtinName) {
+    return (_builtinCtorsCache[builtinName] || GetBuiltinConstructor(builtinName)).prototype;
+}
+
+// ES 2016 draft Mar 25, 2016 7.3.20.
 function SpeciesConstructor(obj, defaultConstructor) {
     // Step 1.
     assert(IsObject(obj), "not passed an object");
 
-    // Steps 2-3.
+    // Step 2.
     var ctor = obj.constructor;
 
-    // Step 4.
+    // Step 3.
     if (ctor === undefined)
         return defaultConstructor;
 
-    // Step 5.
+    // Step 4.
     if (!IsObject(ctor))
         ThrowTypeError(JSMSG_NOT_NONNULL_OBJECT, "object's 'constructor' property");
 
-    // Steps 6-7.  We don't yet implement @@species and Symbol.species, so we
-    // don't implement this correctly right now.  Somebody fix this!
-    var s = /* ctor[Symbol.species] */ undefined;
+    // Steps 5.
+    var s = ctor[std_species];
 
-    // Step 8.
+    // Step 6.
     if (s === undefined || s === null)
         return defaultConstructor;
 
-    // Step 9.
+    // Step 7.
     if (IsConstructor(s))
         return s;
 
-    // Step 10.
+    // Step 8.
     ThrowTypeError(JSMSG_NOT_CONSTRUCTOR, "@@species property of object's constructor");
 }
+
+function GetTypeError(msg) {
+    try {
+        FUN_APPLY(ThrowTypeError, undefined, arguments);
+    } catch (e) {
+        return e;
+    }
+    assert(false, "the catch block should've returned from this function.");
+}
+
+function GetInternalError(msg) {
+    try {
+        FUN_APPLY(ThrowInternalError, undefined, arguments);
+    } catch (e) {
+        return e;
+    }
+    assert(false, "the catch block should've returned from this function.");
+}
+
+// To be used when a function is required but calling it shouldn't do anything.
+function NullFunction() {}
 
 /*************************************** Testing functions ***************************************/
 function outer() {

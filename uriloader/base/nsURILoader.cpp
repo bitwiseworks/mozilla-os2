@@ -49,8 +49,9 @@
 #include "nsDocLoader.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 
-PRLogModuleInfo* nsURILoader::mLog = nullptr;
+mozilla::LazyLogModule nsURILoader::mLog("URILoader");
 
 #define LOG(args) MOZ_LOG(nsURILoader::mLog, mozilla::LogLevel::Debug, args)
 #define LOG_ERROR(args) MOZ_LOG(nsURILoader::mLog, mozilla::LogLevel::Error, args)
@@ -234,6 +235,23 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest *request, nsISupport
     if (204 == responseCode || 205 == responseCode) {
       return NS_BINDING_ABORTED;
     }
+
+    static bool sLargeAllocationHeaderEnabled = false;
+    static bool sCachedLargeAllocationPref = false;
+    if (!sCachedLargeAllocationPref) {
+      sCachedLargeAllocationPref = true;
+      mozilla::Preferences::AddBoolVarCache(&sLargeAllocationHeaderEnabled,
+                                            "dom.largeAllocationHeader.enabled");
+    }
+
+    if (sLargeAllocationHeaderEnabled) {
+      // If we have a Large-Allocation header, let's check if we should perform a process switch.
+      nsAutoCString largeAllocationHeader;
+      rv = httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Large-Allocation"), largeAllocationHeader);
+      if (NS_SUCCEEDED(rv) && nsContentUtils::AttemptLargeAllocationLoad(httpChannel)) {
+        return NS_BINDING_ABORTED;
+      }
+    }
   }
 
   //
@@ -315,7 +333,7 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStopRequest(nsIRequest *request, nsISupports
 
     // If this is a multipart stream, we could get another
     // OnStartRequest after this... reset state.
-    m_targetStreamListener = 0;
+    m_targetStreamListener = nullptr;
     mContentType.Truncate();
     listener->OnStopRequest(request, aCtxt, aStatus);
   }
@@ -384,8 +402,6 @@ nsresult nsDocumentOpenInfo::DispatchContent(nsIRequest *request, nsISupports * 
 
   LOG(("  forceExternalHandling: %s", forceExternalHandling ? "yes" : "no"));
 
-  // We're going to try to find a contentListener that can handle our data
-  nsCOMPtr<nsIURIContentListener> contentListener;
   // The type or data the contentListener wants.
   nsXPIDLCString desiredContentType;
 
@@ -626,7 +642,6 @@ nsDocumentOpenInfo::ConvertData(nsIRequest *request,
   //
   RefPtr<nsDocumentOpenInfo> nextLink =
     new nsDocumentOpenInfo(m_originalContext, mFlags, mURILoader);
-  if (!nextLink) return NS_ERROR_OUT_OF_MEMORY;
 
   LOG(("  Downstream DocumentOpenInfo would be: 0x%p", nextLink.get()));
   
@@ -754,9 +769,6 @@ nsDocumentOpenInfo::TryContentListener(nsIURIContentListener* aListener,
 
 nsURILoader::nsURILoader()
 {
-  if (!mLog) {
-    mLog = PR_NewLogModule("URILoader");
-  }
 }
 
 nsURILoader::~nsURILoader()
@@ -875,8 +887,6 @@ nsresult nsURILoader::OpenChannel(nsIChannel* channel,
   RefPtr<nsDocumentOpenInfo> loader =
     new nsDocumentOpenInfo(aWindowContext, aFlags, this);
 
-  if (!loader) return NS_ERROR_OUT_OF_MEMORY;
-
   // Set the correct loadgroup on the channel
   nsCOMPtr<nsILoadGroup> loadGroup(do_GetInterface(aWindowContext));
 
@@ -890,8 +900,6 @@ nsresult nsURILoader::OpenChannel(nsIChannel* channel,
       listener->GetLoadCookie(getter_AddRefs(cookie));
       if (!cookie) {
         RefPtr<nsDocLoader> newDocLoader = new nsDocLoader();
-        if (!newDocLoader)
-          return NS_ERROR_OUT_OF_MEMORY;
         nsresult rv = newDocLoader->Init();
         if (NS_FAILED(rv))
           return rv;

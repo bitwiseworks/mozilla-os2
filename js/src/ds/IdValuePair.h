@@ -11,8 +11,8 @@
 
 #include "NamespaceImports.h"
 #include "gc/Tracer.h"
+#include "js/GCVector.h"
 #include "js/Id.h"
-#include "js/TraceableVector.h"
 
 namespace js {
 
@@ -27,7 +27,7 @@ struct IdValuePair
     explicit IdValuePair(jsid idArg)
       : value(UndefinedValue()), id(idArg)
     {}
-    IdValuePair(jsid idArg, Value valueArg)
+    IdValuePair(jsid idArg, const Value& valueArg)
       : value(valueArg), id(idArg)
     {}
 
@@ -37,7 +37,7 @@ struct IdValuePair
     }
 };
 
-using IdValueVector = TraceableVector<IdValuePair>;
+using IdValueVector = JS::GCVector<IdValuePair>;
 
 } /* namespace js */
 

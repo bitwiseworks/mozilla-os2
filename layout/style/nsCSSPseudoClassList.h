@@ -97,7 +97,7 @@ CSS_PSEUDO_CLASS(mozIsHTML, ":-moz-is-html", 0, "")
 // a subtree of C++ anonymous content constructed by Gecko for its own
 // purposes).
 CSS_PSEUDO_CLASS(mozNativeAnonymous, ":-moz-native-anonymous",
-                 CSS_PSEUDO_CLASS_UA_SHEET_ONLY, "")
+                 CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS, "")
 
 // Matches anything when the specified look-and-feel metric is set
 CSS_PSEUDO_CLASS(mozSystemMetric, ":-moz-system-metric", 0, "")
@@ -123,7 +123,8 @@ CSS_PSEUDO_CLASS(mozWindowInactive, ":-moz-window-inactive", 0, "")
 CSS_PSEUDO_CLASS(mozTableBorderNonzero, ":-moz-table-border-nonzero", 0, "")
 
 // Matches HTML frame/iframe elements which are mozbrowser.
-CSS_PSEUDO_CLASS(mozBrowserFrame, ":-moz-browser-frame", 0, "")
+CSS_PSEUDO_CLASS(mozBrowserFrame, ":-moz-browser-frame",
+                 CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "")
 
 // Matches whatever the contextual reference elements are for the
 // matching operation.
@@ -131,16 +132,21 @@ CSS_PSEUDO_CLASS(scope, ":scope", 0, "layout.css.scope-pseudo.enabled")
 
 // :not needs to come at the end of the non-bit pseudo-class list, since
 // it doesn't actually get directly matched on in SelectorMatches.
-CSS_PSEUDO_CLASS(notPseudo, ":not", 0, "")
+CSS_PSEUDO_CLASS(negation, ":not", 0, "")
 
-// :-moz-dir(ltr) and :-moz-dir(rtl) match elements whose resolved
-// directionality in the markup language is ltr or rtl respectively
-CSS_STATE_DEPENDENT_PSEUDO_CLASS(dir, ":-moz-dir", 0, "",
+// :dir(ltr) and :dir(rtl) match elements whose resolved
+// directionality in the markup language is ltr or rtl respectively.
+CSS_STATE_DEPENDENT_PSEUDO_CLASS(dir, ":dir", 0, "",
+                                 NS_EVENT_STATE_LTR | NS_EVENT_STATE_RTL)
+// prefix version is deprecated and will be removed per bug 1270406.
+CSS_STATE_DEPENDENT_PSEUDO_CLASS(mozDir, ":-moz-dir", 0, "",
                                  NS_EVENT_STATE_LTR | NS_EVENT_STATE_RTL)
 
 CSS_STATE_PSEUDO_CLASS(link, ":link", 0, "", NS_EVENT_STATE_UNVISITED)
 // what matches :link or :visited
 CSS_STATE_PSEUDO_CLASS(mozAnyLink, ":-moz-any-link", 0, "",
+                       NS_EVENT_STATE_VISITED | NS_EVENT_STATE_UNVISITED)
+CSS_STATE_PSEUDO_CLASS(anyLink, ":any-link", 0, "",
                        NS_EVENT_STATE_VISITED | NS_EVENT_STATE_UNVISITED)
 CSS_STATE_PSEUDO_CLASS(visited, ":visited", 0, "", NS_EVENT_STATE_VISITED)
 
@@ -149,6 +155,7 @@ CSS_STATE_PSEUDO_CLASS(checked, ":checked", 0, "", NS_EVENT_STATE_CHECKED)
 CSS_STATE_PSEUDO_CLASS(disabled, ":disabled", 0, "", NS_EVENT_STATE_DISABLED)
 CSS_STATE_PSEUDO_CLASS(enabled, ":enabled", 0, "", NS_EVENT_STATE_ENABLED)
 CSS_STATE_PSEUDO_CLASS(focus, ":focus", 0, "", NS_EVENT_STATE_FOCUS)
+CSS_STATE_PSEUDO_CLASS(focusWithin, ":focus-within", 0, "", NS_EVENT_STATE_FOCUS_WITHIN)
 CSS_STATE_PSEUDO_CLASS(hover, ":hover", 0, "", NS_EVENT_STATE_HOVER)
 CSS_STATE_PSEUDO_CLASS(mozDragOver, ":-moz-drag-over", 0, "", NS_EVENT_STATE_DRAGOVER)
 CSS_STATE_PSEUDO_CLASS(target, ":target", 0, "", NS_EVENT_STATE_URLTARGET)
@@ -157,40 +164,47 @@ CSS_STATE_PSEUDO_CLASS(indeterminate, ":indeterminate", 0, "",
 
 CSS_STATE_PSEUDO_CLASS(mozDevtoolsHighlighted, ":-moz-devtools-highlighted", 0, "",
                        NS_EVENT_STATE_DEVTOOLS_HIGHLIGHTED)
+CSS_STATE_PSEUDO_CLASS(mozStyleeditorTransitioning, ":-moz-styleeditor-transitioning", 0, "",
+                       NS_EVENT_STATE_STYLEEDITOR_TRANSITIONING)
 
 // Matches the element which is being displayed full-screen, and
 // any containing frames.
+CSS_STATE_PSEUDO_CLASS(fullscreen, ":fullscreen",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME,
+                       "full-screen-api.unprefix.enabled",
+                       NS_EVENT_STATE_FULL_SCREEN)
 CSS_STATE_PSEUDO_CLASS(mozFullScreen, ":-moz-full-screen", 0, "", NS_EVENT_STATE_FULL_SCREEN)
-
-// Matches any element which is an ancestor of the DOM full-screen element,
-// or an ancestor of a containing frame of the full-screen element.
-CSS_STATE_PSEUDO_CLASS(mozFullScreenAncestor, ":-moz-full-screen-ancestor", 0, "", NS_EVENT_STATE_FULL_SCREEN_ANCESTOR)
 
 // Matches if the element is focused and should show a focus ring
 CSS_STATE_PSEUDO_CLASS(mozFocusRing, ":-moz-focusring", 0, "", NS_EVENT_STATE_FOCUSRING)
 
 // Image, object, etc state pseudo-classes
 CSS_STATE_PSEUDO_CLASS(mozBroken, ":-moz-broken", 0, "", NS_EVENT_STATE_BROKEN)
-CSS_STATE_PSEUDO_CLASS(mozUserDisabled, ":-moz-user-disabled", 0, "",
-                       NS_EVENT_STATE_USERDISABLED)
-CSS_STATE_PSEUDO_CLASS(mozSuppressed, ":-moz-suppressed", 0, "",
-                       NS_EVENT_STATE_SUPPRESSED)
 CSS_STATE_PSEUDO_CLASS(mozLoading, ":-moz-loading", 0, "", NS_EVENT_STATE_LOADING)
-CSS_STATE_PSEUDO_CLASS(mozTypeUnsupported, ":-moz-type-unsupported", 0, "",
-                       NS_EVENT_STATE_TYPE_UNSUPPORTED)
-CSS_STATE_PSEUDO_CLASS(mozTypeUnsupportedPlatform, ":-moz-type-unsupported-platform", 0, "",
-                       NS_EVENT_STATE_TYPE_UNSUPPORTED_PLATFORM)
-CSS_STATE_PSEUDO_CLASS(mozHandlerClickToPlay, ":-moz-handler-clicktoplay", 0, "",
+
+CSS_STATE_PSEUDO_CLASS(mozUserDisabled, ":-moz-user-disabled",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
+                       NS_EVENT_STATE_USERDISABLED)
+CSS_STATE_PSEUDO_CLASS(mozSuppressed, ":-moz-suppressed",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
+                       NS_EVENT_STATE_SUPPRESSED)
+CSS_STATE_PSEUDO_CLASS(mozHandlerClickToPlay, ":-moz-handler-clicktoplay",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_TYPE_CLICK_TO_PLAY)
-CSS_STATE_PSEUDO_CLASS(mozHandlerVulnerableUpdatable, ":-moz-handler-vulnerable-updatable", 0, "",
+CSS_STATE_PSEUDO_CLASS(mozHandlerVulnerableUpdatable, ":-moz-handler-vulnerable-updatable",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_VULNERABLE_UPDATABLE)
-CSS_STATE_PSEUDO_CLASS(mozHandlerVulnerableNoUpdate, ":-moz-handler-vulnerable-no-update", 0, "",
+CSS_STATE_PSEUDO_CLASS(mozHandlerVulnerableNoUpdate, ":-moz-handler-vulnerable-no-update",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_VULNERABLE_NO_UPDATE)
-CSS_STATE_PSEUDO_CLASS(mozHandlerDisabled, ":-moz-handler-disabled", 0, "",
+CSS_STATE_PSEUDO_CLASS(mozHandlerDisabled, ":-moz-handler-disabled",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_HANDLER_DISABLED)
-CSS_STATE_PSEUDO_CLASS(mozHandlerBlocked, ":-moz-handler-blocked", 0, "",
+CSS_STATE_PSEUDO_CLASS(mozHandlerBlocked, ":-moz-handler-blocked",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_HANDLER_BLOCKED)
-CSS_STATE_PSEUDO_CLASS(mozHandlerCrashed, ":-moz-handler-crashed", 0, "",
+CSS_STATE_PSEUDO_CLASS(mozHandlerCrashed, ":-moz-handler-crashed",
+                       CSS_PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME, "",
                        NS_EVENT_STATE_HANDLER_CRASHED)
 
 CSS_STATE_PSEUDO_CLASS(mozMathIncrementScriptLevel,
@@ -206,6 +220,8 @@ CSS_STATE_PSEUDO_CLASS(invalid, ":invalid", 0, "", NS_EVENT_STATE_INVALID)
 CSS_STATE_PSEUDO_CLASS(inRange, ":in-range", 0, "", NS_EVENT_STATE_INRANGE)
 CSS_STATE_PSEUDO_CLASS(outOfRange, ":out-of-range", 0, "", NS_EVENT_STATE_OUTOFRANGE)
 CSS_STATE_PSEUDO_CLASS(defaultPseudo, ":default", 0, "", NS_EVENT_STATE_DEFAULT)
+CSS_STATE_PSEUDO_CLASS(placeholderShown, ":placeholder-shown", 0, "",
+                       NS_EVENT_STATE_PLACEHOLDERSHOWN)
 CSS_STATE_PSEUDO_CLASS(mozReadOnly, ":-moz-read-only", 0, "",
                        NS_EVENT_STATE_MOZ_READONLY)
 CSS_STATE_PSEUDO_CLASS(mozReadWrite, ":-moz-read-write", 0, "",

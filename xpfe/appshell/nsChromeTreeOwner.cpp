@@ -63,8 +63,6 @@ nsChromeTreeOwner::InitGlobals()
 {
   NS_ASSERTION(gLiterals == nullptr, "already initialized");
   gLiterals = new nsChromeTreeOwnerLiterals();
-  if (!gLiterals)
-    return NS_ERROR_OUT_OF_MEMORY;
   return NS_OK;
 }
 
@@ -139,94 +137,6 @@ NS_IMETHODIMP nsChromeTreeOwner::GetInterface(const nsIID& aIID, void** aSink)
 // nsChromeTreeOwner::nsIDocShellTreeOwner
 //*****************************************************************************   
 
-NS_IMETHODIMP nsChromeTreeOwner::FindItemWithName(const char16_t* aName,
-   nsIDocShellTreeItem* aRequestor, nsIDocShellTreeItem* aOriginalRequestor,
-   nsIDocShellTreeItem** aFoundItem)
-{
-   NS_DEFINE_CID(kWindowMediatorCID, NS_WINDOWMEDIATOR_CID);
-
-   NS_ENSURE_ARG_POINTER(aFoundItem);
-
-   *aFoundItem = nullptr;
-
-   bool fIs_Content = false;
-
-   /* Special Cases */
-   if(!aName || !*aName)
-      return NS_OK;
-
-   nsDependentString name(aName);
-
-   if(name.LowerCaseEqualsLiteral("_blank"))
-      return NS_OK;
-   // _main is an IE target which should be case-insensitive but isn't
-   // see bug 217886 for details
-   if(name.LowerCaseEqualsLiteral("_content") || name.EqualsLiteral("_main"))
-      {
-      NS_ENSURE_STATE(mXULWindow);
-      fIs_Content = true;
-      mXULWindow->GetPrimaryContentShell(aFoundItem);
-      if(*aFoundItem)
-         return NS_OK;
-      // Otherwise fall through and ask the other windows for a content area.
-      }
-
-   nsCOMPtr<nsIWindowMediator> windowMediator(do_GetService(kWindowMediatorCID));
-   NS_ENSURE_TRUE(windowMediator, NS_ERROR_FAILURE);
-
-   nsCOMPtr<nsISimpleEnumerator> windowEnumerator;
-   NS_ENSURE_SUCCESS(windowMediator->GetXULWindowEnumerator(nullptr, 
-      getter_AddRefs(windowEnumerator)), NS_ERROR_FAILURE);
-   
-   bool more;
-   
-   windowEnumerator->HasMoreElements(&more);
-   while(more)
-      {
-      nsCOMPtr<nsISupports> nextWindow = nullptr;
-      windowEnumerator->GetNext(getter_AddRefs(nextWindow));
-      nsCOMPtr<nsIXULWindow> xulWindow(do_QueryInterface(nextWindow));
-      NS_ENSURE_TRUE(xulWindow, NS_ERROR_FAILURE);
-
-      nsCOMPtr<nsIDocShellTreeItem> shellAsTreeItem;
-     
-      if(fIs_Content)
-         {
-         xulWindow->GetPrimaryContentShell(aFoundItem);
-         }
-      else
-         {
-         // Note that we don't look for targetable content shells here...
-         // in fact, we aren't looking for content shells at all!
-         nsCOMPtr<nsIDocShell> shell;
-         xulWindow->GetDocShell(getter_AddRefs(shell));
-         shellAsTreeItem = do_QueryInterface(shell);
-         if (shellAsTreeItem) {
-           // Get the root tree item of same type, since roots are the only
-           // things that call into the treeowner to look for named items.
-           nsCOMPtr<nsIDocShellTreeItem> root;
-           shellAsTreeItem->GetSameTypeRootTreeItem(getter_AddRefs(root));
-           shellAsTreeItem = root;
-         }
-         if(shellAsTreeItem && aRequestor != shellAsTreeItem)
-            {
-            // Do this so we can pass in the tree owner as the requestor so the child knows not
-            // to call back up.
-            nsCOMPtr<nsIDocShellTreeOwner> shellOwner;
-            shellAsTreeItem->GetTreeOwner(getter_AddRefs(shellOwner));
-            nsCOMPtr<nsISupports> shellOwnerSupports(do_QueryInterface(shellOwner));
-
-            shellAsTreeItem->FindItemWithName(aName, shellOwnerSupports,
-                                              aOriginalRequestor, aFoundItem);
-            }
-         }
-      if(*aFoundItem)
-         return NS_OK;   
-      windowEnumerator->HasMoreElements(&more);
-      }
-   return NS_OK;      
-}
-
 NS_IMETHODIMP
 nsChromeTreeOwner::ContentShellAdded(nsIDocShellTreeItem* aContentShell,
                                      bool aPrimary, bool aTargetable,
@@ -269,6 +179,38 @@ nsChromeTreeOwner::GetPrimaryTabParent(nsITabParent** aTab)
 {
   NS_ENSURE_STATE(mXULWindow);
   return mXULWindow->GetPrimaryTabParent(aTab);
+}
+
+NS_IMETHODIMP
+nsChromeTreeOwner::GetPrimaryContentSize(int32_t* aWidth,
+                                         int32_t* aHeight)
+{
+  NS_ENSURE_STATE(mXULWindow);
+  return mXULWindow->GetPrimaryContentSize(aWidth, aHeight);
+}
+
+NS_IMETHODIMP
+nsChromeTreeOwner::SetPrimaryContentSize(int32_t aWidth,
+                                         int32_t aHeight)
+{
+  NS_ENSURE_STATE(mXULWindow);
+  return mXULWindow->SetPrimaryContentSize(aWidth, aHeight);
+}
+
+NS_IMETHODIMP
+nsChromeTreeOwner::GetRootShellSize(int32_t* aWidth,
+                                    int32_t* aHeight)
+{
+  NS_ENSURE_STATE(mXULWindow);
+  return mXULWindow->GetRootShellSize(aWidth, aHeight);
+}
+
+NS_IMETHODIMP
+nsChromeTreeOwner::SetRootShellSize(int32_t aWidth,
+                                    int32_t aHeight)
+{
+  NS_ENSURE_STATE(mXULWindow);
+  return mXULWindow->SetRootShellSize(aWidth, aHeight);
 }
 
 NS_IMETHODIMP nsChromeTreeOwner::SizeShellTo(nsIDocShellTreeItem* aShellItem,
@@ -351,6 +293,13 @@ nsChromeTreeOwner::GetTargetableShellCount(uint32_t* aResult)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsChromeTreeOwner::GetHasPrimaryContent(bool* aResult)
+{
+  NS_ENSURE_STATE(mXULWindow);
+  return mXULWindow->GetHasPrimaryContent(aResult);
+}
+
 //*****************************************************************************
 // nsChromeTreeOwner::nsIBaseWindow
 //*****************************************************************************   
@@ -380,6 +329,18 @@ NS_IMETHODIMP nsChromeTreeOwner::GetUnscaledDevicePixelsPerCSSPixel(double *aSca
 {
    NS_ENSURE_STATE(mXULWindow);
    return mXULWindow->GetUnscaledDevicePixelsPerCSSPixel(aScale);
+}
+
+NS_IMETHODIMP nsChromeTreeOwner::GetDevicePixelsPerDesktopPixel(double *aScale)
+{
+   NS_ENSURE_STATE(mXULWindow);
+   return mXULWindow->GetDevicePixelsPerDesktopPixel(aScale);
+}
+
+NS_IMETHODIMP nsChromeTreeOwner::SetPositionDesktopPix(int32_t x, int32_t y)
+{
+   NS_ENSURE_STATE(mXULWindow);
+   return mXULWindow->SetPositionDesktopPix(x, y);
 }
 
 NS_IMETHODIMP nsChromeTreeOwner::SetPosition(int32_t x, int32_t y)
@@ -542,12 +503,13 @@ NS_IMETHODIMP nsChromeTreeOwner::OnLocationChange(nsIWebProgress* aWebProgress,
 
   if (aWebProgress) {
     NS_ENSURE_STATE(mXULWindow);
-    nsCOMPtr<nsIDOMWindow> progressWin;
+    nsCOMPtr<mozIDOMWindowProxy> progressWin;
     aWebProgress->GetDOMWindow(getter_AddRefs(progressWin));
 
     nsCOMPtr<nsIDocShell> docshell;
     mXULWindow->GetDocShell(getter_AddRefs(docshell));
-    nsCOMPtr<nsIDOMWindow> ourWin(do_QueryInterface(docshell));
+    // XXXkhuey this is totally wrong, bug 1223303.
+    nsCOMPtr<mozIDOMWindowProxy> ourWin(do_QueryInterface(docshell));
 
     if (ourWin != progressWin)
       itsForYou = false;

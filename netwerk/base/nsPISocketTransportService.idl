@@ -18,13 +18,7 @@ interface nsPISocketTransportService : nsIRoutedSocketTransportService
    * init/shutdown routines.
    */
   void init();
-  void shutdown();
-
-  /**
-   * controls whether or not the socket transport service should poke
-   * the autodialer on connection failure.
-   */
-  attribute boolean autodialEnabled;
+  void shutdown(in bool aXpcomShutdown);
 
   /**
    * controls the TCP sender window clamp

@@ -12,15 +12,16 @@
 #define nsCSSFrameConstructor_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/LinkedList.h"
+#include "mozilla/RestyleManagerBase.h"
+#include "mozilla/RestyleManagerHandle.h"
 
 #include "nsCOMPtr.h"
 #include "nsILayoutHistoryState.h"
 #include "nsQuoteList.h"
 #include "nsCounterManager.h"
-#include "nsCSSPseudoElements.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsFrameManager.h"
-#include "nsIDocument.h"
 #include "ScrollbarStyles.h"
 
 struct nsFrameItems;
@@ -31,6 +32,7 @@ struct nsGenConInitializer;
 class nsContainerFrame;
 class nsFirstLineFrame;
 class nsICSSAnonBoxPseudo;
+class nsIDocument;
 class nsPageContentFrame;
 struct PendingBinding;
 class nsGenericDOMDataNode;
@@ -38,8 +40,6 @@ class nsGenericDOMDataNode;
 class nsFrameConstructorState;
 
 namespace mozilla {
-
-class RestyleManager;
 
 namespace dom {
 
@@ -51,9 +51,12 @@ class FlattenedChildIterator;
 class nsCSSFrameConstructor : public nsFrameManager
 {
 public:
+  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
 
   friend class mozilla::RestyleManager;
+  friend class mozilla::RestyleManagerBase;
+  friend class mozilla::ServoRestyleManager;
 
   nsCSSFrameConstructor(nsIDocument* aDocument, nsIPresShell* aPresShell);
   ~nsCSSFrameConstructor(void) {
@@ -70,7 +73,7 @@ private:
   nsCSSFrameConstructor& operator=(const nsCSSFrameConstructor& aCopy) = delete;
 
 public:
-  mozilla::RestyleManager* RestyleManager() const
+  mozilla::RestyleManagerHandle RestyleManager() const
     { return mPresShell->GetPresContext()->RestyleManager(); }
 
   nsIFrame* ConstructRootFrame();
@@ -304,9 +307,7 @@ public:
                                 nsIFrame*         aPrevFrame,
                                 nsIContent*       aChild,
                                 nsIFrame**        aResult,
-                                bool              aIsAppend,
-                                bool              aIsScrollbar,
-                                nsILayoutHistoryState* aFrameState);
+                                bool              aIsAppend);
 
   // GetInitialContainingBlock() is deprecated in favor of GetRootElementFrame();
   // nsIFrame* GetInitialContainingBlock() { return mRootElementFrame; }
@@ -454,7 +455,7 @@ private:
                                   nsContainerFrame*          aFrame,
                                   nsIContent*                aContent,
                                   nsStyleContext*            aStyleContext,
-                                  nsCSSPseudoElements::Type  aPseudoElement,
+                                  CSSPseudoElementType       aPseudoElement,
                                   FrameConstructionItemList& aItems);
 
   // This method can change aFrameList: it can chop off the beginning and put
@@ -470,7 +471,7 @@ private:
 
   // BEGIN TABLE SECTION
   /**
-   * Construct an outer table frame.  This is the FrameConstructionData
+   * Construct a table wrapper frame. This is the FrameConstructionData
    * callback used for the job.
    */
   nsIFrame* ConstructTable(nsFrameConstructorState& aState,
@@ -565,6 +566,7 @@ private:
      @param nsStyleContext the style context to use for the frame. */
   typedef nsIFrame* (* FrameCreationFunc)(nsIPresShell*, nsStyleContext*);
   typedef nsContainerFrame* (* ContainerFrameCreationFunc)(nsIPresShell*, nsStyleContext*);
+  typedef nsBlockFrame* (* BlockFrameCreationFunc)(nsIPresShell*, nsStyleContext*);
 
   /* A function that can be used to get a FrameConstructionData.  Such
      a function is allowed to return null.
@@ -688,6 +690,12 @@ private:
    * display:contents
    */
 #define FCDATA_IS_CONTENTS 0x100000
+  /**
+   * When FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS is set, this bit says
+   * if we should create a grid/flex/columnset container instead of
+   * a block wrapper when the styles says so.
+   */
+#define FCDATA_ALLOW_GRID_FLEX_COLUMNSET 0x200000
 
   /* Structure representing information about how a frame should be
      constructed.  */
@@ -730,6 +738,21 @@ private:
     const FrameConstructionData mData;
   };
 
+  struct FrameConstructionDataByDisplay {
+#ifdef DEBUG
+    const mozilla::StyleDisplay mDisplay;
+#endif
+    const FrameConstructionData mData;
+  };
+
+#ifdef DEBUG
+#define FCDATA_FOR_DISPLAY(_display, _fcdata) \
+  { _display, _fcdata }
+#else
+#define FCDATA_FOR_DISPLAY(_display, _fcdata) \
+  { _fcdata }
+#endif
+
   /* Structure that has a FrameConstructionData and style context pseudo-type
      for a table pseudo-frame */
   struct PseudoParentData {
@@ -763,7 +786,7 @@ private:
                   uint32_t aDataLength);
 
   /* A class representing a list of FrameConstructionItems */
-  class FrameConstructionItemList {
+  class FrameConstructionItemList final {
   public:
     FrameConstructionItemList() :
       mInlineCount(0),
@@ -775,20 +798,13 @@ private:
       mParentHasNoXBLChildren(false),
       mTriedConstructingFrames(false)
     {
-      PR_INIT_CLIST(&mItems);
       memset(mDesiredParentCounts, 0, sizeof(mDesiredParentCounts));
     }
 
     ~FrameConstructionItemList() {
-      PRCList* cur = PR_NEXT_LINK(&mItems);
-      while (cur != &mItems) {
-        PRCList* next = PR_NEXT_LINK(cur);
-        delete ToItem(cur);
-        cur = next;
+      while (FrameConstructionItem* item = mItems.popFirst()) {
+        delete item;
       }
-
-      // Leaves our mItems pointing to deleted memory in both directions,
-      // but that's OK at this point.
 
       // Create the undisplayed entries for our mUndisplayedItems, if any, but
       // only if we have tried constructing frames for this item list.  If we
@@ -814,7 +830,7 @@ private:
     bool HasLineBoundaryAtStart() { return mLineBoundaryAtStart; }
     bool HasLineBoundaryAtEnd() { return mLineBoundaryAtEnd; }
     bool ParentHasNoXBLChildren() { return mParentHasNoXBLChildren; }
-    bool IsEmpty() const { return PR_CLIST_IS_EMPTY(&mItems); }
+    bool IsEmpty() const { return mItems.isEmpty(); }
     bool AnyItemsNeedBlockParent() const { return mLineParticipantCount != 0; }
     bool AreAllItemsInline() const { return mInlineCount == mItemCount; }
     bool AreAllItemsBlock() const { return mBlockCount == mItemCount; }
@@ -840,7 +856,28 @@ private:
                                   aPendingBinding, aStyleContext,
                                   aSuppressWhiteSpaceOptimizations,
                                   aAnonChildren);
-      PR_APPEND_LINK(item, &mItems);
+      mItems.insertBack(item);
+      ++mItemCount;
+      ++mDesiredParentCounts[item->DesiredParentType()];
+      return item;
+    }
+
+    // Arguments are the same as AppendItem().
+    FrameConstructionItem* PrependItem(const FrameConstructionData* aFCData,
+                                       nsIContent* aContent,
+                                       nsIAtom* aTag,
+                                       int32_t aNameSpaceID,
+                                       PendingBinding* aPendingBinding,
+                                       already_AddRefed<nsStyleContext>&& aStyleContext,
+                                       bool aSuppressWhiteSpaceOptimizations,
+                                       nsTArray<nsIAnonymousContentCreator::ContentInfo>* aAnonChildren)
+    {
+      FrameConstructionItem* item =
+        new FrameConstructionItem(aFCData, aContent, aTag, aNameSpaceID,
+                                  aPendingBinding, aStyleContext,
+                                  aSuppressWhiteSpaceOptimizations,
+                                  aAnonChildren);
+      mItems.insertFront(item);
       ++mItemCount;
       ++mDesiredParentCounts[item->DesiredParentType()];
       return item;
@@ -855,31 +892,26 @@ private:
     void BlockItemAdded() { ++mBlockCount; }
     void LineParticipantItemAdded() { ++mLineParticipantCount; }
 
-    class Iterator;
-    friend class Iterator;
-
     class Iterator {
     public:
-      explicit Iterator(FrameConstructionItemList& list) :
-        mCurrent(PR_NEXT_LINK(&list.mItems)),
-        mEnd(&list.mItems),
-        mList(list)
+      explicit Iterator(FrameConstructionItemList& aList)
+        : mCurrent(aList.mItems.getFirst())
+        , mList(aList)
       {}
       Iterator(const Iterator& aOther) :
         mCurrent(aOther.mCurrent),
-        mEnd(aOther.mEnd),
         mList(aOther.mList)
       {}
 
       bool operator==(const Iterator& aOther) const {
-        NS_ASSERTION(mEnd == aOther.mEnd, "Iterators for different lists?");
+        MOZ_ASSERT(&mList == &aOther.mList, "Iterators for different lists?");
         return mCurrent == aOther.mCurrent;
       }
       bool operator!=(const Iterator& aOther) const {
         return !(*this == aOther);
       }
       Iterator& operator=(const Iterator& aOther) {
-        NS_ASSERTION(mEnd == aOther.mEnd, "Iterators for different lists?");
+        MOZ_ASSERT(&mList == &aOther.mList, "Iterators for different lists?");
         mCurrent = aOther.mCurrent;
         return *this;
       }
@@ -888,31 +920,27 @@ private:
         return &mList;
       }
 
-      operator FrameConstructionItem& () {
-        return item();
-      }
-
       FrameConstructionItem& item() {
         MOZ_ASSERT(!IsDone(), "Should have checked IsDone()!");
-        return *FrameConstructionItemList::ToItem(mCurrent);
+        return *mCurrent;
       }
 
       const FrameConstructionItem& item() const {
         MOZ_ASSERT(!IsDone(), "Should have checked IsDone()!");
-        return *FrameConstructionItemList::ToItem(mCurrent);
+        return *mCurrent;
       }
 
-      bool IsDone() const { return mCurrent == mEnd; }
-      bool AtStart() const { return mCurrent == PR_NEXT_LINK(mEnd); }
+      bool IsDone() const { return mCurrent == nullptr; }
+      bool AtStart() const { return mCurrent == mList.mItems.getFirst(); }
       void Next() {
         NS_ASSERTION(!IsDone(), "Should have checked IsDone()!");
-        mCurrent = PR_NEXT_LINK(mCurrent);
+        mCurrent = mCurrent->getNext();
       }
       void Prev() {
         NS_ASSERTION(!AtStart(), "Should have checked AtStart()!");
-        mCurrent = PR_PREV_LINK(mCurrent);
+        mCurrent = mCurrent ? mCurrent->getPrevious() : mList.mItems.getLast();
       }
-      void SetToEnd() { mCurrent = mEnd; }
+      void SetToEnd() { mCurrent = nullptr; }
 
       // Skip over all items that want the given parent type. Return whether
       // the iterator is done after doing that.  The iterator must not be done
@@ -928,13 +956,15 @@ private:
       // Return whether the iterator is done after doing that.
       // The iterator must not be done when this is called.
       inline bool SkipItemsThatNeedAnonFlexOrGridItem(
-        const nsFrameConstructorState& aState, nsIAtom* aContainerType);
+        const nsFrameConstructorState& aState,
+        bool aIsWebkitBox);
 
       // Skip to the first frame that is a non-replaced inline or is
       // positioned.  Return whether the iterator is done after doing that.
       // The iterator must not be done when this is called.
       inline bool SkipItemsThatDontNeedAnonFlexOrGridItem(
-        const nsFrameConstructorState& aState, nsIAtom* aContainerType);
+        const nsFrameConstructorState& aState,
+        bool aIsWebkitBox);
 
       // Skip over all items that do not want a ruby parent.  Return whether
       // the iterator is done after doing that.  The iterator must not be done
@@ -948,7 +978,7 @@ private:
 
       // Remove the item pointed to by this iterator from its current list and
       // Append it to aTargetList.  This iterator is advanced to point to the
-      // next item in its list.  aIter must not be done.  aOther must not be
+      // next item in its list.  aIter must not be done.  aTargetList must not be
       // the list this iterator is iterating over..
       void AppendItemToList(FrameConstructionItemList& aTargetList);
 
@@ -976,16 +1006,11 @@ private:
       void DeleteItemsTo(const Iterator& aEnd);
 
     private:
-      PRCList* mCurrent;
-      PRCList* mEnd;
+      FrameConstructionItem* mCurrent;
       FrameConstructionItemList& mList;
     };
 
   private:
-    static FrameConstructionItem* ToItem(PRCList* item) {
-      return static_cast<FrameConstructionItem*>(item);
-    }
-
     struct UndisplayedItem {
       UndisplayedItem(nsIContent* aContent, nsStyleContext* aStyleContext) :
         mContent(aContent), mStyleContext(aStyleContext)
@@ -999,7 +1024,7 @@ private:
     // should be either +1 or -1 depending on which is happening.
     void AdjustCountsForItem(FrameConstructionItem* aItem, int32_t aDelta);
 
-    PRCList mItems;
+    mozilla::LinkedList<FrameConstructionItem> mItems;
     uint32_t mInlineCount;
     uint32_t mBlockCount;
     uint32_t mLineParticipantCount;
@@ -1025,9 +1050,8 @@ private:
    * constructed.  This contains all the information needed to construct the
    * frame other than the parent frame and whatever would be stored in the
    * frame constructor state. */
-  struct FrameConstructionItem : public PRCList {
-    // No need to PR_INIT_CLIST in the constructor because the only
-    // place that creates us immediately appends us.
+  struct FrameConstructionItem final
+    : public mozilla::LinkedListElement<FrameConstructionItem> {
     FrameConstructionItem(const FrameConstructionData* aFCData,
                           nsIContent* aContent,
                           nsIAtom* aTag,
@@ -1070,9 +1094,12 @@ private:
     }
 
     // Indicates whether (when in a flex or grid container) this item needs
-    // to be wrapped in an anonymous block.
+    // to be wrapped in an anonymous block.  (Note that we implement
+    // -webkit-box/-webkit-inline-box using our standard flexbox frame class,
+    // but we use different rules for what gets wrapped. The aIsWebkitBox
+    // parameter here tells us whether to use those different rules.)
     bool NeedsAnonFlexOrGridItem(const nsFrameConstructorState& aState,
-                                 nsIAtom* aContainerType);
+                                 bool aIsWebkitBox);
 
     // Don't call this unless the frametree really depends on the answer!
     // Especially so for generated content, where we don't want to reframe
@@ -1186,7 +1213,7 @@ private:
    * values of the previous and the next elements.
    */
   static inline RubyWhitespaceType ComputeRubyWhitespaceType(
-    uint_fast8_t aPrevDisplay, uint_fast8_t aNextDisplay);
+    mozilla::StyleDisplay aPrevDisplay, mozilla::StyleDisplay aNextDisplay);
 
   /**
    * Function to interpret the type of whitespace between
@@ -1272,10 +1299,15 @@ protected:
   static nsIFrame* CreatePlaceholderFrameFor(nsIPresShell*     aPresShell,
                                              nsIContent*       aContent,
                                              nsIFrame*         aFrame,
-                                             nsStyleContext*   aStyleContext,
+                                             nsStyleContext*   aParentStyle,
                                              nsContainerFrame* aParentFrame,
                                              nsIFrame*         aPrevInFlow,
                                              nsFrameState      aTypeBit);
+
+  static nsIFrame* CreateBackdropFrameFor(nsIPresShell* aPresShell,
+                                          nsIContent* aContent,
+                                          nsIFrame* aFrame,
+                                          nsContainerFrame* aParentFrame);
 
 private:
   // ConstructSelectFrame puts the new frame in aFrameItems and
@@ -1293,6 +1325,14 @@ private:
                                    nsContainerFrame*        aParentFrame,
                                    const nsStyleDisplay*    aStyleDisplay,
                                    nsFrameItems&            aFrameItems);
+
+  // ConstructDetailsFrame puts the new frame in aFrameItems and
+  // handles the kids of the details.
+  nsIFrame* ConstructDetailsFrame(nsFrameConstructorState& aState,
+                                  FrameConstructionItem& aItem,
+                                  nsContainerFrame* aParentFrame,
+                                  const nsStyleDisplay* aStyleDisplay,
+                                  nsFrameItems& aFrameItems);
 
   // aParentFrame might be null.  If it is, that means it was an
   // inline frame.
@@ -1475,7 +1515,6 @@ private:
                                   nsFrameConstructorState& aState,
                                   FrameConstructionItem&   aItem,
                                   nsContainerFrame*        aParentFrame,
-                                  const nsStyleDisplay*    aDisplay,
                                   nsFrameItems&            aFrameItems,
                                   ContainerFrameCreationFunc aConstructor,
                                   ContainerFrameCreationFunc aInnerConstructor,
@@ -1512,7 +1551,7 @@ private:
      changes, make this static */
   const FrameConstructionData*
     FindDisplayData(const nsStyleDisplay* aDisplay, Element* aElement,
-                    nsIFrame* aParentFrame, nsStyleContext* aStyleContext);
+                    nsStyleContext* aStyleContext);
 
   /**
    * Construct a scrollable block frame
@@ -1524,6 +1563,18 @@ private:
                                      nsFrameItems&            aFrameItems);
 
   /**
+   * Construct a scrollable block frame using the given block frame creation
+   * function.
+   */
+  nsIFrame* ConstructScrollableBlockWithConstructor(
+    nsFrameConstructorState& aState,
+    FrameConstructionItem& aItem,
+    nsContainerFrame* aParentFrame,
+    const nsStyleDisplay* aDisplay,
+    nsFrameItems& aFrameItems,
+    BlockFrameCreationFunc aConstructor);
+
+  /**
    * Construct a non-scrollable block frame
    */
   nsIFrame* ConstructNonScrollableBlock(nsFrameConstructorState& aState,
@@ -1531,6 +1582,18 @@ private:
                                         nsContainerFrame*        aParentFrame,
                                         const nsStyleDisplay*    aDisplay,
                                         nsFrameItems&            aFrameItems);
+
+  /**
+   * Construct a non-scrollable block frame using the given block frame creation
+   * function.
+   */
+  nsIFrame* ConstructNonScrollableBlockWithConstructor(
+    nsFrameConstructorState& aState,
+    FrameConstructionItem& aItem,
+    nsContainerFrame* aParentFrame,
+    const nsStyleDisplay* aDisplay,
+    nsFrameItems& aFrameItems,
+    BlockFrameCreationFunc aConstructor);
 
   /**
    * This adds FrameConstructionItem objects to aItemsToConstruct for the
@@ -1741,7 +1804,6 @@ private:
   // @param aPendingBinding the pending binding  from this block's frame
   // construction item.
   void ConstructBlock(nsFrameConstructorState& aState,
-                      const nsStyleDisplay*    aDisplay,
                       nsIContent*              aContent,
                       nsContainerFrame*        aParentFrame,
                       nsContainerFrame*        aContentParentFrame,
@@ -1816,7 +1878,6 @@ private:
   // Methods support :first-letter style
 
   void CreateFloatingLetterFrame(nsFrameConstructorState& aState,
-                                 nsContainerFrame*        aBlockFrame,
                                  nsIContent*              aTextContent,
                                  nsIFrame*                aTextFrame,
                                  nsContainerFrame*        aParentFrame,
@@ -1829,8 +1890,7 @@ private:
                          nsContainerFrame*        aParentFrame,
                          nsFrameItems&            aResult);
 
-  void WrapFramesInFirstLetterFrame(nsIContent*       aBlockContent,
-                                    nsContainerFrame* aBlockFrame,
+  void WrapFramesInFirstLetterFrame(nsContainerFrame* aBlockFrame,
                                     nsFrameItems&     aBlockFrames);
 
   /**
@@ -1851,9 +1911,6 @@ private:
    * @param aTextFrame returns the textframe that had the first-letter
    * @param aPrevFrame returns the previous sibling of aTextFrame
    * @param aLetterFrames returns the frames that were created
-   * @param aStopLooking returns whether we should stop looking for a
-   *                     first-letter either because it was found or won't be
-   *                     found
    */
   void WrapFramesInFirstLetterFrame(nsContainerFrame*  aBlockFrame,
                                     nsContainerFrame*  aBlockContinuation,
@@ -1879,8 +1936,7 @@ private:
 
   // Special remove method for those pesky floating first-letter frames
   nsresult RemoveFloatingFirstLetterFrames(nsIPresShell*    aPresShell,
-                                           nsIFrame*        aBlockFrame,
-                                           bool*          aStopLooking);
+                                           nsIFrame*        aBlockFrame);
 
   // Capture state for the frame tree rooted at the frame associated with the
   // content object, aContent
@@ -1935,7 +1991,7 @@ private:
    */
   nsIFrame* FindFrameForContentSibling(nsIContent* aContent,
                                        nsIContent* aTargetContent,
-                                       uint8_t& aTargetContentDisplay,
+                                       mozilla::StyleDisplay& aTargetContentDisplay,
                                        nsContainerFrame* aParentFrame,
                                        bool aPrevSibling);
 
@@ -1955,7 +2011,7 @@ private:
    */
   nsIFrame* FindPreviousSibling(mozilla::dom::FlattenedChildIterator aIter,
                                 nsIContent* aTargetContent,
-                                uint8_t& aTargetContentDisplay,
+                                mozilla::StyleDisplay& aTargetContentDisplay,
                                 nsContainerFrame* aParentFrame);
 
   /**
@@ -1974,7 +2030,7 @@ private:
    */
   nsIFrame* FindNextSibling(mozilla::dom::FlattenedChildIterator aIter,
                             nsIContent* aTargetContent,
-                            uint8_t& aTargetContentDisplay,
+                            mozilla::StyleDisplay& aTargetContentDisplay,
                             nsContainerFrame* aParentFrame);
 
   // Find the right previous sibling for an insertion.  This also updates the
@@ -2008,8 +2064,8 @@ private:
   // XXXbz this code is generally wrong, since the frame for aContent
   // may be constructed based on tag, not based on aDisplay!
   bool IsValidSibling(nsIFrame*              aSibling,
-                        nsIContent*            aContent,
-                        uint8_t&               aDisplay);
+                      nsIContent*            aContent,
+                      mozilla::StyleDisplay& aDisplay);
 
   void QuotesDirty() {
     NS_PRECONDITION(mUpdateCount != 0, "Instant quote updates are bad news");
@@ -2064,7 +2120,9 @@ private:
   nsCounterManager    mCounterManager;
   // Current ProcessChildren depth.
   uint16_t            mCurrentDepth;
+#ifdef DEBUG
   uint16_t            mUpdateCount;
+#endif
   bool                mQuotesDirty : 1;
   bool                mCountersDirty : 1;
   bool                mIsDestroyingFrameTree : 1;

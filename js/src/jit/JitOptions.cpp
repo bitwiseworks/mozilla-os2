@@ -56,12 +56,13 @@ T overrideDefault(const char* param, T dflt) {
     }
     return dflt;
 }
+
 #define SET_DEFAULT(var, dflt) var = overrideDefault("JIT_OPTION_" #var, dflt)
 DefaultJitOptions::DefaultJitOptions()
 {
     // Whether to perform expensive graph-consistency DEBUG-only assertions.
     // It can be useful to disable this to reduce DEBUG-compile time of large
-    // asm.js programs.
+    // wasm programs.
     SET_DEFAULT(checkGraphConsistency, true);
 
 #ifdef CHECK_OSIPOINT_REGISTERS
@@ -74,6 +75,9 @@ DefaultJitOptions::DefaultJitOptions()
     // RangeAnalysis results.
     SET_DEFAULT(checkRangeAnalysis, false);
 
+    // Toggles whether IonBuilder fallbacks to a call if we fail to inline.
+    SET_DEFAULT(disableInlineBacktracking, true);
+
     // Toggles whether Alignment Mask Analysis is globally disabled.
     SET_DEFAULT(disableAma, false);
 
@@ -85,6 +89,9 @@ DefaultJitOptions::DefaultJitOptions()
 
     // Toggles whether Edge Case Analysis is gobally disabled.
     SET_DEFAULT(disableEdgeCaseAnalysis, false);
+
+    // Toggles whether to use flow sensitive Alias Analysis.
+    SET_DEFAULT(disableFlowAA, true);
 
     // Toggle whether global value numbering is globally disabled.
     SET_DEFAULT(disableGvn, false);
@@ -99,7 +106,7 @@ DefaultJitOptions::DefaultJitOptions()
     SET_DEFAULT(disableLoopUnrolling, true);
 
     // Toggle whether Profile Guided Optimization is globally disabled.
-    SET_DEFAULT(disablePgo, true);
+    SET_DEFAULT(disablePgo, false);
 
     // Toggles whether instruction reordering is globally disabled.
     SET_DEFAULT(disableInstructionReordering, false);
@@ -107,11 +114,17 @@ DefaultJitOptions::DefaultJitOptions()
     // Toggles whether Range Analysis is globally disabled.
     SET_DEFAULT(disableRangeAnalysis, false);
 
+    // Toggles wheter Recover instructions is globally disabled.
+    SET_DEFAULT(disableRecoverIns, false);
+
     // Toggle whether eager scalar replacement is globally disabled.
     SET_DEFAULT(disableScalarReplacement, false);
 
+    // Toggles whether CacheIR stubs are used.
+    SET_DEFAULT(disableCacheIR, false);
+
     // Toggles whether shared stubs are used in Ionmonkey.
-    SET_DEFAULT(disableSharedStubs, true);
+    SET_DEFAULT(disableSharedStubs, false);
 
     // Toggles whether sincos optimization is globally disabled.
     // See bug984018: The MacOS is the only one that has the sincos fast.
@@ -159,7 +172,22 @@ DefaultJitOptions::DefaultJitOptions()
     SET_DEFAULT(osrPcMismatchesBeforeRecompile, 6000);
 
     // The bytecode length limit for small function.
-    SET_DEFAULT(smallFunctionMaxBytecodeLength_, 120);
+    SET_DEFAULT(smallFunctionMaxBytecodeLength_, 130);
+
+    // An artificial testing limit for the maximum supported offset of
+    // pc-relative jump and call instructions.
+    SET_DEFAULT(jumpThreshold, UINT32_MAX);
+
+    // Branch pruning heuristic is based on a scoring system, which is look at
+    // different metrics and provide a score. The score is computed as a
+    // projection where each factor defines the weight of each metric. Then this
+    // score is compared against a threshold to prevent a branch from being
+    // removed.
+    SET_DEFAULT(branchPruningHitCountFactor, 1);
+    SET_DEFAULT(branchPruningInstFactor, 10);
+    SET_DEFAULT(branchPruningBlockSpanFactor, 100);
+    SET_DEFAULT(branchPruningEffectfulInstFactor, 3500);
+    SET_DEFAULT(branchPruningThreshold, 4000);
 
     // Force how many invocation or loop iterations are needed before compiling
     // a function with the highest ionmonkey optimization level.
@@ -173,6 +201,17 @@ DefaultJitOptions::DefaultJitOptions()
             Warn(forcedDefaultIonWarmUpThresholdEnv, env);
     }
 
+    // Same but for compiling small functions.
+    const char* forcedDefaultIonSmallFunctionWarmUpThresholdEnv =
+        "JIT_OPTION_forcedDefaultIonSmallFunctionWarmUpThreshold";
+    if (const char* env = getenv(forcedDefaultIonSmallFunctionWarmUpThresholdEnv)) {
+        Maybe<int> value = ParseInt(env);
+        if (value.isSome())
+            forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(value.ref());
+        else
+            Warn(forcedDefaultIonSmallFunctionWarmUpThresholdEnv, env);
+    }
+
     // Force the used register allocator instead of letting the optimization
     // pass decide.
     const char* forcedRegisterAllocatorEnv = "JIT_OPTION_forcedRegisterAllocator";
@@ -184,6 +223,23 @@ DefaultJitOptions::DefaultJitOptions()
 
     // Toggles whether unboxed plain objects can be created by the VM.
     SET_DEFAULT(disableUnboxedObjects, false);
+
+    // Test whether Atomics are allowed in asm.js code.
+    SET_DEFAULT(asmJSAtomicsEnable, false);
+
+    // Test whether wasm int64 / double NaN bits testing is enabled.
+    SET_DEFAULT(wasmTestMode, false);
+
+    // Test whether wasm bounds check should always be generated.
+    SET_DEFAULT(wasmAlwaysCheckBounds, false);
+
+    // Toggles the optimization whereby offsets are folded into loads and not
+    // included in the bounds check.
+    SET_DEFAULT(wasmFoldOffsets, true);
+
+    // Determines whether we suppress using signal handlers
+    // for interrupting jit-ed code. This is used only for testing.
+    SET_DEFAULT(ionInterruptWithoutSignals, false);
 }
 
 bool
@@ -205,6 +261,8 @@ DefaultJitOptions::setEagerCompilation()
     baselineWarmUpThreshold = 0;
     forcedDefaultIonWarmUpThreshold.reset();
     forcedDefaultIonWarmUpThreshold.emplace(0);
+    forcedDefaultIonSmallFunctionWarmUpThreshold.reset();
+    forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(0);
 }
 
 void
@@ -212,6 +270,8 @@ DefaultJitOptions::setCompilerWarmUpThreshold(uint32_t warmUpThreshold)
 {
     forcedDefaultIonWarmUpThreshold.reset();
     forcedDefaultIonWarmUpThreshold.emplace(warmUpThreshold);
+    forcedDefaultIonSmallFunctionWarmUpThreshold.reset();
+    forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(warmUpThreshold);
 
     // Undo eager compilation
     if (eagerCompilation && warmUpThreshold != 0) {

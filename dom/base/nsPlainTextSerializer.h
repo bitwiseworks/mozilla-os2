@@ -14,7 +14,6 @@
 #define nsPlainTextSerializer_h__
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIAtom.h"
 #include "nsIContentSerializer.h"
@@ -111,6 +110,11 @@ private:
     return mHeadLevel == 0;
   }
 
+  inline bool IsQuotedLine(const nsAString& aLine)
+  {
+    return !aLine.IsEmpty() && aLine.First() == char16_t('>');
+  }
+
   // Stack handling functions
   bool GetLastBool(const nsTArray<bool>& aStack);
   void SetLastBool(nsTArray<bool>& aStack, bool aValue);
@@ -127,15 +131,6 @@ private:
   nsString         mCurrentLine;
   uint32_t         mHeadLevel;
   bool             mAtFirstColumn;
-
-  // Handling of quoted text (for mail):
-  // Quotes need to be wrapped differently from non-quoted text,
-  // because quoted text has a few extra characters (e.g. ">> ")
-  // which makes the line length longer.
-  // Mail can represent quotes in different ways:
-  // Not wrapped in any special tag (if mail.compose.wrap_to_window_width)
-  // or in a <span>.
-  bool             mDontWrapAnyQuotes;  // no special quote markers
 
   bool             mStructs;            // Output structs (pref)
 
@@ -199,10 +194,10 @@ private:
   RefPtr<mozilla::dom::Element> mElement;
 
   // For handling table rows
-  nsAutoTArray<bool, 8> mHasWrittenCellsForRow;
+  AutoTArray<bool, 8> mHasWrittenCellsForRow;
   
   // Values gotten in OpenContainer that is (also) needed in CloseContainer
-  nsAutoTArray<bool, 8> mIsInCiteBlockquote;
+  AutoTArray<bool, 8> mIsInCiteBlockquote;
 
   // The output data
   nsAString*            mOutputString;

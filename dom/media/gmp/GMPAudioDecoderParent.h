@@ -12,6 +12,7 @@
 #include "mozilla/gmp/PGMPAudioDecoderParent.h"
 #include "GMPMessageUtils.h"
 #include "GMPAudioDecoderProxy.h"
+#include "GMPCrashHelperHolder.h"
 
 namespace mozilla {
 namespace gmp {
@@ -20,6 +21,7 @@ class GMPContentParent;
 
 class GMPAudioDecoderParent final : public GMPAudioDecoderProxy
                                   , public PGMPAudioDecoderParent
+                                  , public GMPCrashHelperHolder
 {
 public:
   NS_INLINE_DECL_REFCOUNTING(GMPAudioDecoderParent)
@@ -29,29 +31,29 @@ public:
   nsresult Shutdown();
 
   // GMPAudioDecoderProxy
-  virtual nsresult InitDecode(GMPAudioCodecType aCodecType,
-                              uint32_t aChannelCount,
-                              uint32_t aBitsPerChannel,
-                              uint32_t aSamplesPerSecond,
-                              nsTArray<uint8_t>& aExtraData,
-                              GMPAudioDecoderCallbackProxy* aCallback) override;
-  virtual nsresult Decode(GMPAudioSamplesImpl& aInput) override;
-  virtual nsresult Reset() override;
-  virtual nsresult Drain() override;
-  virtual nsresult Close() override;
+  nsresult InitDecode(GMPAudioCodecType aCodecType,
+                      uint32_t aChannelCount,
+                      uint32_t aBitsPerChannel,
+                      uint32_t aSamplesPerSecond,
+                      nsTArray<uint8_t>& aExtraData,
+                      GMPAudioDecoderCallbackProxy* aCallback) override;
+  nsresult Decode(GMPAudioSamplesImpl& aInput) override;
+  nsresult Reset() override;
+  nsresult Drain() override;
+  nsresult Close() override;
 
 private:
   ~GMPAudioDecoderParent();
 
   // PGMPAudioDecoderParent
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-  virtual bool RecvDecoded(const GMPAudioDecodedSampleData& aDecoded) override;
-  virtual bool RecvInputDataExhausted() override;
-  virtual bool RecvDrainComplete() override;
-  virtual bool RecvResetComplete() override;
-  virtual bool RecvError(const GMPErr& aError) override;
-  virtual bool RecvShutdown() override;
-  virtual bool Recv__delete__() override;
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+  bool RecvDecoded(const GMPAudioDecodedSampleData& aDecoded) override;
+  bool RecvInputDataExhausted() override;
+  bool RecvDrainComplete() override;
+  bool RecvResetComplete() override;
+  bool RecvError(const GMPErr& aError) override;
+  bool RecvShutdown() override;
+  bool Recv__delete__() override;
 
   void UnblockResetAndDrain();
 

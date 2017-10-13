@@ -6,7 +6,7 @@
 
 var initialPageZoom = ZoomManager.zoom;
 
-add_task(function() {
+add_task(function*() {
   info("Check zoom reset button existence and functionality");
 
   is(initialPageZoom, 1, "Page zoom reset correctly");
@@ -18,6 +18,8 @@ add_task(function() {
   ok(zoomResetButton, "Zoom reset button exists in Panel Menu");
 
   zoomResetButton.click();
+  yield new Promise(SimpleTest.executeSoon);
+
   let pageZoomLevel = Math.floor(ZoomManager.zoom * 100);
   let expectedZoomLevel = 100;
   let buttonZoomLevel = parseInt(zoomResetButton.getAttribute("label"), 10);
@@ -31,7 +33,7 @@ add_task(function() {
   info("Menu panel was closed");
 });
 
-add_task(function asyncCleanup() {
+add_task(function* asyncCleanup() {
   // reset zoom level
   ZoomManager.zoom = initialPageZoom;
   info("Zoom level was restored");

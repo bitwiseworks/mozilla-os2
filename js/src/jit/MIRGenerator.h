@@ -37,8 +37,11 @@ class MIRGenerator
   public:
     MIRGenerator(CompileCompartment* compartment, const JitCompileOptions& options,
                  TempAllocator* alloc, MIRGraph* graph,
-                 const CompileInfo* info, const OptimizationInfo* optimizationInfo,
-                 bool usesSignalHandlersForAsmJSOOB = false);
+                 const CompileInfo* info, const OptimizationInfo* optimizationInfo);
+
+    void initMinWasmHeapLength(uint32_t init) {
+        minWasmHeapLength_ = init;
+    }
 
     TempAllocator& alloc() {
         return *alloc_;
@@ -46,7 +49,7 @@ class MIRGenerator
     MIRGraph& graph() {
         return *graph_;
     }
-    bool ensureBallast() {
+    MOZ_MUST_USE bool ensureBallast() {
         return alloc().ensureBallast();
     }
     const JitRuntime* jitRuntime() const {
@@ -69,14 +72,14 @@ class MIRGenerator
 
     // Set an error state and prints a message. Returns false so errors can be
     // propagated up.
-    bool abort(const char* message, ...);
-    bool abortFmt(const char* message, va_list ap);
+    bool abort(const char* message, ...) MOZ_FORMAT_PRINTF(2, 3); // always returns false
+    bool abortFmt(const char* message, va_list ap); // always returns false
 
     bool errored() const {
         return error_;
     }
 
-    bool instrumentedProfiling() {
+    MOZ_MUST_USE bool instrumentedProfiling() {
         if (!instrumentedProfilingIsCached_) {
             instrumentedProfiling_ = GetJitContext()->runtime->spsProfiler().enabled();
             instrumentedProfilingIsCached_ = true;
@@ -85,7 +88,7 @@ class MIRGenerator
     }
 
     bool isProfilerInstrumentationEnabled() {
-        return !compilingAsmJS() && instrumentedProfiling();
+        return !compilingWasm() && instrumentedProfiling();
     }
 
     bool isOptimizationTrackingEnabled() {
@@ -123,23 +126,21 @@ class MIRGenerator
         return abortReason_;
     }
 
-    bool compilingAsmJS() const {
-        return info_->compilingAsmJS();
+    bool compilingWasm() const {
+        return info_->compilingWasm();
     }
 
-    uint32_t maxAsmJSStackArgBytes() const {
-        MOZ_ASSERT(compilingAsmJS());
-        return maxAsmJSStackArgBytes_;
+    uint32_t wasmMaxStackArgBytes() const {
+        MOZ_ASSERT(compilingWasm());
+        return wasmMaxStackArgBytes_;
     }
-    uint32_t resetAsmJSMaxStackArgBytes() {
-        MOZ_ASSERT(compilingAsmJS());
-        uint32_t old = maxAsmJSStackArgBytes_;
-        maxAsmJSStackArgBytes_ = 0;
-        return old;
+    void initWasmMaxStackArgBytes(uint32_t n) {
+        MOZ_ASSERT(compilingWasm());
+        MOZ_ASSERT(wasmMaxStackArgBytes_ == 0);
+        wasmMaxStackArgBytes_ = n;
     }
-    void setAsmJSMaxStackArgBytes(uint32_t n) {
-        MOZ_ASSERT(compilingAsmJS());
-        maxAsmJSStackArgBytes_ = n;
+    uint32_t minWasmHeapLength() const {
+        return minWasmHeapLength_;
     }
     void setPerformsCall() {
         performsCall_ = true;
@@ -170,8 +171,6 @@ class MIRGenerator
     const CompileInfo* info_;
     const OptimizationInfo* optimizationInfo_;
     TempAllocator* alloc_;
-    JSFunction* fun_;
-    uint32_t nslots_;
     MIRGraph* graph_;
     AbortReason abortReason_;
     bool shouldForceAbort_; // Force AbortReason_Disable
@@ -180,10 +179,10 @@ class MIRGenerator
     mozilla::Atomic<bool, mozilla::Relaxed>* pauseBuild_;
     mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
 
-    uint32_t maxAsmJSStackArgBytes_;
+    uint32_t wasmMaxStackArgBytes_;
     bool performsCall_;
     bool usesSimd_;
-    bool usesSimdCached_;
+    bool cachedUsesSimd_;
 
     // Keep track of whether frame arguments are modified during execution.
     // RegAlloc needs to know this as spilling values back to their register
@@ -196,9 +195,7 @@ class MIRGenerator
 
     void addAbortedPreliminaryGroup(ObjectGroup* group);
 
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-    bool usesSignalHandlersForAsmJSOOB_;
-#endif
+    uint32_t minWasmHeapLength_;
 
     void setForceAbort() {
         shouldForceAbort_ = true;
@@ -208,17 +205,14 @@ class MIRGenerator
     }
 
 #if defined(JS_ION_PERF)
-    AsmJSPerfSpewer asmJSPerfSpewer_;
+    WasmPerfSpewer wasmPerfSpewer_;
 
   public:
-    AsmJSPerfSpewer& perfSpewer() { return asmJSPerfSpewer_; }
+    WasmPerfSpewer& perfSpewer() { return wasmPerfSpewer_; }
 #endif
 
   public:
     const JitCompileOptions options;
-
-    bool needsAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* access) const;
-    size_t foldableOffsetRange(const MAsmJSHeapAccess* access) const;
 
   private:
     GraphSpewer gs_;

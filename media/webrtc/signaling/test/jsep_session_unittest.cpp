@@ -20,6 +20,7 @@
 
 #include "FakeMediaStreams.h"
 #include "FakeMediaStreamsImpl.h"
+#include "FakeLogging.h"
 
 #include "signaling/src/sdp/SdpMediaSection.h"
 #include "signaling/src/sdp/SipccSdpParser.h"
@@ -33,6 +34,8 @@
 
 #include "FakeIPC.h"
 #include "FakeIPC.cpp"
+
+#include "TestHarness.h"
 
 namespace mozilla {
 static std::string kAEqualsCandidate("a=candidate:");
@@ -310,6 +313,102 @@ protected:
     return pairs;
   }
 
+  bool Equals(const SdpFingerprintAttributeList::Fingerprint& f1,
+              const SdpFingerprintAttributeList::Fingerprint& f2) const {
+    if (f1.hashFunc != f2.hashFunc) {
+      return false;
+    }
+
+    if (f1.fingerprint != f2.fingerprint) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Equals(const SdpFingerprintAttributeList& f1,
+              const SdpFingerprintAttributeList& f2) const {
+    if (f1.mFingerprints.size() != f2.mFingerprints.size()) {
+      return false;
+    }
+
+    for (size_t i=0; i<f1.mFingerprints.size(); ++i) {
+      if (!Equals(f1.mFingerprints[i], f2.mFingerprints[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool Equals(const UniquePtr<JsepDtlsTransport>& t1,
+              const UniquePtr<JsepDtlsTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (!Equals(t1->GetFingerprints(),  t2->GetFingerprints())) {
+      return false;
+    }
+
+    if (t1->GetRole() != t2->GetRole()) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  bool Equals(const UniquePtr<JsepIceTransport>& t1,
+              const UniquePtr<JsepIceTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (t1->GetUfrag() != t2->GetUfrag()) {
+      return false;
+    }
+
+    if (t1->GetPassword() != t2->GetPassword()) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Equals(const RefPtr<JsepTransport>& t1,
+              const RefPtr<JsepTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (t1->mTransportId != t2->mTransportId) {
+      return false;
+    }
+
+    if (t1->mComponents != t2->mComponents) {
+      return false;
+    }
+
+    if (!Equals(t1->mIce, t2->mIce)) {
+      return false;
+    }
+
+    return true;
+  }
+
   bool Equals(const JsepTrackPair& p1,
               const JsepTrackPair& p2) const {
     if (p1.mLevel != p2.mLevel) {
@@ -327,11 +426,11 @@ protected:
       return false;
     }
 
-    if (p1.mRtpTransport.get() != p2.mRtpTransport.get()) {
+    if (!Equals(p1.mRtpTransport, p2.mRtpTransport)) {
       return false;
     }
 
-    if (p1.mRtcpTransport.get() != p2.mRtcpTransport.get()) {
+    if (!Equals(p1.mRtcpTransport, p2.mRtcpTransport)) {
       return false;
     }
 
@@ -541,6 +640,7 @@ protected:
         }
       }
     }
+    std::cerr << "OFFER pairs:" << std::endl;
     DumpTrackPairs(mSessionOff);
   }
 
@@ -574,10 +674,11 @@ protected:
           msidAttr += " ";
           msidAttr += pairs[i].mReceiving->GetTrackId();
           ASSERT_NE(std::string::npos, answer.find(msidAttr))
-            << "Did not find " << msidAttr << " in offer";
+            << "Did not find " << msidAttr << " in answer";
         }
       }
     }
+    std::cerr << "ANSWER pairs:" << std::endl;
     DumpTrackPairs(mSessionAns);
   }
 
@@ -860,6 +961,18 @@ protected:
   }
 
   void
+  ReplaceInSdp(std::string* sdp,
+               const char* searchStr,
+               const char* replaceStr) const
+  {
+    if (searchStr[0] == '\0') return;
+    size_t pos;
+    while ((pos = sdp->find(searchStr)) != std::string::npos) {
+      sdp->replace(pos, strlen(searchStr), replaceStr);
+    }
+  }
+
+  void
   ValidateDisabledMSection(const SdpMediaSection* msection)
   {
     ASSERT_EQ(1U, msection->GetFormats().size());
@@ -904,9 +1017,16 @@ protected:
     std::cerr << "  encodings=" << std::endl;
     for (size_t i = 0; i < details->GetEncodingCount(); ++i) {
       const JsepTrackEncoding& encoding = details->GetEncoding(i);
-      std::cerr << "    id=" << encoding.mRid;
+      std::cerr << "    id=" << encoding.mRid << std::endl;
       for (const JsepCodecDescription* codec : encoding.GetCodecs()) {
-        std::cerr << "      " << codec->mName << std::endl;
+        std::cerr << "      " << codec->mName
+                  << " enabled(" << (codec->mEnabled?"yes":"no") << ")";
+        if (track.GetMediaType() == SdpMediaSection::kAudio) {
+          const JsepAudioCodecDescription* audioCodec =
+              static_cast<const JsepAudioCodecDescription*>(codec);
+          std::cerr << " dtmf(" << (audioCodec->mDtmfEnabled?"yes":"no") << ")";
+        }
+        std::cerr << std::endl;
       }
     }
   }
@@ -1848,6 +1968,79 @@ TEST_P(JsepSessionTest, RenegotiationAutoAssignedMsidIsStable)
   }
 }
 
+TEST_P(JsepSessionTest, RenegotiationOffererDisablesTelephoneEvent)
+{
+  AddTracks(mSessionOff);
+  AddTracks(mSessionAns);
+  OfferAnswer();
+
+  auto offererPairs = GetTrackPairsByLevel(mSessionOff);
+
+  // check all the audio tracks to make sure they have 2 codecs (109 and 101),
+  // and dtmf is enabled on all audio tracks
+  for (size_t i = 0; i < offererPairs.size(); ++i) {
+    std::vector<JsepTrack*> tracks;
+    tracks.push_back(offererPairs[i].mSending.get());
+    tracks.push_back(offererPairs[i].mReceiving.get());
+    for (JsepTrack *track : tracks) {
+      if (track->GetMediaType() != SdpMediaSection::kAudio) {
+        continue;
+      }
+      const JsepTrackNegotiatedDetails* details = track->GetNegotiatedDetails();
+      ASSERT_EQ(1U, details->GetEncodingCount());
+      const JsepTrackEncoding& encoding = details->GetEncoding(0);
+      ASSERT_EQ(2U, encoding.GetCodecs().size());
+      ASSERT_TRUE(encoding.HasFormat("109"));
+      ASSERT_TRUE(encoding.HasFormat("101"));
+      for (JsepCodecDescription* codec: encoding.GetCodecs()) {
+        ASSERT_TRUE(codec);
+        // we can cast here because we've already checked for audio track
+        JsepAudioCodecDescription *audioCodec =
+            static_cast<JsepAudioCodecDescription*>(codec);
+        ASSERT_TRUE(audioCodec->mDtmfEnabled);
+      }
+    }
+  }
+
+  std::string offer = CreateOffer();
+  ReplaceInSdp(&offer, " 109 101 ", " 109 ");
+  ReplaceInSdp(&offer, "a=fmtp:101 0-15\r\n", "");
+  ReplaceInSdp(&offer, "a=rtpmap:101 telephone-event/8000/1\r\n", "");
+  std::cerr << "modified OFFER: " << offer << std::endl;
+
+  SetLocalOffer(offer);
+  SetRemoteOffer(offer);
+  AddTracks(mSessionAns);
+  std::string answer = CreateAnswer();
+  SetLocalAnswer(answer);
+  SetRemoteAnswer(answer);
+
+  auto newOffererPairs = GetTrackPairsByLevel(mSessionOff);
+
+  // check all the audio tracks to make sure they have 1 codec (109),
+  // and dtmf is disabled on all audio tracks
+  for (size_t i = 0; i < newOffererPairs.size(); ++i) {
+    std::vector<JsepTrack*> tracks;
+    tracks.push_back(newOffererPairs[i].mSending.get());
+    tracks.push_back(newOffererPairs[i].mReceiving.get());
+    for (JsepTrack* track : tracks) {
+      if (track->GetMediaType() != SdpMediaSection::kAudio) {
+        continue;
+      }
+      const JsepTrackNegotiatedDetails* details = track->GetNegotiatedDetails();
+      ASSERT_EQ(1U, details->GetEncodingCount());
+      const JsepTrackEncoding& encoding = details->GetEncoding(0);
+      ASSERT_EQ(1U, encoding.GetCodecs().size());
+      ASSERT_TRUE(encoding.HasFormat("109"));
+      // we can cast here because we've already checked for audio track
+      JsepAudioCodecDescription *audioCodec =
+          static_cast<JsepAudioCodecDescription*>(encoding.GetCodecs()[0]);
+      ASSERT_TRUE(audioCodec);
+      ASSERT_FALSE(audioCodec->mDtmfEnabled);
+    }
+  }
+}
+
 // Tests behavior when the answerer does not use msid in the initial exchange,
 // but does on renegotiation.
 TEST_P(JsepSessionTest, RenegotiationAnswererEnablesMsid)
@@ -1882,8 +2075,10 @@ TEST_P(JsepSessionTest, RenegotiationAnswererEnablesMsid)
               newOffererPairs[i].mReceiving->GetMediaType());
 
     ASSERT_EQ(offererPairs[i].mSending, newOffererPairs[i].mSending);
-    ASSERT_EQ(offererPairs[i].mRtpTransport, newOffererPairs[i].mRtpTransport);
-    ASSERT_EQ(offererPairs[i].mRtcpTransport, newOffererPairs[i].mRtcpTransport);
+    ASSERT_TRUE(Equals(offererPairs[i].mRtpTransport,
+                       newOffererPairs[i].mRtpTransport));
+    ASSERT_TRUE(Equals(offererPairs[i].mRtcpTransport,
+                       newOffererPairs[i].mRtcpTransport));
 
     if (offererPairs[i].mReceiving->GetMediaType() ==
         SdpMediaSection::kApplication) {
@@ -1927,8 +2122,10 @@ TEST_P(JsepSessionTest, RenegotiationAnswererDisablesMsid)
               newOffererPairs[i].mReceiving->GetMediaType());
 
     ASSERT_EQ(offererPairs[i].mSending, newOffererPairs[i].mSending);
-    ASSERT_EQ(offererPairs[i].mRtpTransport, newOffererPairs[i].mRtpTransport);
-    ASSERT_EQ(offererPairs[i].mRtcpTransport, newOffererPairs[i].mRtcpTransport);
+    ASSERT_TRUE(Equals(offererPairs[i].mRtpTransport,
+                       newOffererPairs[i].mRtpTransport));
+    ASSERT_TRUE(Equals(offererPairs[i].mRtcpTransport,
+                       newOffererPairs[i].mRtcpTransport));
 
     if (offererPairs[i].mReceiving->GetMediaType() ==
         SdpMediaSection::kApplication) {
@@ -2115,6 +2312,21 @@ TEST_P(JsepSessionTest, RenegotiationAnswererDisablesBundleTransport)
             offererPairs[0].mRtpTransport.get());
   ASSERT_NE(newAnswererPairs[0].mRtpTransport.get(),
             answererPairs[0].mRtpTransport.get());
+}
+
+TEST_P(JsepSessionTest, ParseRejectsBadMediaFormat)
+{
+  if (GetParam() == "datachannel") {
+    return;
+  }
+  AddTracks(mSessionOff);
+  std::string offer = CreateOffer();
+  UniquePtr<Sdp> munge(Parse(offer));
+  SdpMediaSection& mediaSection = munge->GetMediaSection(0);
+  mediaSection.AddCodec("75", "DummyFormatVal", 8000, 1);
+  std::string sdpString = munge->ToString();
+  nsresult rv = mSessionOff.SetLocalDescription(kJsepSdpOffer, sdpString);
+  ASSERT_EQ(NS_ERROR_INVALID_ARG, rv);
 }
 
 TEST_P(JsepSessionTest, FullCallWithCandidates)
@@ -2404,6 +2616,73 @@ TEST_P(JsepSessionTest, RenegotiationWithCandidates)
   }
 }
 
+TEST_P(JsepSessionTest, RenegotiationAnswererSendonly)
+{
+  AddTracks(mSessionOff);
+  AddTracks(mSessionAns);
+  OfferAnswer();
+
+  std::string offer = CreateOffer();
+  SetLocalOffer(offer);
+  SetRemoteOffer(offer);
+  std::string answer = CreateAnswer();
+  SetLocalAnswer(answer);
+
+  UniquePtr<Sdp> parsedAnswer(Parse(answer));
+  for (size_t i = 0; i < parsedAnswer->GetMediaSectionCount(); ++i) {
+    SdpMediaSection& msection = parsedAnswer->GetMediaSection(i);
+    if (msection.GetMediaType() != SdpMediaSection::kApplication) {
+      msection.SetReceiving(false);
+    }
+  }
+
+  answer = parsedAnswer->ToString();
+
+  SetRemoteAnswer(answer);
+
+  for (const RefPtr<JsepTrack>& track : mSessionOff.GetLocalTracks()) {
+    if (track->GetMediaType() != SdpMediaSection::kApplication) {
+      ASSERT_FALSE(track->GetActive());
+    }
+  }
+
+  ASSERT_EQ(types.size(), mSessionOff.GetNegotiatedTrackPairs().size());
+}
+
+TEST_P(JsepSessionTest, RenegotiationAnswererInactive)
+{
+  AddTracks(mSessionOff);
+  AddTracks(mSessionAns);
+  OfferAnswer();
+
+  std::string offer = CreateOffer();
+  SetLocalOffer(offer);
+  SetRemoteOffer(offer);
+  std::string answer = CreateAnswer();
+  SetLocalAnswer(answer);
+
+  UniquePtr<Sdp> parsedAnswer(Parse(answer));
+  for (size_t i = 0; i < parsedAnswer->GetMediaSectionCount(); ++i) {
+    SdpMediaSection& msection = parsedAnswer->GetMediaSection(i);
+    if (msection.GetMediaType() != SdpMediaSection::kApplication) {
+      msection.SetReceiving(false);
+      msection.SetSending(false);
+    }
+  }
+
+  answer = parsedAnswer->ToString();
+
+  SetRemoteAnswer(answer, CHECK_SUCCESS); // Won't have answerer tracks
+
+  for (const RefPtr<JsepTrack>& track : mSessionOff.GetLocalTracks()) {
+    if (track->GetMediaType() != SdpMediaSection::kApplication) {
+      ASSERT_FALSE(track->GetActive());
+    }
+  }
+
+  ASSERT_EQ(types.size(), mSessionOff.GetNegotiatedTrackPairs().size());
+}
+
 
 INSTANTIATE_TEST_CASE_P(
     Variants,
@@ -2634,7 +2913,7 @@ TEST_F(JsepSessionTest, CreateOfferNoDatachannelDefault)
             outputSdp->GetMediaSection(1).GetMediaType());
 }
 
-TEST_F(JsepSessionTest, ValidateOfferedCodecParams)
+TEST_F(JsepSessionTest, ValidateOfferedVideoCodecParams)
 {
   types.push_back(SdpMediaSection::kAudio);
   types.push_back(SdpMediaSection::kVideo);
@@ -2657,11 +2936,13 @@ TEST_F(JsepSessionTest, ValidateOfferedCodecParams)
   auto& video_attrs = video_section.GetAttributeList();
   ASSERT_EQ(SdpDirectionAttribute::kSendrecv, video_attrs.GetDirection());
 
-  ASSERT_EQ(4U, video_section.GetFormats().size());
+  ASSERT_EQ(6U, video_section.GetFormats().size());
   ASSERT_EQ("120", video_section.GetFormats()[0]);
   ASSERT_EQ("121", video_section.GetFormats()[1]);
   ASSERT_EQ("126", video_section.GetFormats()[2]);
   ASSERT_EQ("97", video_section.GetFormats()[3]);
+  ASSERT_EQ("122", video_section.GetFormats()[4]);
+  ASSERT_EQ("123", video_section.GetFormats()[5]);
 
   // Validate rtpmap
   ASSERT_TRUE(video_attrs.HasAttribute(SdpAttribute::kRtpmapAttribute));
@@ -2670,22 +2951,28 @@ TEST_F(JsepSessionTest, ValidateOfferedCodecParams)
   ASSERT_TRUE(rtpmaps.HasEntry("121"));
   ASSERT_TRUE(rtpmaps.HasEntry("126"));
   ASSERT_TRUE(rtpmaps.HasEntry("97"));
+  ASSERT_TRUE(rtpmaps.HasEntry("122"));
+  ASSERT_TRUE(rtpmaps.HasEntry("123"));
 
   auto& vp8_entry = rtpmaps.GetEntry("120");
   auto& vp9_entry = rtpmaps.GetEntry("121");
   auto& h264_1_entry = rtpmaps.GetEntry("126");
   auto& h264_0_entry = rtpmaps.GetEntry("97");
+  auto& red_0_entry = rtpmaps.GetEntry("122");
+  auto& ulpfec_0_entry = rtpmaps.GetEntry("123");
 
   ASSERT_EQ("VP8", vp8_entry.name);
   ASSERT_EQ("VP9", vp9_entry.name);
   ASSERT_EQ("H264", h264_1_entry.name);
   ASSERT_EQ("H264", h264_0_entry.name);
+  ASSERT_EQ("red", red_0_entry.name);
+  ASSERT_EQ("ulpfec", ulpfec_0_entry.name);
 
   // Validate fmtps
   ASSERT_TRUE(video_attrs.HasAttribute(SdpAttribute::kFmtpAttribute));
   auto& fmtps = video_attrs.GetFmtp().mFmtps;
 
-  ASSERT_EQ(4U, fmtps.size());
+  ASSERT_EQ(5U, fmtps.size());
 
   // VP8
   const SdpFmtpAttributeList::Parameters* vp8_params =
@@ -2736,11 +3023,112 @@ TEST_F(JsepSessionTest, ValidateOfferedCodecParams)
   ASSERT_EQ((uint32_t)0x42e00d, parsed_h264_0_params.profile_level_id);
   ASSERT_TRUE(parsed_h264_0_params.level_asymmetry_allowed);
   ASSERT_EQ(0U, parsed_h264_0_params.packetization_mode);
+
+  // red
+  const SdpFmtpAttributeList::Parameters* red_params =
+    video_section.FindFmtp("122");
+  ASSERT_TRUE(red_params);
+  ASSERT_EQ(SdpRtpmapAttributeList::kRed, red_params->codec_type);
+
+  auto& parsed_red_params =
+      *static_cast<const SdpFmtpAttributeList::RedParameters*>(red_params);
+  ASSERT_EQ(5U, parsed_red_params.encodings.size());
+  ASSERT_EQ(120, parsed_red_params.encodings[0]);
+  ASSERT_EQ(121, parsed_red_params.encodings[1]);
+  ASSERT_EQ(126, parsed_red_params.encodings[2]);
+  ASSERT_EQ(97, parsed_red_params.encodings[3]);
+  ASSERT_EQ(123, parsed_red_params.encodings[4]);
+}
+
+TEST_F(JsepSessionTest, ValidateOfferedAudioCodecParams)
+{
+  types.push_back(SdpMediaSection::kAudio);
+  types.push_back(SdpMediaSection::kVideo);
+
+  RefPtr<JsepTrack> msta(
+      new JsepTrack(SdpMediaSection::kAudio, "offerer_stream", "a1"));
+  mSessionOff.AddTrack(msta);
+  RefPtr<JsepTrack> mstv1(
+      new JsepTrack(SdpMediaSection::kVideo, "offerer_stream", "v2"));
+  mSessionOff.AddTrack(mstv1);
+
+  std::string offer = CreateOffer();
+
+  UniquePtr<Sdp> outputSdp(Parse(offer));
+  ASSERT_TRUE(!!outputSdp);
+
+  ASSERT_EQ(2U, outputSdp->GetMediaSectionCount());
+  auto& audio_section = outputSdp->GetMediaSection(0);
+  ASSERT_EQ(SdpMediaSection::kAudio, audio_section.GetMediaType());
+  auto& audio_attrs = audio_section.GetAttributeList();
+  ASSERT_EQ(SdpDirectionAttribute::kSendrecv, audio_attrs.GetDirection());
+  ASSERT_EQ(5U, audio_section.GetFormats().size());
+  ASSERT_EQ("109", audio_section.GetFormats()[0]);
+  ASSERT_EQ("9", audio_section.GetFormats()[1]);
+  ASSERT_EQ("0", audio_section.GetFormats()[2]);
+  ASSERT_EQ("8", audio_section.GetFormats()[3]);
+  ASSERT_EQ("101", audio_section.GetFormats()[4]);
+
+  // Validate rtpmap
+  ASSERT_TRUE(audio_attrs.HasAttribute(SdpAttribute::kRtpmapAttribute));
+  auto& rtpmaps = audio_attrs.GetRtpmap();
+  ASSERT_TRUE(rtpmaps.HasEntry("109"));
+  ASSERT_TRUE(rtpmaps.HasEntry("9"));
+  ASSERT_TRUE(rtpmaps.HasEntry("0"));
+  ASSERT_TRUE(rtpmaps.HasEntry("8"));
+  ASSERT_TRUE(rtpmaps.HasEntry("101"));
+
+  auto& opus_entry = rtpmaps.GetEntry("109");
+  auto& g722_entry = rtpmaps.GetEntry("9");
+  auto& pcmu_entry = rtpmaps.GetEntry("0");
+  auto& pcma_entry = rtpmaps.GetEntry("8");
+  auto& telephone_event_entry = rtpmaps.GetEntry("101");
+
+  ASSERT_EQ("opus", opus_entry.name);
+  ASSERT_EQ("G722", g722_entry.name);
+  ASSERT_EQ("PCMU", pcmu_entry.name);
+  ASSERT_EQ("PCMA", pcma_entry.name);
+  ASSERT_EQ("telephone-event", telephone_event_entry.name);
+
+  // Validate fmtps
+  ASSERT_TRUE(audio_attrs.HasAttribute(SdpAttribute::kFmtpAttribute));
+  auto& fmtps = audio_attrs.GetFmtp().mFmtps;
+
+  ASSERT_EQ(2U, fmtps.size());
+
+  // opus
+  const SdpFmtpAttributeList::Parameters* opus_params =
+    audio_section.FindFmtp("109");
+  ASSERT_TRUE(opus_params);
+  ASSERT_EQ(SdpRtpmapAttributeList::kOpus, opus_params->codec_type);
+
+  auto& parsed_opus_params =
+      *static_cast<const SdpFmtpAttributeList::OpusParameters*>(opus_params);
+
+  ASSERT_EQ((uint32_t)48000, parsed_opus_params.maxplaybackrate);
+  ASSERT_EQ((uint32_t)1, parsed_opus_params.stereo);
+  ASSERT_EQ((uint32_t)0, parsed_opus_params.useInBandFec);
+
+  // dtmf
+  const SdpFmtpAttributeList::Parameters* dtmf_params =
+    audio_section.FindFmtp("101");
+  ASSERT_TRUE(dtmf_params);
+  ASSERT_EQ(SdpRtpmapAttributeList::kTelephoneEvent, dtmf_params->codec_type);
+
+  auto& parsed_dtmf_params =
+      *static_cast<const SdpFmtpAttributeList::TelephoneEventParameters*>
+          (dtmf_params);
+
+  ASSERT_EQ("0-15", parsed_dtmf_params.dtmfTones);
 }
 
 TEST_F(JsepSessionTest, ValidateAnsweredCodecParams)
 {
-
+  // TODO(bug 1099351): Once fixed, we can allow red in this offer,
+  // which will also cause multiple codecs in answer.  For now,
+  // red/ulpfec for video are behind a pref to mitigate potential for
+  // errors.
+  SetCodecEnabled(mSessionOff, "red", false);
   for (auto i = mSessionAns.Codecs().begin(); i != mSessionAns.Codecs().end();
        ++i) {
     auto* codec = *i;
@@ -2793,21 +3181,25 @@ TEST_F(JsepSessionTest, ValidateAnsweredCodecParams)
   ASSERT_EQ(1U, video_section.GetFormats().size());
   // ASSERT_EQ(3U, video_section.GetFormats().size());
   ASSERT_EQ("120", video_section.GetFormats()[0]);
-  // ASSERT_EQ("126", video_section.GetFormats()[1]);
-  // ASSERT_EQ("97", video_section.GetFormats()[2]);
+  // ASSERT_EQ("121", video_section.GetFormats()[1]);
+  // ASSERT_EQ("126", video_section.GetFormats()[2]);
+  // ASSERT_EQ("97", video_section.GetFormats()[3]);
 
   // Validate rtpmap
   ASSERT_TRUE(video_attrs.HasAttribute(SdpAttribute::kRtpmapAttribute));
   auto& rtpmaps = video_attrs.GetRtpmap();
   ASSERT_TRUE(rtpmaps.HasEntry("120"));
+  //ASSERT_TRUE(rtpmaps.HasEntry("121"));
   // ASSERT_TRUE(rtpmaps.HasEntry("126"));
   // ASSERT_TRUE(rtpmaps.HasEntry("97"));
 
   auto& vp8_entry = rtpmaps.GetEntry("120");
+  //auto& vp9_entry = rtpmaps.GetEntry("121");
   // auto& h264_1_entry = rtpmaps.GetEntry("126");
   // auto& h264_0_entry = rtpmaps.GetEntry("97");
 
   ASSERT_EQ("VP8", vp8_entry.name);
+  //ASSERT_EQ("VP9", vp9_entry.name);
   // ASSERT_EQ("H264", h264_1_entry.name);
   // ASSERT_EQ("H264", h264_0_entry.name);
 
@@ -3389,13 +3781,10 @@ TEST_F(JsepSessionTest, TestExtmap)
   auto& answerMediaAttrs = parsedAnswer->GetMediaSection(0).GetAttributeList();
   ASSERT_TRUE(answerMediaAttrs.HasAttribute(SdpAttribute::kExtmapAttribute));
   auto& answerExtmap = answerMediaAttrs.GetExtmap().mExtmaps;
-  ASSERT_EQ(2U, answerExtmap.size());
-  ASSERT_EQ("urn:ietf:params:rtp-hdrext:ssrc-audio-level",
-      answerExtmap[0].extensionname);
-  ASSERT_EQ(1U, answerExtmap[0].entry);
+  ASSERT_EQ(1U, answerExtmap.size());
   // We ensure that the entry for "bar" matches what was in the offer
-  ASSERT_EQ("bar", answerExtmap[1].extensionname);
-  ASSERT_EQ(3U, answerExtmap[1].entry);
+  ASSERT_EQ("bar", answerExtmap[0].extensionname);
+  ASSERT_EQ(3U, answerExtmap[0].entry);
 }
 
 TEST_F(JsepSessionTest, TestRtcpFbStar)

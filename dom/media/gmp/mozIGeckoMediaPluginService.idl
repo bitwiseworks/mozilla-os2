@@ -15,6 +15,7 @@ class GMPDecryptorProxy;
 class GMPVideoDecoderProxy;
 class GMPVideoEncoderProxy;
 class GMPVideoHost;
+class GMPCrashHelper;
 
 template<class T>
 class GMPGetterCallback
@@ -51,8 +52,9 @@ native GetGMPAudioDecoderCallback(mozilla::UniquePtr<GetGMPAudioDecoderCallback>
 native GetGMPVideoDecoderCallback(mozilla::UniquePtr<GetGMPVideoDecoderCallback>&&);
 native GetGMPVideoEncoderCallback(mozilla::UniquePtr<GetGMPVideoEncoderCallback>&&);
 native GetNodeIdCallback(mozilla::UniquePtr<GetNodeIdCallback>&&);
+native GMPCrashHelperPtr(GMPCrashHelper*);
 
-[scriptable, uuid(b5492915-2f0e-4973-9f91-a6fe61ac4749)]
+[scriptable, uuid(44d362ae-937a-4803-bee6-f2512a0149d1)]
 interface mozIGeckoMediaPluginService : nsISupports
 {
 
@@ -62,19 +64,17 @@ interface mozIGeckoMediaPluginService : nsISupports
   readonly attribute nsIThread thread;
 
   /**
+   * Run through windows registered registered for pluginId, sending
+   * 'PluginCrashed' chrome-only event
+   */
+  void RunPluginCrashCallbacks(in unsigned long pluginId, in ACString pluginName);
+
+  /**
    * Get a plugin that supports the specified tags.
    * Callable on any thread
    */
   [noscript]
   boolean hasPluginForAPI(in ACString api, in TagArray tags);
-
-  /**
-   * Get the version of the plugin that supports the specified tags.
-   * Callable on any thread
-   */
-  [noscript]
-  void getPluginVersionForAPI(in ACString api, in TagArray tags,
-                              out boolean hasPlugin, out ACString version);
 
   /**
    * Get a video decoder that supports the specified tags.
@@ -88,9 +88,23 @@ interface mozIGeckoMediaPluginService : nsISupports
    * callback object will not be called at all.
    */
   [noscript]
-  void getGMPVideoDecoder(in TagArray tags,
+  void getGMPVideoDecoder(in GMPCrashHelperPtr helper,
+                          in TagArray tags,
                           [optional] in ACString nodeId,
                           in GetGMPVideoDecoderCallback callback);
+
+  /**
+   * Gets a video decoder as per getGMPVideoDecoder, except it is linked to
+   * with a corresponding GMPDecryptor via the decryptor's ID.
+   * This is a temporary measure, until we can implement a Chromium CDM
+   * GMP protocol which does both decryption and decoding.
+   */
+  [noscript]
+  void getDecryptingGMPVideoDecoder(in GMPCrashHelperPtr helper,
+                                    in TagArray tags,
+                                    in ACString nodeId,
+                                    in GetGMPVideoDecoderCallback callback,
+                                    in uint32_t decryptorId);
 
   /**
    * Get a video encoder that supports the specified tags.
@@ -104,9 +118,10 @@ interface mozIGeckoMediaPluginService : nsISupports
    * callback object will not be called at all.
    */
   [noscript]
-  void getGMPVideoEncoder(in TagArray tags,
-		                      [optional] in ACString nodeId,
-		                      in GetGMPVideoEncoderCallback callback);
+  void getGMPVideoEncoder(in GMPCrashHelperPtr helper,
+                          in TagArray tags,
+                          [optional] in ACString nodeId,
+                          in GetGMPVideoEncoderCallback callback);
 
   /**
    * Returns an audio decoder that supports the specified tags.
@@ -120,7 +135,8 @@ interface mozIGeckoMediaPluginService : nsISupports
    * callback object will not be called at all.
    */
   [noscript]
-  void getGMPAudioDecoder(in TagArray tags,
+  void getGMPAudioDecoder(in GMPCrashHelperPtr helper,
+                          in TagArray tags,
                           [optional] in ACString nodeId,
                           in GetGMPAudioDecoderCallback callback);
 
@@ -136,7 +152,9 @@ interface mozIGeckoMediaPluginService : nsISupports
    * callback object will not be called at all.
    */
   [noscript]
-  void getGMPDecryptor(in TagArray tags, in ACString nodeId,
+  void getGMPDecryptor(in GMPCrashHelperPtr helper,
+                       in TagArray tags,
+                       in ACString nodeId,
                        in GetGMPDecryptorCallback callback);
 
   /**
@@ -148,10 +166,4 @@ interface mozIGeckoMediaPluginService : nsISupports
                  in AString gmpName,
                  in bool inPrivateBrowsingMode,
                  in GetNodeIdCallback callback);
-
-  /**
-   * Stores the result of trying to create a decoder for the given keysystem.
-   */
-  [noscript]
-  void updateTrialCreateState(in AString keySystem, in uint32_t status);
 };

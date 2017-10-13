@@ -18,7 +18,10 @@ window.onload = function() {
   var Cc = Components.classes;
   var Ci = Components.interfaces;
 
-  Cu.import("resource://gre/modules/Services.jsm");
+  var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+  var Services = require("Services");
+  var { DebuggerClient } = require("devtools/shared/client/main");
+  var { DebuggerServer } = require("devtools/server/main");
 
   // Always log packets when running tests.
   Services.prefs.setBoolPref("devtools.debugger.log", true);
@@ -26,13 +29,9 @@ window.onload = function() {
     Services.prefs.clearUserPref("devtools.debugger.log");
   });
 
-  var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-  var { DebuggerClient } = require("devtools/shared/client/main");
-  var { DebuggerServer } = require("devtools/server/main");
-
   SimpleTest.waitForExplicitFinish();
 
-  var {FramerateFront} = require("devtools/server/actors/framerate");
+  var {FramerateFront} = require("devtools/shared/fronts/framerate");
 
   function plotFPS(ticks, interval = 100, clamp = 60) {
     var timeline = [];
@@ -75,7 +74,7 @@ window.onload = function() {
   }
 
   var client = new DebuggerClient(DebuggerServer.connectPipe());
-  client.connect(function onConnect() {
+  client.connect().then(function onConnect() {
     client.listTabs(function onListTabs(aResponse) {
       var form = aResponse.tabs[aResponse.selected];
       var front = FramerateFront(client, form);
@@ -130,7 +129,7 @@ window.onload = function() {
       prevFramerateValue = currFramerateStart;
     }
 
-    client.close(() => {
+    client.close().then(() => {
       DebuggerServer.destroy();
       SimpleTest.finish()
     });

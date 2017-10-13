@@ -2,9 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
- "use strict";
+"use strict";
 
-const {Cu} = require("chrome");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const promise = require("promise");
 const dbginfo = new WeakMap();
@@ -43,7 +42,9 @@ function doSearch(ctx, rev, query) {
   }
 
   cm.operation(function () {
-    if (state.query) return;
+    if (state.query) {
+      return;
+    }
 
     state.query = query;
     state.posFrom = state.posTo = { line: 0, ch: 0 };
@@ -57,14 +58,16 @@ function doSearch(ctx, rev, query) {
 function searchNext(ctx, rev) {
   let { cm, ed } = ctx;
   cm.operation(function () {
-    let state = getSearchState(cm)
-    let cursor = getSearchCursor(cm, state.query, rev ? state.posFrom : state.posTo);
+    let state = getSearchState(cm);
+    let cursor = getSearchCursor(cm, state.query,
+                                 rev ? state.posFrom : state.posTo);
 
     if (!cursor.find(rev)) {
       cursor = getSearchCursor(cm, state.query, rev ?
         { line: cm.lastLine(), ch: null } : { line: cm.firstLine(), ch: 0 });
-      if (!cursor.find(rev))
+      if (!cursor.find(rev)) {
         return;
+      }
     }
 
     ed.alignLine(cursor.from().line, "center");
@@ -80,8 +83,9 @@ function searchNext(ctx, rev) {
 function clearSearch(cm) {
   let state = getSearchState(cm);
 
-  if (!state.query)
+  if (!state.query) {
     return;
+  }
 
   state.query = null;
 }
@@ -96,7 +100,7 @@ function initialize(ctx) {
   let { ed } = ctx;
 
   dbginfo.set(ed, {
-    breakpoints:   {},
+    breakpoints: {},
     debugLocation: null
   });
 }
@@ -112,11 +116,10 @@ function hasBreakpoint(ctx, line) {
   if (cm.lineInfo(line) === null) {
     return null;
   }
-  let markers = cm.lineInfo(line).gutterMarkers;
+  let markers = cm.lineInfo(line).wrapClass;
 
   return markers != null &&
-    markers.breakpoints &&
-    markers.breakpoints.classList.contains("breakpoint");
+         markers.includes("breakpoint");
 }
 
 /**
@@ -127,7 +130,7 @@ function hasBreakpoint(ctx, line) {
  * emit a breakpointAdded event.
  */
 function addBreakpoint(ctx, line, cond) {
-  function _addBreakpoint(ctx, line, cond) {
+  function _addBreakpoint() {
     let { ed, cm } = ctx;
     let meta = dbginfo.get(ed);
     let info = cm.lineInfo(line);
@@ -139,7 +142,7 @@ function addBreakpoint(ctx, line, cond) {
       return;
     }
 
-    ed.addMarker(line, "breakpoints", "breakpoint");
+    ed.addLineClass(line, "breakpoint");
     meta.breakpoints[line] = { condition: cond };
 
     // TODO(jwl): why is `info` null when breaking on page reload?
@@ -148,64 +151,100 @@ function addBreakpoint(ctx, line, cond) {
       meta.breakpoints[info.line] = null;
     });
 
+    if (cond) {
+      setBreakpointCondition(ctx, line);
+    }
     ed.emit("breakpointAdded", line);
     deferred.resolve();
   }
 
-  if (hasBreakpoint(ctx, line))
-    return;
+  if (hasBreakpoint(ctx, line)) {
+    return null;
+  }
 
   let deferred = promise.defer();
   // If lineInfo() returns null, wait a tick to give the editor a chance to
   // initialize properly.
   if (ctx.cm.lineInfo(line) === null) {
-    DevToolsUtils.executeSoon(() => _addBreakpoint(ctx, line, cond));
+    DevToolsUtils.executeSoon(() => _addBreakpoint());
   } else {
-    _addBreakpoint(ctx, line, cond);
+    _addBreakpoint();
   }
   return deferred.promise;
 }
 
 /**
+ * Helps reset the debugger's breakpoint state
+ * - removes the breakpoints in the editor
+ * - cleares the debugger's breakpoint state
+ *
+ * Note, does not *actually* remove a source's breakpoints.
+ * The canonical state is kept in the app state.
+ *
+ */
+function removeBreakpoints(ctx) {
+  let { ed, cm } = ctx;
+
+  let meta = dbginfo.get(ed);
+  if (meta.breakpoints != null) {
+    meta.breakpoints = {};
+  }
+
+  cm.doc.iter((line) => {
+    // The hasBreakpoint is a slow operation: checks the line type, whether cm
+    // is initialized and creates several new objects. Inlining the line's
+    // wrapClass property check directly.
+    if (line.wrapClass == null || !line.wrapClass.includes("breakpoint")) {
+      return;
+    }
+    removeBreakpoint(ctx, line);
+  });
+}
+
+/**
  * Removes a visual breakpoint from a specified line and
- * makes Editor to emit a breakpointRemoved event.
+ * makes Editor emit a breakpointRemoved event.
  */
 function removeBreakpoint(ctx, line) {
-  if (!hasBreakpoint(ctx, line))
+  if (!hasBreakpoint(ctx, line)) {
     return;
+  }
 
   let { ed, cm } = ctx;
   let meta = dbginfo.get(ed);
   let info = cm.lineInfo(line);
 
   meta.breakpoints[info.line] = null;
-  ed.removeMarker(info.line, "breakpoints", "breakpoint");
+  ed.removeLineClass(info.line, "breakpoint");
+  ed.removeLineClass(info.line, "conditional");
   ed.emit("breakpointRemoved", line);
 }
 
 function moveBreakpoint(ctx, fromLine, toLine) {
-  let { ed, cm } = ctx;
-
-  var fromTop = cm.cursorCoords({ line: fromLine }).top;
-  var toTop = cm.cursorCoords({ line: toLine }).top;
+  let { ed } = ctx;
 
   ed.removeBreakpoint(fromLine);
   ed.addBreakpoint(toLine);
-  let info = cm.lineInfo(toLine);
-  var marker = ed.getMarker(info.line, "breakpoints", "breakpoint");
-  if (marker) {
-    marker.setAttribute("adding", "");
-    marker.style.position = 'relative';
-    marker.style.top = -(toTop - fromTop) + 'px';
-    marker.style.transform = "translateY(" + (toTop - fromTop) + "px)";
-    marker.addEventListener('transitionend', function(e) {
-      // For some reason, we have to reset the styles after the marker
-      // is already removed, not before.
-      e.target.removeAttribute("adding");
-      e.target.style.transform = "none";
-      e.target.style.top = '0px';
-    });
+}
+
+function setBreakpointCondition(ctx, line) {
+  let { ed, cm } = ctx;
+  let info = cm.lineInfo(line);
+
+  // The line does not exist in the editor. This is harmless, the
+  // architecture calling this assumes the editor will handle this
+  // gracefully, and make sure breakpoints exist when they need to.
+  if (!info) {
+    return;
   }
+
+  ed.addLineClass(line, "conditional");
+}
+
+function removeBreakpointCondition(ctx, line) {
+  let { ed } = ctx;
+
+  ed.removeLineClass(line, "conditional");
 }
 
 /**
@@ -216,8 +255,9 @@ function getBreakpoints(ctx) {
   let meta = dbginfo.get(ed);
 
   return Object.keys(meta.breakpoints).reduce((acc, line) => {
-    if (meta.breakpoints[line] != null)
+    if (meta.breakpoints[line] != null) {
       acc.push({ line: line, condition: meta.breakpoints[line].condition });
+    }
     return acc;
   }, []);
 }
@@ -234,7 +274,6 @@ function setDebugLocation(ctx, line) {
   clearDebugLocation(ctx);
 
   meta.debugLocation = line;
-  ed.addMarker(line, "breakpoints", "debugLocation");
   ed.addLineClass(line, "debug-line");
 }
 
@@ -258,7 +297,6 @@ function clearDebugLocation(ctx) {
   let meta = dbginfo.get(ed);
 
   if (meta.debugLocation != null) {
-    ed.removeMarker(meta.debugLocation, "breakpoints", "debugLocation");
     ed.removeLineClass(meta.debugLocation, "debug-line");
     meta.debugLocation = null;
   }
@@ -286,11 +324,13 @@ function findPrev(ctx, query) {
   doSearch(ctx, true, query);
 }
 
-
 // Export functions
 
 [
-  initialize, hasBreakpoint, addBreakpoint, removeBreakpoint,
-  moveBreakpoint, getBreakpoints, setDebugLocation, getDebugLocation,
-  clearDebugLocation, find, findNext, findPrev
-].forEach(function (func) { module.exports[func.name] = func; });
+  initialize, hasBreakpoint, addBreakpoint, removeBreakpoint, moveBreakpoint,
+  setBreakpointCondition, removeBreakpointCondition, getBreakpoints, removeBreakpoints,
+  setDebugLocation, getDebugLocation, clearDebugLocation, find, findNext,
+  findPrev
+].forEach(func => {
+  module.exports[func.name] = func;
+});

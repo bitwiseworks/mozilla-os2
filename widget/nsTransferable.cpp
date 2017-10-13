@@ -8,16 +8,19 @@ Notes to self:
 
 - at some point, strings will be accessible from JS, so we won't have to wrap
    flavors in an nsISupportsCString. Until then, we're kinda stuck with
-   this crappy API of nsISupportsArrays.
+   this crappy API of nsIArrays.
 
 */
 
- 
+
 #include "nsTransferable.h"
+#include "nsArray.h"
+#include "nsArrayUtils.h"
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsTArray.h"
 #include "nsIFormatConverter.h"
+#include "nsIContentPolicy.h"
 #include "nsIComponentManager.h"
 #include "nsCOMPtr.h"
 #include "nsXPCOM.h"
@@ -27,7 +30,7 @@ Notes to self:
 #include "nsXPIDLString.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryService.h"
-#include "nsCRT.h" 
+#include "nsCRT.h"
 #include "nsNetUtil.h"
 #include "nsIDOMNode.h"
 #include "nsIOutputStream.h"
@@ -35,7 +38,7 @@ Notes to self:
 #include "nsIWeakReferenceUtils.h"
 #include "nsIFile.h"
 #include "nsILoadContext.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 
 NS_IMPL_ISUPPORTS(nsTransferable, nsITransferable)
 
@@ -51,9 +54,9 @@ size_t GetDataForFlavor (const nsTArray<DataStruct>& aArray,
 }
 
 //-------------------------------------------------------------------------
-DataStruct::~DataStruct() 
-{ 
-  if (mCacheFileName) free(mCacheFileName); 
+DataStruct::~DataStruct()
+{
+  if (mCacheFileName) free(mCacheFileName);
 }
 
 //-------------------------------------------------------------------------
@@ -67,11 +70,11 @@ DataStruct::SetData ( nsISupports* aData, uint32_t aDataLen, bool aIsPrivateData
     if ( NS_SUCCEEDED(WriteCache(aData, aDataLen)) )
       return;
     else
-			NS_WARNING("Oh no, couldn't write data to the cache file");   
-  } 
+			NS_WARNING("Oh no, couldn't write data to the cache file");
+  }
 
   mData    = aData;
-  mDataLen = aDataLen;  
+  mDataLen = aDataLen;
 }
 
 
@@ -93,10 +96,10 @@ DataStruct::GetData ( nsISupports** aData, uint32_t *aDataLen )
       return;
     }
   }
-  
+
   *aData = mData;
   if ( mData )
-    NS_ADDREF(*aData); 
+    NS_ADDREF(*aData);
   *aDataLen = mDataLen;
 }
 
@@ -107,7 +110,7 @@ DataStruct::GetFileSpec(const char* aFileName)
 {
   nsCOMPtr<nsIFile> cacheFile;
   NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(cacheFile));
-  
+
   if (!cacheFile)
     return nullptr;
 
@@ -116,11 +119,13 @@ DataStruct::GetFileSpec(const char* aFileName)
   // otherwise create a unique name
   if (!aFileName) {
     cacheFile->AppendNative(NS_LITERAL_CSTRING("clipboardcache"));
-    cacheFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
+    nsresult rv = cacheFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
+    if (NS_FAILED(rv))
+      return nullptr;
   } else {
     cacheFile->AppendNative(nsDependentCString(aFileName));
   }
-  
+
   return cacheFile.forget();
 }
 
@@ -183,15 +188,15 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
 
     uint32_t size = uint32_t(fileSize);
     // create new memory for the large clipboard data
-    auto data = MakeUnique<char[]>(size);
+    auto data = mozilla::MakeUnique<char[]>(size);
     if ( !data )
       return NS_ERROR_OUT_OF_MEMORY;
-      
+
     // now read it all in
     nsCOMPtr<nsIInputStream> inStr;
     NS_NewLocalFileInputStream( getter_AddRefs(inStr),
                                 cacheFile);
-    
+
     if (!cacheFile) return NS_ERROR_FAILURE;
 
     nsresult rv = inStr->Read(data.get(), fileSize, aDataLen);
@@ -219,6 +224,7 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
 //-------------------------------------------------------------------------
 nsTransferable::nsTransferable()
   : mPrivateData(false)
+  , mContentPolicyType(nsIContentPolicy::TYPE_OTHER)
 #ifdef DEBUG
   , mInitialized(false)
 #endif
@@ -252,17 +258,16 @@ nsTransferable::Init(nsILoadContext* aContext)
 //
 // GetTransferDataFlavors
 //
-// Returns a copy of the internal list of flavors. This does NOT take into 
+// Returns a copy of the internal list of flavors. This does NOT take into
 // account any converter that may be registered. This list consists of
 // nsISupportsCString objects so that the flavor list can be accessed from JS.
 //
-nsresult
-nsTransferable::GetTransferDataFlavors(nsISupportsArray ** aDataFlavorList)
+already_AddRefed<nsIMutableArray>
+nsTransferable::GetTransferDataFlavors()
 {
   MOZ_ASSERT(mInitialized);
 
-  nsresult rv = NS_NewISupportsArray ( aDataFlavorList );
-  if (NS_FAILED(rv)) return rv;
+  nsCOMPtr<nsIMutableArray> array = nsArray::Create();
 
   for (size_t i = 0; i < mDataArray.Length(); ++i) {
     DataStruct& data = mDataArray.ElementAt(i);
@@ -270,11 +275,11 @@ nsTransferable::GetTransferDataFlavors(nsISupportsArray ** aDataFlavorList)
     if ( flavorWrapper ) {
       flavorWrapper->SetData ( data.GetFlavor() );
       nsCOMPtr<nsISupports> genericWrapper ( do_QueryInterface(flavorWrapper) );
-      (*aDataFlavorList)->AppendElement( genericWrapper );
+      array->AppendElement( genericWrapper, /*weak =*/ false );
     }
   }
 
-  return NS_OK;
+  return array.forget();
 }
 
 
@@ -294,7 +299,7 @@ nsTransferable::GetTransferData(const char *aFlavor, nsISupports **aData, uint32
 
   nsresult rv = NS_OK;
   nsCOMPtr<nsISupports> savedData;
-  
+
   // first look and see if the data is present in one of the intrinsic flavors
   for (size_t i = 0; i < mDataArray.Length(); ++i) {
     DataStruct& data = mDataArray.ElementAt(i);
@@ -366,18 +371,19 @@ nsTransferable::GetTransferData(const char *aFlavor, nsISupports **aData, uint32
 //
 // Returns the data of the first flavor found. Caller is responsible for deleting the
 // flavor string.
-// 
+//
 NS_IMETHODIMP
-nsTransferable::GetAnyTransferData(char **aFlavor, nsISupports **aData, uint32_t *aDataLen)
+nsTransferable::GetAnyTransferData(nsACString& aFlavor, nsISupports **aData,
+                                   uint32_t *aDataLen)
 {
   MOZ_ASSERT(mInitialized);
 
-  NS_ENSURE_ARG_POINTER(aFlavor && aData && aDataLen);
+  NS_ENSURE_ARG_POINTER(aData && aDataLen);
 
   for (size_t i = 0; i < mDataArray.Length(); ++i) {
     DataStruct& data = mDataArray.ElementAt(i);
     if (data.IsDataAvailable()) {
-      *aFlavor = ToNewCString(data.GetFlavor());
+      aFlavor.Assign(data.GetFlavor());
       data.GetData(aData, aDataLen);
       return NS_OK;
     }
@@ -391,7 +397,7 @@ nsTransferable::GetAnyTransferData(char **aFlavor, nsISupports **aData, uint32_t
 // SetTransferData
 //
 //
-// 
+//
 NS_IMETHODIMP
 nsTransferable::SetTransferData(const char *aFlavor, nsISupports *aData, uint32_t aDataLen)
 {
@@ -429,7 +435,7 @@ nsTransferable::SetTransferData(const char *aFlavor, nsISupports *aData, uint32_
   nsresult result = NS_ERROR_FAILURE;
   if ( NS_SUCCEEDED(AddDataFlavor(aFlavor)) )
     result = SetTransferData (aFlavor, aData, aDataLen);
-    
+
   return result;
 }
 
@@ -438,7 +444,7 @@ nsTransferable::SetTransferData(const char *aFlavor, nsISupports *aData, uint32_
 // AddDataFlavor
 //
 // Adds a data flavor to our list with no data. Error if it already exists.
-// 
+//
 NS_IMETHODIMP
 nsTransferable::AddDataFlavor(const char *aDataFlavor)
 {
@@ -475,7 +481,7 @@ nsTransferable::RemoveDataFlavor(const char *aDataFlavor)
 
 
 /**
-  * 
+  *
   *
   */
 NS_IMETHODIMP
@@ -490,7 +496,7 @@ nsTransferable::IsLargeDataSet(bool *_retval)
 
 
 /**
-  * 
+  *
   *
   */
 NS_IMETHODIMP nsTransferable::SetConverter(nsIFormatConverter * aConverter)
@@ -503,7 +509,7 @@ NS_IMETHODIMP nsTransferable::SetConverter(nsIFormatConverter * aConverter)
 
 
 /**
-  * 
+  *
   *
   */
 NS_IMETHODIMP nsTransferable::GetConverter(nsIFormatConverter * *aConverter)
@@ -524,42 +530,41 @@ NS_IMETHODIMP nsTransferable::GetConverter(nsIFormatConverter * *aConverter)
 // intrinsic knowledge or input data converters.
 //
 NS_IMETHODIMP
-nsTransferable::FlavorsTransferableCanImport(nsISupportsArray **_retval)
+nsTransferable::FlavorsTransferableCanImport(nsIArray **_retval)
 {
   MOZ_ASSERT(mInitialized);
 
   NS_ENSURE_ARG_POINTER(_retval);
-  
+
   // Get the flavor list, and on to the end of it, append the list of flavors we
   // can also get to through a converter. This is so that we can just walk the list
   // in one go, looking for the desired flavor.
-  GetTransferDataFlavors(_retval);                        // addrefs
+  nsCOMPtr<nsIMutableArray> array = GetTransferDataFlavors();
   nsCOMPtr<nsIFormatConverter> converter;
   GetConverter(getter_AddRefs(converter));
   if ( converter ) {
-    nsCOMPtr<nsISupportsArray> convertedList;
+    nsCOMPtr<nsIArray> convertedList;
     converter->GetInputDataFlavors(getter_AddRefs(convertedList));
 
     if ( convertedList ) {
       uint32_t importListLen;
-      convertedList->Count(&importListLen);
+      convertedList->GetLength(&importListLen);
 
       for (uint32_t i = 0; i < importListLen; ++i ) {
-        nsCOMPtr<nsISupports> genericFlavor;
-        convertedList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
-
-        nsCOMPtr<nsISupportsCString> flavorWrapper ( do_QueryInterface (genericFlavor) );
+        nsCOMPtr<nsISupportsCString> flavorWrapper =
+            do_QueryElementAt(convertedList, i);
         nsAutoCString flavorStr;
         flavorWrapper->GetData( flavorStr );
 
         if (GetDataForFlavor (mDataArray, flavorStr.get())
             == mDataArray.NoIndex) // Don't append if already in intrinsic list
-          (*_retval)->AppendElement (genericFlavor);
+          array->AppendElement (flavorWrapper, /*weak =*/ false);
       } // foreach flavor that can be converted to
     }
   } // if a converter exists
 
-  return NS_OK;  
+  array.forget(_retval);
+  return NS_OK;
 } // FlavorsTransferableCanImport
 
 
@@ -570,41 +575,40 @@ nsTransferable::FlavorsTransferableCanImport(nsISupportsArray **_retval)
 // intrinsic knowledge or output data converters.
 //
 NS_IMETHODIMP
-nsTransferable::FlavorsTransferableCanExport(nsISupportsArray **_retval)
+nsTransferable::FlavorsTransferableCanExport(nsIArray **_retval)
 {
   MOZ_ASSERT(mInitialized);
 
   NS_ENSURE_ARG_POINTER(_retval);
-  
+
   // Get the flavor list, and on to the end of it, append the list of flavors we
   // can also get to through a converter. This is so that we can just walk the list
   // in one go, looking for the desired flavor.
-  GetTransferDataFlavors(_retval);  // addrefs
+  nsCOMPtr<nsIMutableArray> array = GetTransferDataFlavors();
   nsCOMPtr<nsIFormatConverter> converter;
   GetConverter(getter_AddRefs(converter));
   if ( converter ) {
-    nsCOMPtr<nsISupportsArray> convertedList;
+    nsCOMPtr<nsIArray> convertedList;
     converter->GetOutputDataFlavors(getter_AddRefs(convertedList));
 
     if ( convertedList ) {
       uint32_t importListLen;
-      convertedList->Count(&importListLen);
+      convertedList->GetLength(&importListLen);
 
       for ( uint32_t i=0; i < importListLen; ++i ) {
-        nsCOMPtr<nsISupports> genericFlavor;
-        convertedList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
-
-        nsCOMPtr<nsISupportsCString> flavorWrapper ( do_QueryInterface (genericFlavor) );
+        nsCOMPtr<nsISupportsCString> flavorWrapper =
+            do_QueryElementAt(convertedList, i);
         nsAutoCString flavorStr;
         flavorWrapper->GetData( flavorStr );
 
         if (GetDataForFlavor (mDataArray, flavorStr.get())
             == mDataArray.NoIndex) // Don't append if already in intrinsic list
-          (*_retval)->AppendElement (genericFlavor);
+          array->AppendElement (flavorWrapper, /*weak =*/ false);
       } // foreach flavor that can be converted to
     }
   } // if a converter exists
 
+  array.forget(_retval);
   return NS_OK;
 } // FlavorsTransferableCanExport
 
@@ -631,16 +635,30 @@ nsTransferable::SetIsPrivateData(bool aIsPrivateData)
 }
 
 NS_IMETHODIMP
-nsTransferable::GetRequestingNode(nsIDOMNode** outRequestingNode)
+nsTransferable::GetRequestingPrincipal(nsIPrincipal** outRequestingPrincipal)
 {
-  nsCOMPtr<nsIDOMNode> node = do_QueryReferent(mRequestingNode);
-  node.forget(outRequestingNode);
+  NS_IF_ADDREF(*outRequestingPrincipal = mRequestingPrincipal);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsTransferable::SetRequestingNode(nsIDOMNode* aRequestingNode)
+nsTransferable::SetRequestingPrincipal(nsIPrincipal* aRequestingPrincipal)
 {
-  mRequestingNode = do_GetWeakReference(aRequestingNode);
+  mRequestingPrincipal = aRequestingPrincipal;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsTransferable::GetContentPolicyType(nsContentPolicyType* outContentPolicyType)
+{
+  NS_ENSURE_ARG_POINTER(outContentPolicyType);
+  *outContentPolicyType = mContentPolicyType;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsTransferable::SetContentPolicyType(nsContentPolicyType aContentPolicyType)
+{
+  mContentPolicyType = aContentPolicyType;
   return NS_OK;
 }

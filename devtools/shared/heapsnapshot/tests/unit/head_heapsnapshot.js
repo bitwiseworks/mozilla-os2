@@ -14,22 +14,26 @@ const { Match } = Cu.import("resource://test/Match.jsm", {});
 const { Census } = Cu.import("resource://test/Census.jsm", {});
 const { addDebuggerToGlobal } =
   Cu.import("resource://gre/modules/jsdebugger.jsm", {});
-const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
+const { Task } = require("devtools/shared/task");
 
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const flags = require("devtools/shared/flags");
 const HeapAnalysesClient =
   require("devtools/shared/heapsnapshot/HeapAnalysesClient");
 const Services = require("Services");
 const { censusReportToCensusTreeNode } = require("devtools/shared/heapsnapshot/census-tree-node");
 const CensusUtils = require("devtools/shared/heapsnapshot/CensusUtils");
+const DominatorTreeNode = require("devtools/shared/heapsnapshot/DominatorTreeNode");
+const { deduplicatePaths } = require("devtools/shared/heapsnapshot/shortest-paths");
+const { LabelAndShallowSizeVisitor } = DominatorTreeNode;
+
 
 // Always log packets when running tests. runxpcshelltests.py will throw
 // the output away anyway, unless you give it the --verbose flag.
-if (Services.appInfo &&
-    Services.appInfo.processType == Services.appInfo.PROCESS_TYPE_DEFAULT) {
+if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT) {
   Services.prefs.setBoolPref("devtools.debugger.log", true);
 }
-DevToolsUtils.dumpn.wantLogging = true;
+flags.wantLogging = true;
 
 const SYSTEM_PRINCIPAL = Cc["@mozilla.org/systemprincipal;1"]
   .createInstance(Ci.nsIPrincipal);
@@ -91,7 +95,7 @@ function assertThrowsValue(f, val, msg) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false)
+function getFilePath(aName, aAllowMissing = false, aUsePlatformPathSeparator = false)
 {
   let file = do_get_file(aName, aAllowMissing);
   let path = Services.io.newFileURI(file).spec;
@@ -143,7 +147,7 @@ function readHeapSnapshot(filePath) {
  *
  * @returns Census
  */
-function saveHeapSnapshotAndTakeCensus(dbg=null, censusOptions=undefined) {
+function saveHeapSnapshotAndTakeCensus(dbg = null, censusOptions = undefined) {
   const snapshotOptions = dbg ? { debugger: dbg } : { runtime: true };
   const filePath = saveNewHeapSnapshot(snapshotOptions);
   const snapshot = readHeapSnapshot(filePath);
@@ -207,7 +211,7 @@ function savedFrameReplacer(key, val) {
  * @param {Object} options
  *        The options to pass through to `censusReportToCensusTreeNode`.
  */
-function compareCensusViewData (breakdown, report, expected, options) {
+function compareCensusViewData(breakdown, report, expected, options) {
   dumpn("Generating CensusTreeNode from report:");
   dumpn("breakdown: " + JSON.stringify(breakdown, null, 4));
   dumpn("report: " + JSON.stringify(report, null, 4));
@@ -221,7 +225,7 @@ function compareCensusViewData (breakdown, report, expected, options) {
 
 // Deep structural equivalence that can handle Map objects in addition to plain
 // objects.
-function assertStructurallyEquivalent(actual, expected, path="root") {
+function assertStructurallyEquivalent(actual, expected, path = "root") {
   if (actual === expected) {
     equal(actual, expected, "actual and expected are the same");
     return;
@@ -249,6 +253,17 @@ function assertStructurallyEquivalent(actual, expected, path="root") {
 
       equal(expectedKeys.size, 0,
             `${path}: every key in expected should also exist in actual, did not see ${[...expectedKeys]}`);
+    } else if (actualProtoString === "[object Set]") {
+      const expectedItems = new Set([...expected]);
+
+      for (let item of actual) {
+        ok(expectedItems.has(item),
+           `${path}: every set item in actual should exist in expected: ${item}`);
+        expectedItems.delete(item);
+      }
+
+      equal(expectedItems.size, 0,
+            `${path}: every set item in expected should also exist in actual, did not see ${[...expectedItems]}`);
     } else {
       const expectedKeys = new Set(Object.keys(expected));
 
@@ -295,4 +310,139 @@ function assertDiff(breakdown, first, second, expected) {
   dumpn("Actual delta-report: " + JSON.stringify(actual, null, 4));
 
   assertStructurallyEquivalent(actual, expected);
+}
+
+/**
+ * Assert that creating a label and getting a shallow size from the given node
+ * description with the specified breakdown is as expected.
+ *
+ * @param {Object} breakdown
+ * @param {Object} givenDescription
+ * @param {Number} expectedShallowSize
+ * @param {Object} expectedLabel
+ */
+function assertLabelAndShallowSize(breakdown, givenDescription, expectedShallowSize, expectedLabel) {
+  dumpn("Computing label and shallow size from node description:");
+  dumpn("Breakdown: " + JSON.stringify(breakdown, null, 4));
+  dumpn("Given description: " + JSON.stringify(givenDescription, null, 4));
+
+  const visitor = new LabelAndShallowSizeVisitor();
+  CensusUtils.walk(breakdown, description, visitor);
+
+  dumpn("Expected shallow size: " + expectedShallowSize);
+  dumpn("Actual shallow size: " + visitor.shallowSize());
+  equal(visitor.shallowSize(), expectedShallowSize, "Shallow size should be correct");
+
+  dumpn("Expected label: " + JSON.stringify(expectedLabel, null, 4));
+  dumpn("Actual label: " + JSON.stringify(visitor.label(), null, 4));
+  assertStructurallyEquivalent(visitor.label(), expectedLabel);
+}
+
+// Counter for mock DominatorTreeNode ids.
+let TEST_NODE_ID_COUNTER = 0;
+
+/**
+ * Create a mock DominatorTreeNode for testing, with sane defaults. Override any
+ * property by providing it on `opts`. Optionally pass child nodes as well.
+ *
+ * @param {Object} opts
+ * @param {Array<DominatorTreeNode>?} children
+ *
+ * @returns {DominatorTreeNode}
+ */
+function makeTestDominatorTreeNode(opts, children) {
+  const nodeId = TEST_NODE_ID_COUNTER++;
+
+  const node = Object.assign({
+    nodeId,
+    label: undefined,
+    shallowSize: 1,
+    retainedSize: (children || []).reduce((size, c) => size + c.retainedSize, 1),
+    parentId: undefined,
+    children,
+    moreChildrenAvailable: true,
+  }, opts);
+
+  if (children && children.length) {
+    children.map(c => c.parentId = node.nodeId);
+  }
+
+  return node;
+}
+
+/**
+ * Insert `newChildren` into the given dominator `tree` as specified by the
+ * `path` from the root to the node the `newChildren` should be inserted
+ * beneath. Assert that the resulting tree matches `expected`.
+ */
+function assertDominatorTreeNodeInsertion(tree, path, newChildren, moreChildrenAvailable, expected) {
+  dumpn("Inserting new children into a dominator tree:");
+  dumpn("Dominator tree: " + JSON.stringify(tree, null, 2));
+  dumpn("Path: " + JSON.stringify(path, null, 2));
+  dumpn("New children: " + JSON.stringify(newChildren, null, 2));
+  dumpn("Expected resulting tree: " + JSON.stringify(expected, null, 2));
+
+  const actual = DominatorTreeNode.insert(tree, path, newChildren, moreChildrenAvailable);
+  dumpn("Actual resulting tree: " + JSON.stringify(actual, null, 2));
+
+  assertStructurallyEquivalent(actual, expected);
+}
+
+function assertDeduplicatedPaths({ target, paths, expectedNodes, expectedEdges }) {
+  dumpn("Deduplicating paths:");
+  dumpn("target = " + target);
+  dumpn("paths = " + JSON.stringify(paths, null, 2));
+  dumpn("expectedNodes = " + expectedNodes);
+  dumpn("expectedEdges = " + JSON.stringify(expectedEdges, null, 2));
+
+  const { nodes, edges } = deduplicatePaths(target, paths);
+
+  dumpn("Actual nodes = " + nodes);
+  dumpn("Actual edges = " + JSON.stringify(edges, null, 2));
+
+  equal(nodes.length, expectedNodes.length,
+        "actual number of nodes is equal to the expected number of nodes");
+
+  equal(edges.length, expectedEdges.length,
+        "actual number of edges is equal to the expected number of edges");
+
+  const expectedNodeSet = new Set(expectedNodes);
+  const nodeSet = new Set(nodes);
+  ok(nodeSet.size === nodes.length,
+     "each returned node should be unique");
+
+  for (let node of nodes) {
+    ok(expectedNodeSet.has(node), `the ${node} node was expected`);
+  }
+
+  for (let expectedEdge of expectedEdges) {
+    let count = 0;
+    for (let edge of edges) {
+      if (edge.from === expectedEdge.from &&
+          edge.to === expectedEdge.to &&
+          edge.name === expectedEdge.name) {
+        count++;
+      }
+    }
+    equal(count, 1,
+          "should have exactly one matching edge for the expected edge = " + JSON.stringify(edge));
+  }
+}
+
+function assertCountToBucketBreakdown(breakdown, expected) {
+  dumpn("count => bucket breakdown");
+  dumpn("Initial breakdown = ", JSON.stringify(breakdown, null, 2));
+  dumpn("Expected results = ", JSON.stringify(expected, null, 2));
+
+  const actual = CensusUtils.countToBucketBreakdown(breakdown);
+  dumpn("Actual results = ", JSON.stringify(actual, null, 2));
+
+  assertStructurallyEquivalent(actual, expected);
+}
+
+/**
+ * Create a mock path entry for the given predecessor and edge.
+ */
+function pathEntry(predecessor, edge) {
+  return { predecessor, edge };
 }

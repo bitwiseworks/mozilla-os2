@@ -15,7 +15,6 @@
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/URL.h"
-#include "mozilla/dom/workers/bindings/URL.h"
 
 #include "nsDOMString.h"
 
@@ -39,6 +38,8 @@ Response::Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse
   , mOwner(aGlobal)
   , mInternalResponse(aInternalResponse)
 {
+  MOZ_ASSERT(aInternalResponse->Headers()->Guard() == HeadersGuardEnum::Immutable ||
+             aInternalResponse->Headers()->Guard() == HeadersGuardEnum::Response);
   SetMimeType();
 }
 
@@ -86,8 +87,7 @@ Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
     worker->AssertIsOnWorkerThread();
 
     NS_ConvertUTF8toUTF16 baseURL(worker->GetLocationInfo().mHref);
-    RefPtr<workers::URL> url =
-      workers::URL::Constructor(aGlobal, aUrl, baseURL, aRv);
+    RefPtr<URL> url = URL::WorkerConstructor(aGlobal, aUrl, baseURL, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
@@ -135,35 +135,29 @@ Response::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  nsCString statusText;
-  if (aInit.mStatusText.WasPassed()) {
-    statusText = aInit.mStatusText.Value();
-    nsACString::const_iterator start, end;
-    statusText.BeginReading(start);
-    statusText.EndReading(end);
-    if (FindCharInReadable('\r', start, end)) {
-      aRv.ThrowTypeError<MSG_RESPONSE_INVALID_STATUSTEXT_ERROR>();
-      return nullptr;
-    }
-    // Reset iterator since FindCharInReadable advances it.
-    statusText.BeginReading(start);
-    if (FindCharInReadable('\n', start, end)) {
-      aRv.ThrowTypeError<MSG_RESPONSE_INVALID_STATUSTEXT_ERROR>();
-      return nullptr;
-    }
-  } else {
-    // Since we don't support default values for ByteString.
-    statusText = NS_LITERAL_CSTRING("OK");
+  // Check if the status text contains illegal characters
+  nsACString::const_iterator start, end;
+  aInit.mStatusText.BeginReading(start);
+  aInit.mStatusText.EndReading(end);
+  if (FindCharInReadable('\r', start, end)) {
+    aRv.ThrowTypeError<MSG_RESPONSE_INVALID_STATUSTEXT_ERROR>();
+    return nullptr;
+  }
+  // Reset iterator since FindCharInReadable advances it.
+  aInit.mStatusText.BeginReading(start);
+  if (FindCharInReadable('\n', start, end)) {
+    aRv.ThrowTypeError<MSG_RESPONSE_INVALID_STATUSTEXT_ERROR>();
+    return nullptr;
   }
 
   RefPtr<InternalResponse> internalResponse =
-    new InternalResponse(aInit.mStatus, statusText);
+    new InternalResponse(aInit.mStatus, aInit.mStatusText);
 
   // Grab a valid channel info from the global so this response is 'valid' for
   // interception.
   if (NS_IsMainThread()) {
     ChannelInfo info;
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global);
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
     if (window) {
       nsIDocument* doc = window->GetExtantDoc();
       MOZ_ASSERT(doc);
@@ -205,8 +199,15 @@ Response::Constructor(const GlobalObject& aGlobal,
 
     nsCOMPtr<nsIInputStream> bodyStream;
     nsCString contentType;
-    aRv = ExtractByteStreamFromBody(aBody.Value(), getter_AddRefs(bodyStream), contentType);
-    internalResponse->SetBody(bodyStream);
+    uint64_t bodySize = 0;
+    aRv = ExtractByteStreamFromBody(aBody.Value(),
+                                    getter_AddRefs(bodyStream),
+                                    contentType,
+                                    bodySize);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
+    internalResponse->SetBody(bodyStream, bodySize);
 
     if (!contentType.IsVoid() &&
         !internalResponse->Headers()->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
@@ -238,11 +239,25 @@ Response::Clone(ErrorResult& aRv) const
   return response.forget();
 }
 
+already_AddRefed<Response>
+Response::CloneUnfiltered(ErrorResult& aRv) const
+{
+  if (BodyUsed()) {
+    aRv.ThrowTypeError<MSG_FETCH_BODY_CONSUMED_ERROR>();
+    return nullptr;
+  }
+
+  RefPtr<InternalResponse> clone = mInternalResponse->Clone();
+  RefPtr<InternalResponse> ir = clone->Unfiltered();
+  RefPtr<Response> ref = new Response(mOwner, ir);
+  return ref.forget();
+}
+
 void
-Response::SetBody(nsIInputStream* aBody)
+Response::SetBody(nsIInputStream* aBody, int64_t aBodySize)
 {
   MOZ_ASSERT(!BodyUsed());
-  mInternalResponse->SetBody(aBody);
+  mInternalResponse->SetBody(aBody, aBodySize);
 }
 
 already_AddRefed<InternalResponse>

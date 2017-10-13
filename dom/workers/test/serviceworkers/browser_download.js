@@ -3,6 +3,7 @@
 
 Cu.import('resource://gre/modules/Services.jsm');
 var Downloads = Cu.import("resource://gre/modules/Downloads.jsm", {}).Downloads;
+var DownloadsCommon = Cu.import("resource:///modules/DownloadsCommon.jsm", {}).DownloadsCommon;
 Cu.import('resource://gre/modules/NetUtil.jsm');
 
 var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/",
@@ -44,8 +45,7 @@ function test() {
 
   SpecialPowers.pushPrefEnv({'set': [['dom.serviceWorkers.enabled', true],
                                      ['dom.serviceWorkers.exemptFromPerDomainMax', true],
-                                     ['dom.serviceWorkers.testing.enabled', true],
-                                     ['dom.serviceWorkers.interception.enabled', true]]},
+                                     ['dom.serviceWorkers.testing.enabled', true]]},
                             function() {
     var url = gTestRoot + 'download/window.html';
     var tab = gBrowser.addTab();
@@ -60,6 +60,7 @@ function test() {
           ok(file.exists(), 'download completed');
           is(file.fileSize, 33, 'downloaded file has correct size');
           file.remove(false);
+          DownloadsCommon.removeAndFinalizeDownload(aDownload);
 
           downloadList.removeView(downloadListener);
           gBrowser.removeTab(tab);

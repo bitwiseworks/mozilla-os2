@@ -47,20 +47,14 @@ class nsXHTMLContentSerializer : public nsXMLContentSerializer {
                           nsAString& aStr,
                           nsresult& aResult) override;
 
-  MOZ_WARN_UNUSED_RESULT
-  virtual bool AppendEndOfElementStart(nsIContent *aOriginalElement,
-                               nsIAtom * aName,
-                               int32_t aNamespaceID,
-                               nsAString& aStr) override;
-
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool AfterElementStart(nsIContent* aContent,
                                  nsIContent* aOriginalElement,
                                  nsAString& aStr) override;
 
-  virtual bool CheckElementEnd(nsIContent * aContent,
-                          bool & aForceFormat,
-                          nsAString& aStr) override;
+  virtual bool CheckElementEnd(mozilla::dom::Element* aContent,
+                               bool& aForceFormat,
+                               nsAString& aStr) override;
 
   virtual void AfterElementEnd(nsIContent * aContent,
                                nsAString& aStr) override;
@@ -76,7 +70,7 @@ class nsXHTMLContentSerializer : public nsXMLContentSerializer {
   virtual void MaybeEnterInPreContent(nsIContent* aNode) override;
   virtual void MaybeLeaveFromPreContent(nsIContent* aNode) override;
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool SerializeAttributes(nsIContent* aContent,
                            nsIContent *aOriginalElement,
                            nsAString& aTagPrefix,
@@ -88,13 +82,13 @@ class nsXHTMLContentSerializer : public nsXMLContentSerializer {
 
   bool IsFirstChildOfOL(nsIContent* aElement);
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool SerializeLIValueAttribute(nsIContent* aElement,
                                  nsAString& aStr);
   bool IsShorthandAttr(const nsIAtom* aAttrName,
                          const nsIAtom* aElementName);
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool AppendAndTranslateEntities(const nsAString& aStr,
                                           nsAString& aOutputStr) override;
 
@@ -158,7 +152,7 @@ protected:
   };
 
   // Stack to store one olState struct per <OL>.
-  nsAutoTArray<olState, 8> mOLStateStack;
+  AutoTArray<olState, 8> mOLStateStack;
 
   bool HasNoChildren(nsIContent* aContent);
 };

@@ -58,25 +58,16 @@ NS_IMETHODIMP
 StartupCache::CollectReports(nsIHandleReportCallback* aHandleReport,
                              nsISupports* aData, bool aAnonymize)
 {
-#define REPORT(_path, _kind, _amount, _desc)                                \
-  do {                                                                      \
-    nsresult rv =                                                           \
-      aHandleReport->Callback(EmptyCString(),                               \
-                              NS_LITERAL_CSTRING(_path),                    \
-                              _kind, UNITS_BYTES, _amount,                  \
-                              NS_LITERAL_CSTRING(_desc), aData);            \
-    NS_ENSURE_SUCCESS(rv, rv);                                              \
-  } while (0)
+  MOZ_COLLECT_REPORT(
+    "explicit/startup-cache/mapping", KIND_NONHEAP, UNITS_BYTES,
+    SizeOfMapping(),
+    "Memory used to hold the mapping of the startup cache from file. "
+    "This memory is likely to be swapped out shortly after start-up.");
 
-  REPORT("explicit/startup-cache/mapping", KIND_NONHEAP,
-         SizeOfMapping(),
-         "Memory used to hold the mapping of the startup cache from file. "
-         "This memory is likely to be swapped out shortly after start-up.");
-
-  REPORT("explicit/startup-cache/data", KIND_HEAP,
-         HeapSizeOfIncludingThis(StartupCacheMallocSizeOf),
-         "Memory used by the startup cache for things other than the file "
-         "mapping.");
+  MOZ_COLLECT_REPORT(
+    "explicit/startup-cache/data", KIND_HEAP, UNITS_BYTES,
+    HeapSizeOfIncludingThis(StartupCacheMallocSizeOf),
+    "Memory used by the startup cache for things other than the file mapping.");
 
   return NS_OK;
 }
@@ -92,9 +83,9 @@ StartupCache::GetSingleton()
     }
 #ifdef MOZ_DISABLE_STARTUPCACHE
     return nullptr;
-#endif
-
+#else
     StartupCache::InitSingleton();
+#endif
   }
 
   return StartupCache::gStartupCache;
@@ -284,7 +275,7 @@ namespace {
 
 nsresult
 GetBufferFromZipArchive(nsZipArchive *zip, bool doCRC, const char* id,
-                        char** outbuf, uint32_t* length)
+                        UniquePtr<char[]>* outbuf, uint32_t* length)
 {
   if (!zip)
     return NS_ERROR_NOT_AVAILABLE;
@@ -303,7 +294,7 @@ GetBufferFromZipArchive(nsZipArchive *zip, bool doCRC, const char* id,
 // NOTE: this will not find a new entry until it has been written to disk!
 // Consumer should take ownership of the resulting buffer.
 nsresult
-StartupCache::GetBuffer(const char* id, char** outbuf, uint32_t* length) 
+StartupCache::GetBuffer(const char* id, UniquePtr<char[]>* outbuf, uint32_t* length) 
 {
   PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
 
@@ -315,8 +306,8 @@ StartupCache::GetBuffer(const char* id, char** outbuf, uint32_t* length)
     nsDependentCString idStr(id);
     mTable.Get(idStr, &entry);
     if (entry) {
-      *outbuf = new char[entry->size];
-      memcpy(*outbuf, entry->data, entry->size);
+      *outbuf = MakeUnique<char[]>(entry->size);
+      memcpy(outbuf->get(), entry->data.get(), entry->size);
       *length = entry->size;
       return NS_OK;
     }
@@ -347,15 +338,15 @@ StartupCache::PutBuffer(const char* id, const char* inbuf, uint32_t len)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsAutoArrayPtr<char> data(new char[len]);
-  memcpy(data, inbuf, len);
+  auto data = MakeUnique<char[]>(len);
+  memcpy(data.get(), inbuf, len);
 
   nsCString idStr(id);
   // Cache it for now, we'll write all together later.
   CacheEntry* entry; 
   
   if (mTable.Get(idStr)) {
-    NS_ASSERTION(false, "Existing entry in StartupCache.");
+    NS_WARNING("Existing entry in StartupCache.");
     // Double-caching is undesirable but not an error.
     return NS_OK;
   }
@@ -367,7 +358,7 @@ StartupCache::PutBuffer(const char* id, const char* inbuf, uint32_t len)
   }
 #endif
 
-  entry = new CacheEntry(data.forget(), len);
+  entry = new CacheEntry(Move(data), len);
   mTable.Put(idStr, entry);
   mPendingWrites.AppendElement(idStr);
   return ResetStartupWriteTimer();
@@ -414,7 +405,7 @@ CacheCloseHelper(const nsACString& key, const CacheEntry* data,
   nsIStringInputStream* stream = holder->stream;
   nsIZipWriter* writer = holder->writer;
 
-  stream->ShareData(data->data, data->size);
+  stream->ShareData(data->data.get(), data->size);
 
 #ifdef DEBUG
   bool hasEntry;
@@ -754,7 +745,10 @@ StartupCacheWrapper::GetBuffer(const char* id, char** outbuf, uint32_t* length)
   if (!sc) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  return sc->GetBuffer(id, outbuf, length);
+  UniquePtr<char[]> buf;
+  nsresult rv = sc->GetBuffer(id, &buf, length);
+  *outbuf = buf.release();
+  return rv;
 }
 
 nsresult

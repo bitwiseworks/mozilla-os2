@@ -8,13 +8,7 @@
 
 #include <stdint.h>                     // for uint32_t
 
-#ifdef MOZ_WIDGET_GONK
-#include <utils/RefBase.h>
-#if ANDROID_VERSION >= 21
-#include <utils/NativeHandle.h>
-#endif
-#endif
-
+#include "Units.h"
 #include "mozilla/gfx/Point.h"          // for IntPoint
 #include "mozilla/TypedEnumBits.h"
 #include "nsRegion.h"
@@ -87,8 +81,6 @@ enum class LayerRenderStateFlags : int8_t {
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(LayerRenderStateFlags)
 
-// The 'ifdef MOZ_WIDGET_GONK' sadness here is because we don't want to include
-// android::sp unless we have to.
 struct LayerRenderState {
   // Constructors and destructor are defined in LayersTypes.cpp so we don't
   // have to pull in a definition for GraphicBuffer.h here. In KK at least,
@@ -97,33 +89,6 @@ struct LayerRenderState {
   LayerRenderState();
   LayerRenderState(const LayerRenderState& aOther);
   ~LayerRenderState();
-
-#ifdef MOZ_WIDGET_GONK
-  LayerRenderState(android::GraphicBuffer* aSurface,
-                   const gfx::IntSize& aSize,
-                   LayerRenderStateFlags aFlags,
-                   TextureHost* aTexture);
-
-  bool OriginBottomLeft() const
-  { return bool(mFlags & LayerRenderStateFlags::ORIGIN_BOTTOM_LEFT); }
-
-  bool BufferRotated() const
-  { return bool(mFlags & LayerRenderStateFlags::BUFFER_ROTATION); }
-
-  bool FormatRBSwapped() const
-  { return bool(mFlags & LayerRenderStateFlags::FORMAT_RB_SWAP); }
-
-  void SetOverlayId(const int32_t& aId)
-  { mOverlayId = aId; }
-
-  android::GraphicBuffer* GetGrallocBuffer() const
-  { return mSurface.get(); }
-
-#if ANDROID_VERSION >= 21
-  android::NativeHandle* GetSidebandStream() const
-  { return mSidebandStream.get(); }
-#endif
-#endif
 
   void SetOffset(const nsIntPoint& aOffset)
   {
@@ -137,19 +102,6 @@ struct LayerRenderState {
   bool mHasOwnOffset;
   // the location of the layer's origin on mSurface
   nsIntPoint mOffset;
-  // The 'ifdef MOZ_WIDGET_GONK' sadness here is because we don't want to include
-  // android::sp unless we have to.
-#ifdef MOZ_WIDGET_GONK
-  // surface to render
-  android::sp<android::GraphicBuffer> mSurface;
-  int32_t mOverlayId;
-  // size of mSurface
-  gfx::IntSize mSize;
-  TextureHost* mTexture;
-#if ANDROID_VERSION >= 21
-  android::sp<android::NativeHandle> mSidebandStream;
-#endif
-#endif
 };
 
 enum class ScaleMode : int8_t {
@@ -190,29 +142,14 @@ struct EventRegions {
   bool operator==(const EventRegions& aRegions) const
   {
     return mHitRegion == aRegions.mHitRegion &&
-           mDispatchToContentHitRegion == aRegions.mDispatchToContentHitRegion;
+           mDispatchToContentHitRegion == aRegions.mDispatchToContentHitRegion &&
+           mNoActionRegion == aRegions.mNoActionRegion &&
+           mHorizontalPanRegion == aRegions.mHorizontalPanRegion &&
+           mVerticalPanRegion == aRegions.mVerticalPanRegion;
   }
   bool operator!=(const EventRegions& aRegions) const
   {
     return !(*this == aRegions);
-  }
-
-  void OrWith(const EventRegions& aOther)
-  {
-    mHitRegion.OrWith(aOther.mHitRegion);
-    mDispatchToContentHitRegion.OrWith(aOther.mDispatchToContentHitRegion);
-  }
-
-  void AndWith(const nsIntRegion& aRegion)
-  {
-    mHitRegion.AndWith(aRegion);
-    mDispatchToContentHitRegion.AndWith(aRegion);
-  }
-
-  void Sub(const EventRegions& aMinuend, const nsIntRegion& aSubtrahend)
-  {
-    mHitRegion.Sub(aMinuend.mHitRegion, aSubtrahend);
-    mDispatchToContentHitRegion.Sub(aMinuend.mDispatchToContentHitRegion, aSubtrahend);
   }
 
   void ApplyTranslationAndScale(float aXTrans, float aYTrans, float aXScale, float aYScale)
@@ -234,12 +171,18 @@ struct EventRegions {
   {
     mHitRegion.Transform(aTransform);
     mDispatchToContentHitRegion.Transform(aTransform);
+    mNoActionRegion.Transform(aTransform);
+    mHorizontalPanRegion.Transform(aTransform);
+    mVerticalPanRegion.Transform(aTransform);
   }
 
   bool IsEmpty() const
   {
     return mHitRegion.IsEmpty()
-        && mDispatchToContentHitRegion.IsEmpty();
+        && mDispatchToContentHitRegion.IsEmpty()
+        && mNoActionRegion.IsEmpty()
+        && mHorizontalPanRegion.IsEmpty()
+        && mVerticalPanRegion.IsEmpty();
   }
 
   nsCString ToString() const
@@ -284,6 +227,22 @@ enum TextureDumpMode {
   Compress,      // dump texture with LZ4 compression
   DoNotCompress  // dump texture uncompressed
 };
+
+// Some specialized typedefs of Matrix4x4Typed.
+typedef gfx::Matrix4x4Typed<LayerPixel, CSSTransformedLayerPixel> CSSTransformMatrix;
+// Several different async transforms can contribute to a layer's transform
+// (specifically, an async animation can contribute a transform, and each APZC
+// that scrolls a layer can contribute async scroll/zoom and overscroll
+// transforms).
+// To try to model this with typed units, we represent individual async
+// transforms as ParentLayer -> ParentLayer transforms (aliased as
+// AsyncTransformComponentMatrix), and we represent the product of all of them
+// as a CSSTransformLayer -> ParentLayer transform (aliased as
+// AsyncTransformMatrix). To create an AsyncTransformMatrix from component
+// matrices, a ViewAs operation is needed. A MultipleAsyncTransforms
+// PixelCastJustification is provided for this purpose.
+typedef gfx::Matrix4x4Typed<ParentLayerPixel, ParentLayerPixel> AsyncTransformComponentMatrix;
+typedef gfx::Matrix4x4Typed<CSSTransformedLayerPixel, ParentLayerPixel> AsyncTransformMatrix;
 
 } // namespace layers
 } // namespace mozilla

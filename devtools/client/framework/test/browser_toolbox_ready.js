@@ -1,41 +1,21 @@
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test()
-{
-  gBrowser.selectedTab = gBrowser.addTab();
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
+const TEST_URL = "data:text/html,test for toolbox being ready";
 
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    gDevTools.showToolbox(target).then(testReady);
-  }, true);
+add_task(function* () {
+  let tab = yield addTab(TEST_URL);
+  let target = TargetFactory.forTab(tab);
 
-  content.location = "data:text/html,test for dynamically registering and unregistering tools";
-}
-
-function testReady(toolbox)
-{
+  const toolbox = yield gDevTools.showToolbox(target, "webconsole");
   ok(toolbox.isReady, "toolbox isReady is set");
-  testDouble(toolbox);
-}
+  ok(toolbox.threadClient, "toolbox has a thread client");
 
-function testDouble(toolbox)
-{
-  let target = toolbox.target;
-  let toolId = toolbox.currentToolId;
+  const toolbox2 = yield gDevTools.showToolbox(toolbox.target, toolbox.toolId);
+  is(toolbox2, toolbox, "same toolbox");
 
-  gDevTools.showToolbox(target, toolId).then(function(toolbox2) {
-    is(toolbox2, toolbox, "same toolbox");
-    cleanup(toolbox);
-  });
-}
-
-function cleanup(toolbox)
-{
-  toolbox.destroy().then(function() {
-    gBrowser.removeCurrentTab();
-    finish();
-  });
-}
+  yield toolbox.destroy();
+  gBrowser.removeCurrentTab();
+});

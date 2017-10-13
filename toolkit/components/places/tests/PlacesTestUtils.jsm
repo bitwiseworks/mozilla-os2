@@ -6,13 +6,16 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
+Cu.importGlobalProperties(["URL"]);
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-  "resource://gre/modules/PlacesUtils.jsm");
-
+                                  "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 
 this.PlacesTestUtils = Object.freeze({
   /**
@@ -25,7 +28,7 @@ this.PlacesTestUtils = Object.freeze({
    *          { uri: nsIURI of the page,
    *            [optional] transition: one of the TRANSITION_* from nsINavHistoryService,
    *            [optional] title: title of the page,
-   *            [optional] visitDate: visit date in microseconds from the epoch
+   *            [optional] visitDate: visit date, either in microseconds from the epoch or as a date object
    *            [optional] referrer: nsIURI of the referrer for this visit
    *          }
    *
@@ -33,48 +36,48 @@ this.PlacesTestUtils = Object.freeze({
    * @resolves When all visits have been added successfully.
    * @rejects JavaScript exception.
    */
-  addVisits: Task.async(function*(placeInfo) {
-    let promise = new Promise((resolve, reject) => {
-      let places = [];
-      if (placeInfo instanceof Ci.nsIURI) {
-        places.push({ uri: placeInfo });
+  addVisits: Task.async(function* (placeInfo) {
+    let places = [];
+    let infos = [];
+
+    if (placeInfo instanceof Ci.nsIURI ||
+        placeInfo instanceof URL ||
+        typeof placeInfo == "string") {
+      places.push({ uri: placeInfo });
+    }
+    else if (Array.isArray(placeInfo)) {
+      places = places.concat(placeInfo);
+    } else if (typeof placeInfo == "object" && placeInfo.uri) {
+      places.push(placeInfo)
+    } else {
+      throw new Error("Unsupported type passed to addVisits");
+    }
+
+    // Create a PageInfo for each entry.
+    for (let place of places) {
+      let info = {url: place.uri};
+      info.title = (typeof place.title === "string") ? place.title : "test visit for " + info.url.spec ;
+      if (typeof place.referrer == "string") {
+        place.referrer = NetUtil.newURI(place.referrer);
+      } else if (place.referrer && place.referrer instanceof URL) {
+        place.referrer = NetUtil.newURI(place.referrer.href);
       }
-      else if (Array.isArray(placeInfo)) {
-        places = places.concat(placeInfo);
+      let visitDate = place.visitDate;
+      if (visitDate) {
+        if (!(visitDate instanceof Date)) {
+          visitDate = PlacesUtils.toDate(visitDate);
+        }
       } else {
-        places.push(placeInfo)
+        visitDate = new Date();
       }
-
-      // Create mozIVisitInfo for each entry.
-      let now = Date.now();
-      for (let place of places) {
-        if (typeof place.title != "string") {
-          place.title = "test visit for " + place.uri.spec;
-        }
-        place.visits = [{
-          transitionType: place.transition === undefined ? Ci.nsINavHistoryService.TRANSITION_LINK
-                                                             : place.transition,
-          visitDate: place.visitDate || (now++) * 1000,
-          referrerURI: place.referrer
-        }];
-      }
-
-      PlacesUtils.asyncHistory.updatePlaces(
-        places,
-        {
-          handleError: function AAV_handleError(resultCode, placeInfo) {
-            let ex = new Components.Exception("Unexpected error in adding visits.",
-                                              resultCode);
-            reject(ex);
-          },
-          handleResult: function () {},
-          handleCompletion: function UP_handleCompletion() {
-            resolve();
-          }
-        }
-      );
-    });
-    return (yield promise);
+      info.visits = [{
+        transition: place.transition,
+        date: visitDate,
+        referrer: place.referrer
+      }];
+      infos.push(info);
+    }
+    return PlacesUtils.history.insertMany(infos);
   }),
 
   /**
@@ -109,23 +112,52 @@ this.PlacesTestUtils = Object.freeze({
    *       this is a problem only across different connections.
    */
   promiseAsyncUpdates() {
-    return new Promise(resolve => {
-      let db = PlacesUtils.history.DBConnection;
-      let begin = db.createAsyncStatement("BEGIN EXCLUSIVE");
-      begin.executeAsync();
-      begin.finalize();
+    return PlacesUtils.withConnectionWrapper("promiseAsyncUpdates", Task.async(function* (db) {
+      try {
+        yield db.executeCached("BEGIN EXCLUSIVE");
+        yield db.executeCached("COMMIT");
+      } catch (ex) {
+        // If we fail to start a transaction, it's because there is already one.
+        // In such a case we should not try to commit the existing transaction.
+      }
+    }));
+  },
 
-      let commit = db.createAsyncStatement("COMMIT");
-      commit.executeAsync({
-        handleResult: function () {},
-        handleError: function () {},
-        handleCompletion: function(aReason)
-        {
-          resolve();
-        }
-      });
-      commit.finalize();
-    });
-  }
+  /**
+   * Asynchronously checks if an address is found in the database.
+   * @param aURI
+   *        nsIURI or address to look for.
+   *
+   * @return {Promise}
+   * @resolves Returns true if the page is found.
+   * @rejects JavaScript exception.
+   */
+  isPageInDB: Task.async(function* (aURI) {
+    let url = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
+    let db = yield PlacesUtils.promiseDBConnection();
+    let rows = yield db.executeCached(
+      "SELECT id FROM moz_places WHERE url_hash = hash(:url) AND url = :url",
+      { url });
+    return rows.length > 0;
+  }),
 
+  /**
+   * Asynchronously checks how many visits exist for a specified page.
+   * @param aURI
+   *        nsIURI or address to look for.
+   *
+   * @return {Promise}
+   * @resolves Returns the number of visits found.
+   * @rejects JavaScript exception.
+   */
+  visitsInDB: Task.async(function* (aURI) {
+    let url = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
+    let db = yield PlacesUtils.promiseDBConnection();
+    let rows = yield db.executeCached(
+      `SELECT count(*) FROM moz_historyvisits v
+       JOIN moz_places h ON h.id = v.place_id
+       WHERE url_hash = hash(:url) AND url = :url`,
+      { url });
+    return rows[0].getResultByIndex(0);
+  })
 });

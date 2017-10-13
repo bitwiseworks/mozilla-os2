@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// @see http://mxr.mozilla.org/mozilla-central/source/js/src/xpconnect/loader/mozJSComponentLoader.cpp
+// @see http://dxr.mozilla.org/mozilla-central/source/js/src/xpconnect/loader/mozJSComponentLoader.cpp
 
 'use strict';
 
@@ -26,6 +26,8 @@ const appInfo = Cc["@mozilla.org/xre/app-info;1"].
 const vc = Cc["@mozilla.org/xpcom/version-comparator;1"].
            getService(Ci.nsIVersionComparator);
 
+const { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
+
 const Startup = Cu.import("resource://gre/modules/sdk/system/Startup.js", {}).exports;
 
 
@@ -48,18 +50,12 @@ function setResourceSubstitution(domain, uri) {
 // Utility function that synchronously reads local resource from the given
 // `uri` and returns content string.
 function readURI(uri) {
-  let ioservice = Cc['@mozilla.org/network/io-service;1'].
-    getService(Ci.nsIIOService);
+  let channel = NetUtil.newChannel({
+    uri: NetUtil.newURI(uri, 'UTF-8'),
+    loadUsingSystemPrincipal: true
+  });
 
-  let channel = ioservice.newChannel2(uri,
-                                      'UTF-8',
-                                      null,
-                                      null,      // aLoadingNode
-                                      systemPrincipal,
-                                      null,      // aTriggeringPrincipal
-                                      Ci.nsILoadInfo.SEC_NORMAL,
-                                      Ci.nsIContentPolicy.TYPE_OTHER);
-  let stream = channel.open();
+  let stream = channel.open2();
 
   let cstream = Cc['@mozilla.org/intl/converter-input-stream;1'].
     createInstance(Ci.nsIConverterInputStream);
@@ -261,6 +257,9 @@ function startup(data, reasonCode) {
     let module = cuddlefish.Module('sdk/loader/cuddlefish', cuddlefishURI);
     let require = cuddlefish.Require(loader, module);
 
+    // Init the 'sdk/webextension' module from the bootstrap addon parameter.
+    require("sdk/webextension").initFromBootstrapAddonParam(data);
+
     require('sdk/addon/runner').startup(reason, {
       loader: loader,
       main: main,
@@ -299,7 +298,7 @@ function loadSandbox(uri) {
 }
 
 function unloadSandbox(sandbox) {
-  if ("nukeSandbox" in Cu)
+  if (Cu.getClassName(sandbox, true) == "Sandbox")
     Cu.nukeSandbox(sandbox);
 }
 
@@ -347,6 +346,7 @@ function nukeModules() {
     // Bug 775067: From FF17 we can kill all CCW from a given sandbox
     unloadSandbox(sandbox);
   }
+  unloadSandbox(loader.sharedGlobalSandbox);
   loader = null;
 
   // both `toolkit/loader` and `system/xul-app` are loaded as JSM's via

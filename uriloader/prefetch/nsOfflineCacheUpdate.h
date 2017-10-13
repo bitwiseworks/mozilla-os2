@@ -54,7 +54,8 @@ public:
                              nsIPrincipal* aLoadingPrincipal,
                              nsIApplicationCache *aApplicationCache,
                              nsIApplicationCache *aPreviousApplicationCache,
-                             uint32_t aType);
+                             uint32_t aType,
+                             uint32_t aLoadFlags);
 
     nsCOMPtr<nsIURI>              mURI;
     nsCOMPtr<nsIURI>              mReferrerURI;
@@ -63,6 +64,7 @@ public:
     nsCOMPtr<nsIApplicationCache> mPreviousApplicationCache;
     nsCString                     mCacheKey;
     uint32_t                      mItemType;
+    uint32_t                      mLoadFlags;
 
     nsresult OpenChannel(nsOfflineCacheUpdate *aUpdate);
     nsresult Cancel();
@@ -107,6 +109,7 @@ public:
     virtual ~nsOfflineManifestItem();
 
     nsCOMArray<nsIURI> &GetExplicitURIs() { return mExplicitURIs; }
+    nsCOMArray<nsIURI> &GetAnonymousURIs() { return mAnonymousURIs; }
     nsCOMArray<nsIURI> &GetFallbackURIs() { return mFallbackURIs; }
 
     nsTArray<nsCString> &GetOpportunisticNamespaces()
@@ -122,12 +125,12 @@ public:
         { aManifestHash = mManifestHashValue; }
 
 private:
-    static NS_METHOD ReadManifest(nsIInputStream *aInputStream,
-                                  void *aClosure,
-                                  const char *aFromSegment,
-                                  uint32_t aOffset,
-                                  uint32_t aCount,
-                                  uint32_t *aBytesConsumed);
+    static nsresult ReadManifest(nsIInputStream *aInputStream,
+                                 void *aClosure,
+                                 const char *aFromSegment,
+                                 uint32_t aOffset,
+                                 uint32_t aCount,
+                                 uint32_t *aBytesConsumed);
 
     nsresult AddNamespace(uint32_t namespaceType,
                           const nsCString &namespaceSpec,
@@ -164,6 +167,7 @@ private:
     nsCString mReadBuf;
 
     nsCOMArray<nsIURI> mExplicitURIs;
+    nsCOMArray<nsIURI> mAnonymousURIs;
     nsCOMArray<nsIURI> mFallbackURIs;
 
     // All opportunistic caching namespaces.  Used to decide whether
@@ -233,7 +237,7 @@ protected:
 private:
     nsresult InitInternal(nsIURI *aManifestURI, nsIPrincipal* aPrincipal);
     nsresult HandleManifest(bool *aDoUpdate);
-    nsresult AddURI(nsIURI *aURI, uint32_t aItemType);
+    nsresult AddURI(nsIURI *aURI, uint32_t aItemType, uint32_t aLoadFlags = 0);
 
     nsresult ProcessNextURI();
 
@@ -280,9 +284,6 @@ private:
     nsCOMPtr<nsIURI> mDocumentURI;
     nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
     nsCOMPtr<nsIFile> mCustomProfileDir;
-
-    uint32_t mAppID;
-    bool mInBrowser;
 
     nsCOMPtr<nsIObserver> mUpdateAvailableObserver;
 
@@ -335,8 +336,7 @@ public:
 
     nsresult ScheduleUpdate(nsOfflineCacheUpdate *aUpdate);
     nsresult FindUpdate(nsIURI *aManifestURI,
-                        uint32_t aAppID,
-                        bool aInBrowser,
+                        nsACString const &aOriginSuffix,
                         nsIFile *aCustomProfileDir,
                         nsOfflineCacheUpdate **aUpdate);
 
@@ -344,10 +344,8 @@ public:
                       nsIURI *aDocumentURI,
                       nsIPrincipal* aLoadingPrincipal,
                       nsIDOMDocument *aDocument,
-                      nsIDOMWindow* aWindow,
+                      nsPIDOMWindowInner* aWindow,
                       nsIFile* aCustomProfileDir,
-                      uint32_t aAppID,
-                      bool aInBrowser,
                       nsIOfflineCacheUpdate **aUpdate);
 
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate) override;

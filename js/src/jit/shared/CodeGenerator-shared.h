@@ -33,6 +33,7 @@ template <class ArgSeq, class StoreOutputTo>
 class OutOfLineCallVM;
 
 class OutOfLineTruncateSlow;
+class OutOfLineWasmTruncateCheck;
 
 struct PatchableBackedgeInfo
 {
@@ -107,7 +108,15 @@ class CodeGeneratorShared : public LElementVisitor
     Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
 
 #ifdef JS_TRACE_LOGGING
+    struct PatchableTLEvent {
+        CodeOffset offset;
+        const char* event;
+        PatchableTLEvent(CodeOffset offset, const char* event)
+            : offset(offset), event(event)
+        {}
+    };
     js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTraceLoggers_;
+    js::Vector<PatchableTLEvent, 0, SystemAllocPolicy> patchableTLEvents_;
     js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTLScripts_;
 #endif
 
@@ -210,13 +219,12 @@ class CodeGeneratorShared : public LElementVisitor
     inline int32_t ToStackOffset(LAllocation a) const;
     inline int32_t ToStackOffset(const LAllocation* a) const;
 
+    inline Address ToAddress(const LAllocation& a);
+    inline Address ToAddress(const LAllocation* a);
+
     uint32_t frameSize() const {
         return frameClass_ == FrameSizeClass::None() ? frameDepth_ : frameClass_.frameSize();
     }
-
-    inline Operand ToOperand(const LAllocation& a);
-    inline Operand ToOperand(const LAllocation* a);
-    inline Operand ToOperand(const LDefinition* def);
 
   protected:
 #ifdef CHECK_OSIPOINT_REGISTERS
@@ -263,7 +271,7 @@ class CodeGeneratorShared : public LElementVisitor
     };
 
   protected:
-    MOZ_WARN_UNUSED_RESULT
+    MOZ_MUST_USE
     bool allocateData(size_t size, size_t* offset) {
         MOZ_ASSERT(size % sizeof(void*) == 0);
         *offset = runtimeData_.length();
@@ -335,9 +343,9 @@ class CodeGeneratorShared : public LElementVisitor
     void emitTruncateDouble(FloatRegister src, Register dest, MInstruction* mir);
     void emitTruncateFloat32(FloatRegister src, Register dest, MInstruction* mir);
 
-    void emitAsmJSCall(LAsmJSCall* ins);
+    void emitWasmCallBase(LWasmCallBase* ins);
 
-    void emitPreBarrier(Register base, const LAllocation* index);
+    void emitPreBarrier(Register base, const LAllocation* index, int32_t offsetAdjustment);
     void emitPreBarrier(Address address);
 
     // We don't emit code for trivial blocks, so if we want to branch to the
@@ -430,7 +438,7 @@ class CodeGeneratorShared : public LElementVisitor
     }
 
     void storeResultTo(Register reg) {
-        masm.storeCallResult(reg);
+        masm.storeCallWordResult(reg);
     }
 
     void storeFloatResultTo(FloatRegister reg) {
@@ -460,7 +468,7 @@ class CodeGeneratorShared : public LElementVisitor
     void addOutOfLineCode(OutOfLineCode* code, const BytecodeSite* site);
     bool generateOutOfLineCode();
 
-    Label* labelForBackedgeWithImplicitCheck(MBasicBlock* mir);
+    Label* getJumpLabelForBranch(MBasicBlock* block);
 
     // Generate a jump to the start of the specified block, adding information
     // if this is a loop backedge. Use this in place of jumping directly to
@@ -468,10 +476,19 @@ class CodeGeneratorShared : public LElementVisitor
     // directly is needed.
     void jumpToBlock(MBasicBlock* mir);
 
+    // Get a label for the start of block which can be used for jumping, in
+    // place of jumpToBlock.
+    Label* labelForBackedgeWithImplicitCheck(MBasicBlock* mir);
+
 // This function is not used for MIPS. MIPS has branchToBlock.
 #if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64)
     void jumpToBlock(MBasicBlock* mir, Assembler::Condition cond);
 #endif
+
+    template <class T>
+    wasm::TrapDesc trap(T* mir, wasm::Trap trap) {
+        return wasm::TrapDesc(mir->trapOffset(), trap, masm.framePushed());
+    }
 
   private:
     void generateInvalidateEpilogue();
@@ -485,12 +502,17 @@ class CodeGeneratorShared : public LElementVisitor
 
     void visitOutOfLineTruncateSlow(OutOfLineTruncateSlow* ool);
 
+    virtual void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool) {
+        MOZ_CRASH("NYI");
+    }
+
     bool omitOverRecursedCheck() const;
 
 #ifdef JS_TRACE_LOGGING
   protected:
     void emitTracelogScript(bool isStart);
     void emitTracelogTree(bool isStart, uint32_t textId);
+    void emitTracelogTree(bool isStart, const char* text, TraceLoggerTextId enabledTextId);
 
   public:
     void emitTracelogScriptStart() {
@@ -504,6 +526,15 @@ class CodeGeneratorShared : public LElementVisitor
     }
     void emitTracelogStopEvent(uint32_t textId) {
         emitTracelogTree(/* isStart =*/ false, textId);
+    }
+    // Log an arbitrary text. The TraceloggerTextId is used to toggle the
+    // logging on and off.
+    // Note: the text is not copied and need to be kept alive until linking.
+    void emitTracelogStartEvent(const char* text, TraceLoggerTextId enabledTextId) {
+        emitTracelogTree(/* isStart =*/ true, text, enabledTextId);
+    }
+    void emitTracelogStopEvent(const char* text, TraceLoggerTextId enabledTextId) {
+        emitTracelogTree(/* isStart =*/ false, text, enabledTextId);
     }
 #endif
     void emitTracelogIonStart() {
@@ -519,9 +550,17 @@ class CodeGeneratorShared : public LElementVisitor
 #endif
     }
 
+  protected:
     inline void verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, bool isLoad,
-                                            Scalar::Type type, unsigned numElems,
-                                            const Operand& mem, LAllocation alloc);
+                                            Scalar::Type type, Operand mem, LAllocation alloc);
+
+  public:
+    inline void verifyLoadDisassembly(uint32_t begin, uint32_t end, Scalar::Type type,
+                                      Operand mem, LAllocation alloc);
+    inline void verifyStoreDisassembly(uint32_t begin, uint32_t end, Scalar::Type type,
+                                       Operand mem, LAllocation alloc);
+
+    bool isGlobalObject(JSObject* object);
 };
 
 // An out-of-line path is generated at the end of the function.
@@ -615,12 +654,14 @@ template <typename HeadType, typename... TailTypes>
 class ArgSeq<HeadType, TailTypes...> : public ArgSeq<TailTypes...>
 {
   private:
-    HeadType head_;
+    using RawHeadType = typename mozilla::RemoveReference<HeadType>::Type;
+    RawHeadType head_;
 
   public:
-    explicit ArgSeq(HeadType&& head, TailTypes&&... tail)
-      : ArgSeq<TailTypes...>(mozilla::Move(tail)...),
-        head_(mozilla::Move(head))
+    template <typename ProvidedHead, typename... ProvidedTail>
+    explicit ArgSeq(ProvidedHead&& head, ProvidedTail&&... tail)
+      : ArgSeq<TailTypes...>(mozilla::Forward<ProvidedTail>(tail)...),
+        head_(mozilla::Forward<ProvidedHead>(head))
     { }
 
     // Arguments are pushed in reverse order, from last argument to first
@@ -633,9 +674,9 @@ class ArgSeq<HeadType, TailTypes...> : public ArgSeq<TailTypes...>
 
 template <typename... ArgTypes>
 inline ArgSeq<ArgTypes...>
-ArgList(ArgTypes... args)
+ArgList(ArgTypes&&... args)
 {
-    return ArgSeq<ArgTypes...>(mozilla::Move(args)...);
+    return ArgSeq<ArgTypes...>(mozilla::Forward<ArgTypes>(args)...);
 }
 
 // Store wrappers, to generate the right move of data after the VM call.
@@ -770,6 +811,36 @@ CodeGeneratorShared::visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo>
     restoreLiveIgnore(lir, ool->out().clobbered());
     masm.jump(ool->rejoin());
 }
+
+class OutOfLineWasmTruncateCheck : public OutOfLineCodeBase<CodeGeneratorShared>
+{
+    MIRType fromType_;
+    MIRType toType_;
+    FloatRegister input_;
+    bool isUnsigned_;
+    wasm::TrapOffset trapOffset_;
+
+  public:
+    OutOfLineWasmTruncateCheck(MWasmTruncateToInt32* mir, FloatRegister input)
+      : fromType_(mir->input()->type()), toType_(MIRType::Int32), input_(input),
+        isUnsigned_(mir->isUnsigned()), trapOffset_(mir->trapOffset())
+    { }
+
+    OutOfLineWasmTruncateCheck(MWasmTruncateToInt64* mir, FloatRegister input)
+      : fromType_(mir->input()->type()), toType_(MIRType::Int64), input_(input),
+        isUnsigned_(mir->isUnsigned()), trapOffset_(mir->trapOffset())
+    { }
+
+    void accept(CodeGeneratorShared* codegen) {
+        codegen->visitOutOfLineWasmTruncateCheck(this);
+    }
+
+    FloatRegister input() const { return input_; }
+    MIRType toType() const { return toType_; }
+    MIRType fromType() const { return fromType_; }
+    bool isUnsigned() const { return isUnsigned_; }
+    wasm::TrapOffset trapOffset() const { return trapOffset_; }
+};
 
 } // namespace jit
 } // namespace js

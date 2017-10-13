@@ -1015,7 +1015,7 @@ nsHtml5TreeBuilder::AllocateContentHandle()
     mHandlesUsed = 0;
   }
 #ifdef DEBUG
-  mHandles[mHandlesUsed] = (nsIContent*)0xC0DEDBAD;
+  mHandles[mHandlesUsed] = reinterpret_cast<nsIContent*>(uintptr_t(0xC0DEDBAD));
 #endif
   return &mHandles[mHandlesUsed++];
 }
@@ -1233,6 +1233,10 @@ nsHtml5TreeBuilder::documentMode(nsHtml5DocumentMode m)
 {
   if (mBuilder) {
     mBuilder->SetDocumentMode(m);
+    return;
+  }
+  if (mSpeculativeLoadStage) {
+    mSpeculativeLoadQueue.AppendElement()->InitSetDocumentMode(m);
     return;
   }
   nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();

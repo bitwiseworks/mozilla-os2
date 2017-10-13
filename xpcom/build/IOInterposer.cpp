@@ -186,6 +186,7 @@ public:
   }
 
   inline void Disable() { mIsEnabled = false; }
+  inline void Enable() { mIsEnabled = true; }
 
   void Register(IOInterposeObserver::Operation aOp,
                 IOInterposeObserver* aObserver)
@@ -359,7 +360,8 @@ public:
 
 // List of observers registered
 static StaticAutoPtr<MasterList> sMasterList;
-static ThreadLocal<PerThreadData*> sThreadLocalData;
+static MOZ_THREAD_LOCAL(PerThreadData*) sThreadLocalData;
+static bool sThreadLocalDataInitialized;
 } // namespace
 
 IOInterposeObserver::Observation::Observation(Operation aOperation,
@@ -429,6 +431,7 @@ IOInterposer::Init()
   if (!sThreadLocalData.init()) {
     return false;
   }
+  sThreadLocalDataInitialized = true;
   bool isMainThread = true;
   RegisterCurrentThread(isMainThread);
   sMasterList = new MasterList();
@@ -448,7 +451,7 @@ IOInterposer::Init()
 bool
 IOInterposeObserver::IsMainThread()
 {
-  if (!sThreadLocalData.initialized()) {
+  if (!sThreadLocalDataInitialized) {
     return false;
   }
   PerThreadData* ptd = sThreadLocalData.get();
@@ -477,6 +480,15 @@ IOInterposer::Disable()
     return;
   }
   sMasterList->Disable();
+}
+
+void
+IOInterposer::Enable()
+{
+  if (!sMasterList) {
+    return;
+  }
+  sMasterList->Enable();
 }
 
 void
@@ -538,7 +550,7 @@ IOInterposer::Unregister(IOInterposeObserver::Operation aOp,
 void
 IOInterposer::RegisterCurrentThread(bool aIsMainThread)
 {
-  if (!sThreadLocalData.initialized()) {
+  if (!sThreadLocalDataInitialized) {
     return;
   }
   MOZ_ASSERT(!sThreadLocalData.get());
@@ -549,7 +561,7 @@ IOInterposer::RegisterCurrentThread(bool aIsMainThread)
 void
 IOInterposer::UnregisterCurrentThread()
 {
-  if (!sThreadLocalData.initialized()) {
+  if (!sThreadLocalDataInitialized) {
     return;
   }
   PerThreadData* curThreadData = sThreadLocalData.get();

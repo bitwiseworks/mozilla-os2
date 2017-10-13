@@ -7,6 +7,7 @@ add_task(function* () {
     manifest: {
       "browser_action": {
         "default_popup": "popup.html",
+        "unrecognized_property": "with-a-random-value",
       },
     },
 
@@ -19,7 +20,9 @@ add_task(function* () {
       `,
 
       "popup.js": function() {
-        browser.runtime.sendMessage("from-popup");
+        window.onload = () => {
+          browser.runtime.sendMessage("from-popup");
+        };
       },
     },
 
@@ -31,26 +34,26 @@ add_task(function* () {
     },
   });
 
-  yield extension.startup();
+  SimpleTest.waitForExplicitFinish();
+  let waitForConsole = new Promise(resolve => {
+    SimpleTest.monitorConsole(resolve, [{
+      message: /Reading manifest: Error processing browser_action.unrecognized_property: An unexpected property was found/,
+    }]);
+  });
 
-  let widgetId = makeWidgetId(extension.id) + "-browser-action";
-  let node = CustomizableUI.getWidget(widgetId).forWindow(window).node;
+  yield extension.startup();
 
   // Do this a few times to make sure the pop-up is reloaded each time.
   for (let i = 0; i < 3; i++) {
-    let evt = new CustomEvent("command", {
-      bubbles: true,
-      cancelable: true,
-    });
-    node.dispatchEvent(evt);
+    clickBrowserAction(extension);
 
     yield extension.awaitMessage("popup");
 
-    let panel = node.querySelector("panel");
-    if (panel) {
-      panel.hidePopup();
-    }
+    closeBrowserAction(extension);
   }
 
   yield extension.unload();
+
+  SimpleTest.endMonitorConsole();
+  yield waitForConsole;
 });

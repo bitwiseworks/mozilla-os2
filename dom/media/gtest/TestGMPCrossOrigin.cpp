@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gtest/gtest.h"
+#include "nsAutoPtr.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
@@ -13,17 +14,16 @@
 #include "GMPVideoEncoderProxy.h"
 #include "GMPDecryptorProxy.h"
 #include "GMPServiceParent.h"
-#ifdef XP_WIN
-#include "GMPVideoDecoderTrialCreator.h"
-#include "mozilla/dom/MediaKeySystemAccess.h"
-#include "mozilla/Monitor.h"
-#endif
+#include "MediaPrefs.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
 #include "mozilla/Atomics.h"
 #include "nsNSSComponent.h"
 #include "mozilla/DebugOnly.h"
+#include "GMPDeviceBinding.h"
+#include "mozilla/dom/MediaKeyStatusMapBinding.h" // For MediaKeyStatus
+#include "mozilla/dom/MediaKeyMessageEventBinding.h" // For MediaKeyMessageType
 
 #if defined(XP_WIN)
 #include "mozilla/WindowsVersion.h"
@@ -38,6 +38,7 @@ struct GMPTestRunner
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPTestRunner)
 
+  GMPTestRunner() { MediaPrefs::GetSingleton(); }
   void DoTest(void (GMPTestRunner::*aTestMethod)(GMPTestMonitor&));
   void RunTestGMPTestCodec1(GMPTestMonitor& aMonitor);
   void RunTestGMPTestCodec2(GMPTestMonitor& aMonitor);
@@ -52,13 +53,14 @@ private:
 };
 
 template<class T, class Base,
-         nsresult (NS_STDCALL GeckoMediaPluginService::*Getter)(nsTArray<nsCString>*,
+         nsresult (NS_STDCALL GeckoMediaPluginService::*Getter)(GMPCrashHelper*,
+                                                                nsTArray<nsCString>*,
                                                                 const nsACString&,
                                                                 UniquePtr<Base>&&)>
 class RunTestGMPVideoCodec : public Base
 {
 public:
-  virtual void Done(T* aGMP, GMPVideoHost* aHost)
+  void Done(T* aGMP, GMPVideoHost* aHost) override
   {
     EXPECT_TRUE(aGMP);
     EXPECT_TRUE(aHost);
@@ -91,7 +93,7 @@ protected:
 
     RefPtr<GeckoMediaPluginService> service =
       GeckoMediaPluginService::GetGeckoMediaPluginService();
-    return ((*service).*Getter)(&tags, aNodeId, Move(aCallback));
+    return ((*service).*Getter)(nullptr, &tags, aNodeId, Move(aCallback));
   }
 
 protected:
@@ -129,7 +131,7 @@ template<class Base>
 class RunTestGMPCrossOrigin : public Base
 {
 public:
-  virtual void Done(typename Base::GMPCodecType* aGMP, GMPVideoHost* aHost)
+  void Done(typename Base::GMPCodecType* aGMP, GMPVideoHost* aHost) override
   {
     EXPECT_TRUE(aGMP);
 
@@ -175,7 +177,7 @@ private:
         mShouldBeEqual(aShouldBeEqual)
     {
     }
-    virtual void Done(typename Base::GMPCodecType* aGMP, GMPVideoHost* aHost)
+    void Done(typename Base::GMPCodecType* aGMP, GMPVideoHost* aHost) override
     {
       EXPECT_TRUE(aGMP);
       if (aGMP) {
@@ -309,8 +311,8 @@ EnumerateGMPStorageDir(const nsACString& aDir, T&& aDirIter)
 class GMPShutdownObserver : public nsIRunnable
                           , public nsIObserver {
 public:
-  GMPShutdownObserver(nsIRunnable* aShutdownTask,
-                      nsIRunnable* Continuation,
+  GMPShutdownObserver(already_AddRefed<nsIRunnable> aShutdownTask,
+                      already_AddRefed<nsIRunnable> Continuation,
                       const nsACString& aNodeId)
     : mShutdownTask(aShutdownTask)
     , mContinuation(Continuation)
@@ -356,12 +358,12 @@ private:
 
 NS_IMPL_ISUPPORTS(GMPShutdownObserver, nsIRunnable, nsIObserver)
 
-class NotifyObserversTask : public nsRunnable {
+class NotifyObserversTask : public Runnable {
 public:
   explicit NotifyObserversTask(const char* aTopic)
     : mTopic(aTopic)
   {}
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -376,7 +378,7 @@ public:
 class ClearGMPStorageTask : public nsIRunnable
                           , public nsIObserver {
 public:
-  ClearGMPStorageTask(nsIRunnable* Continuation,
+  ClearGMPStorageTask(already_AddRefed<nsIRunnable> Continuation,
                       nsIThread* aTarget, PRTime aSince)
     : mContinuation(Continuation)
     , mTarget(aTarget)
@@ -426,11 +428,11 @@ private:
 NS_IMPL_ISUPPORTS(ClearGMPStorageTask, nsIRunnable, nsIObserver)
 
 static void
-ClearGMPStorage(nsIRunnable* aContinuation,
+ClearGMPStorage(already_AddRefed<nsIRunnable> aContinuation,
                 nsIThread* aTarget, PRTime aSince = -1)
 {
   RefPtr<ClearGMPStorageTask> task(
-      new ClearGMPStorageTask(aContinuation, aTarget, aSince));
+    new ClearGMPStorageTask(Move(aContinuation), aTarget, aSince));
   NS_DispatchToMainThread(task, NS_DISPATCH_NORMAL);
 }
 
@@ -521,7 +523,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   void DoTest(void (GMPStorageTest::*aTestMethod)()) {
     EnsureNSSInitializedChromeOrContent();
     nsCOMPtr<nsIThread> thread(GetGMPThread());
-    ClearGMPStorage(NS_NewRunnableMethod(this, aTestMethod), thread);
+    ClearGMPStorage(NewRunnableMethod(this, aTestMethod), thread);
     AwaitFinished();
   }
 
@@ -574,7 +576,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     EXPECT_TRUE(!PBnodeId2.Equals(nodeId2));
 
     nsCOMPtr<nsIThread> thread(GetGMPThread());
-    ClearGMPStorage(NS_NewRunnableMethodWithArg<nsCString>(
+    ClearGMPStorage(NewRunnableMethod<nsCString>(
       this, &GMPStorageTest::TestGetNodeId_Continuation, nodeId1), thread);
   }
 
@@ -594,28 +596,33 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   class CreateDecryptorDone : public GetGMPDecryptorCallback
   {
   public:
-    CreateDecryptorDone(GMPStorageTest* aRunner, nsIRunnable* aContinuation)
-      : mRunner(aRunner),
-        mContinuation(aContinuation)
+    explicit CreateDecryptorDone(GMPStorageTest* aRunner)
+      : mRunner(aRunner)
     {
     }
 
-    virtual void Done(GMPDecryptorProxy* aDecryptor) override
+    void Done(GMPDecryptorProxy* aDecryptor) override
     {
       mRunner->mDecryptor = aDecryptor;
       EXPECT_TRUE(!!mRunner->mDecryptor);
 
       if (mRunner->mDecryptor) {
-        mRunner->mDecryptor->Init(mRunner);
+        mRunner->mDecryptor->Init(mRunner, false, true);
       }
-      nsCOMPtr<nsIThread> thread(GetGMPThread());
-      thread->Dispatch(mContinuation, NS_DISPATCH_NORMAL);
     }
 
   private:
     RefPtr<GMPStorageTest> mRunner;
-    nsCOMPtr<nsIRunnable> mContinuation;
   };
+
+  void CreateDecryptor(const nsCString& aNodeId,
+                       const nsCString& aUpdate)
+  {
+    nsTArray<nsCString> updates;
+    updates.AppendElement(aUpdate);
+    nsCOMPtr<nsIRunnable> continuation(new Updates(this, Move(updates)));
+    CreateDecryptor(aNodeId, continuation);
+  }
 
   void CreateDecryptor(const nsAString& aOrigin,
                        const nsAString& aTopLevelOrigin,
@@ -626,16 +633,16 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     updates.AppendElement(aUpdate);
     CreateDecryptor(aOrigin, aTopLevelOrigin, aInPBMode, Move(updates));
   }
-  class Updates : public nsRunnable
+  class Updates : public Runnable
   {
   public:
     Updates(GMPStorageTest* aRunner, nsTArray<nsCString>&& aUpdates)
       : mRunner(aRunner),
-        mUpdates(aUpdates)
+        mUpdates(Move(aUpdates))
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       for (auto& update : mUpdates) {
         mRunner->Update(update);
@@ -652,26 +659,31 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
                        bool aInPBMode,
                        nsTArray<nsCString>&& aUpdates) {
     nsCOMPtr<nsIRunnable> updates(new Updates(this, Move(aUpdates)));
-    CreateDecryptor(aOrigin, aTopLevelOrigin, aInPBMode, updates);
+    CreateDecryptor(GetNodeId(aOrigin, aTopLevelOrigin, aInPBMode), updates);
   }
-  void CreateDecryptor(const nsAString& aOrigin,
-                       const nsAString& aTopLevelOrigin,
-                       bool aInPBMode,
+
+  void CreateDecryptor(const nsCString& aNodeId,
                        nsIRunnable* aContinuation) {
     RefPtr<GeckoMediaPluginService> service =
       GeckoMediaPluginService::GetGeckoMediaPluginService();
     EXPECT_TRUE(service);
 
-    mNodeId = GetNodeId(aOrigin, aTopLevelOrigin, aInPBMode);
+    mNodeId = aNodeId;
     EXPECT_TRUE(!mNodeId.IsEmpty());
 
     nsTArray<nsCString> tags;
     tags.AppendElement(NS_LITERAL_CSTRING("fake"));
 
     UniquePtr<GetGMPDecryptorCallback> callback(
-      new CreateDecryptorDone(this, aContinuation));
+      new CreateDecryptorDone(this));
+
+    // Continue after the OnSetDecryptorId message, so that we don't
+    // get warnings in the async shutdown tests due to receiving the
+    // SetDecryptorId message after we've started shutdown.
+    mSetDecryptorIdContinuation = aContinuation;
+
     nsresult rv =
-      service->GetGMPDecryptor(&tags, mNodeId, Move(callback));
+      service->GetGMPDecryptor(nullptr, &tags, mNodeId, Move(callback));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
   }
 
@@ -686,7 +698,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     // It sends us a "test-storage complete" message when its passed, or
     // some other message if its tests fail.
     Expect(NS_LITERAL_CSTRING("test-storage complete"),
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://example1.com"),
                     NS_LITERAL_STRING("http://example2.com"),
@@ -705,9 +717,9 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     EXPECT_TRUE(IsGMPStorageIsEmpty());
 
     // Generate storage data for some site.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestForgetThisSite_AnotherSite);
-    Expect(NS_LITERAL_CSTRING("test-storage complete"), r);
+    Expect(NS_LITERAL_CSTRING("test-storage complete"), r.forget());
 
     CreateDecryptor(NS_LITERAL_STRING("http://example1.com"),
                     NS_LITERAL_STRING("http://example2.com"),
@@ -719,9 +731,9 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     Shutdown();
 
     // Generate storage data for another site.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestForgetThisSite_CollectSiteInfo);
-    Expect(NS_LITERAL_CSTRING("test-storage complete"), r);
+    Expect(NS_LITERAL_CSTRING("test-storage complete"), r.forget());
 
     CreateDecryptor(NS_LITERAL_STRING("http://example3.com"),
                     NS_LITERAL_STRING("http://example4.com"),
@@ -730,8 +742,13 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   }
 
   struct NodeInfo {
-    explicit NodeInfo(const nsACString& aSite) : siteToForget(aSite) {}
+    explicit NodeInfo(const nsACString& aSite,
+                      const mozilla::OriginAttributesPattern& aPattern)
+      : siteToForget(aSite)
+      , mPattern(aPattern)
+    { }
     nsCString siteToForget;
+    mozilla::OriginAttributesPattern mPattern;
     nsTArray<nsCString> expectedRemainingNodeIds;
   };
 
@@ -742,7 +759,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
       nsCString salt;
       nsresult rv = ReadSalt(aFile, salt);
       ASSERT_TRUE(NS_SUCCEEDED(rv));
-      if (!MatchOrigin(aFile, mNodeInfo->siteToForget)) {
+      if (!MatchOrigin(aFile, mNodeInfo->siteToForget, mNodeInfo->mPattern)) {
         mNodeInfo->expectedRemainingNodeIds.AppendElement(salt);
       }
     }
@@ -751,28 +768,32 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   };
 
   void TestForgetThisSite_CollectSiteInfo() {
+    mozilla::OriginAttributesPattern pattern;
+
     nsAutoPtr<NodeInfo> siteInfo(
-        new NodeInfo(NS_LITERAL_CSTRING("http://example1.com")));
+        new NodeInfo(NS_LITERAL_CSTRING("http://example1.com"),
+                     pattern));
     // Collect nodeIds that are expected to remain for later comparison.
     EnumerateGMPStorageDir(NS_LITERAL_CSTRING("id"), NodeIdCollector(siteInfo));
     // Invoke "Forget this site" on the main thread.
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg<nsAutoPtr<NodeInfo>>(
+    NS_DispatchToMainThread(NewRunnableMethod<nsAutoPtr<NodeInfo>>(
         this, &GMPStorageTest::TestForgetThisSite_Forget, siteInfo));
   }
 
   void TestForgetThisSite_Forget(nsAutoPtr<NodeInfo> aSiteInfo) {
     RefPtr<GeckoMediaPluginServiceParent> service =
         GeckoMediaPluginServiceParent::GetSingleton();
-    service->ForgetThisSite(NS_ConvertUTF8toUTF16(aSiteInfo->siteToForget));
+    service->ForgetThisSiteNative(NS_ConvertUTF8toUTF16(aSiteInfo->siteToForget),
+                                  aSiteInfo->mPattern);
 
     nsCOMPtr<nsIThread> thread;
     service->GetThread(getter_AddRefs(thread));
 
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethodWithArg<nsAutoPtr<NodeInfo>>(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod<nsAutoPtr<NodeInfo>>(
         this, &GMPStorageTest::TestForgetThisSite_Verify, aSiteInfo);
     thread->Dispatch(r, NS_DISPATCH_NORMAL);
 
-    nsCOMPtr<nsIRunnable> f = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> f = NewRunnableMethod(
         this, &GMPStorageTest::SetFinished);
     thread->Dispatch(f, NS_DISPATCH_NORMAL);
   }
@@ -787,7 +808,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
       nsresult rv = ReadSalt(aFile, salt);
       ASSERT_TRUE(NS_SUCCEEDED(rv));
       // Shouldn't match the origin if we clear correctly.
-      EXPECT_FALSE(MatchOrigin(aFile, mNodeInfo->siteToForget));
+      EXPECT_FALSE(MatchOrigin(aFile, mNodeInfo->siteToForget, mNodeInfo->mPattern));
       // Check if remaining nodeIDs are as expected.
       EXPECT_TRUE(mExpectedRemainingNodeIds.RemoveElement(salt));
     }
@@ -838,9 +859,9 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     EXPECT_TRUE(IsGMPStorageIsEmpty());
 
     // Generate storage data for some site.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory1_Clear);
-    Expect(NS_LITERAL_CSTRING("test-storage complete"), r);
+    Expect(NS_LITERAL_CSTRING("test-storage complete"), r.forget());
 
     CreateDecryptor(NS_LITERAL_STRING("http://example1.com"),
                     NS_LITERAL_STRING("http://example2.com"),
@@ -860,9 +881,9 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     EXPECT_TRUE(IsGMPStorageIsEmpty());
 
     // Generate storage data for some site.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory2_Clear);
-    Expect(NS_LITERAL_CSTRING("test-storage complete"), r);
+    Expect(NS_LITERAL_CSTRING("test-storage complete"), r.forget());
 
     CreateDecryptor(NS_LITERAL_STRING("http://example1.com"),
                     NS_LITERAL_STRING("http://example2.com"),
@@ -882,9 +903,9 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     EXPECT_TRUE(IsGMPStorageIsEmpty());
 
     // Generate storage data for some site.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory3_Clear);
-    Expect(NS_LITERAL_CSTRING("test-storage complete"), r);
+    Expect(NS_LITERAL_CSTRING("test-storage complete"), r.forget());
 
     CreateDecryptor(NS_LITERAL_STRING("http://example1.com"),
                     NS_LITERAL_STRING("http://example2.com"),
@@ -913,10 +934,10 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     nsresult rv = EnumerateGMPStorageDir(NS_LITERAL_CSTRING("id"), f);
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory_CheckEmpty);
     nsCOMPtr<nsIThread> t(GetGMPThread());
-    ClearGMPStorage(r, t, f.GetResult());
+    ClearGMPStorage(r.forget(), t, f.GetResult());
   }
 
   void TestClearRecentHistory2_Clear() {
@@ -924,10 +945,10 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     nsresult rv = EnumerateGMPStorageDir(NS_LITERAL_CSTRING("storage"), f);
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory_CheckEmpty);
     nsCOMPtr<nsIThread> t(GetGMPThread());
-    ClearGMPStorage(r, t, f.GetResult());
+    ClearGMPStorage(r.forget(), t, f.GetResult());
   }
 
   void TestClearRecentHistory3_Clear() {
@@ -935,10 +956,10 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     nsresult rv = EnumerateGMPStorageDir(NS_LITERAL_CSTRING("storage"), f);
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         this, &GMPStorageTest::TestClearRecentHistory_CheckNonEmpty);
     nsCOMPtr<nsIThread> t(GetGMPThread());
-    ClearGMPStorage(r, t, f.GetResult() + 1);
+    ClearGMPStorage(r.forget(), t, f.GetResult() + 1);
   }
 
   class FileCounter {
@@ -992,7 +1013,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     auto t = time(0);
     nsCString response("stored crossOriginTestRecordId ");
     response.AppendInt((int64_t)t);
-    Expect(response, NS_NewRunnableMethod(this,
+    Expect(response, NewRunnableMethod(this,
       &GMPStorageTest::TestCrossOriginStorage_RecordStoredContinuation));
 
     nsCString update("store crossOriginTestRecordId ");
@@ -1012,7 +1033,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     Shutdown();
 
     Expect(NS_LITERAL_CSTRING("retrieve crossOriginTestRecordId succeeded (length 0 bytes)"),
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://example5.com"),
                     NS_LITERAL_STRING("http://example6.com"),
@@ -1024,7 +1045,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     // Send the decryptor the message "store recordid $time"
     // Wait for the decrytor to send us "stored recordid $time"
     nsCString response("stored pbdata test-pb-data");
-    Expect(response, NS_NewRunnableMethod(this,
+    Expect(response, NewRunnableMethod(this,
       &GMPStorageTest::TestPBStorage_RecordStoredContinuation));
 
     // Open decryptor on one, origin, write a record, close decryptor,
@@ -1041,7 +1062,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     Shutdown();
 
     Expect(NS_LITERAL_CSTRING("retrieve pbdata succeeded (length 12 bytes)"),
-           NS_NewRunnableMethod(this,
+           NewRunnableMethod(this,
               &GMPStorageTest::TestPBStorage_RecordRetrievedContinuation));
 
     CreateDecryptor(NS_LITERAL_STRING("http://pb1.com"),
@@ -1055,7 +1076,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     SimulatePBModeExit();
 
     Expect(NS_LITERAL_CSTRING("retrieve pbdata succeeded (length 0 bytes)"),
-           NS_NewRunnableMethod(this,
+           NewRunnableMethod(this,
               &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://pb1.com"),
@@ -1078,12 +1099,12 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
                                      const nsAString& aOrigin2,
                                      void (GMPStorageTest::*aCallback)()) {
     nsCOMPtr<nsIRunnable> continuation(
-      NS_NewRunnableMethodWithArg<nsCOMPtr<nsIRunnable>>(
+      NewRunnableMethod<nsCOMPtr<nsIRunnable>>(
         this,
         &GMPStorageTest::NextAsyncShutdownTimeoutTest,
-        NS_NewRunnableMethod(this, aCallback)));
+        NewRunnableMethod(this, aCallback)));
 
-    CreateDecryptor(aOrigin1, aOrigin2, false, continuation);
+    CreateDecryptor(GetNodeId(aOrigin1, aOrigin2, false), continuation);
   }
 
   void TestAsyncShutdownTimeout() {
@@ -1120,7 +1141,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     // the token.
     nsCString response("shutdown-token received ");
     response.Append(token);
-    Expect(response, NS_NewRunnableMethodWithArg<nsCString>(this,
+    Expect(response, NewRunnableMethod<nsCString>(this,
       &GMPStorageTest::TestAsyncShutdownStorage_ReceivedShutdownToken, token));
 
     // Test that a GMP can write to storage during shutdown, and retrieve
@@ -1132,7 +1153,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   }
 
   void TestAsyncShutdownStorage_ReceivedShutdownToken(const nsCString& aToken) {
-    ShutdownThen(NS_NewRunnableMethodWithArg<nsCString>(this,
+    ShutdownThen(NewRunnableMethod<nsCString>(this,
       &GMPStorageTest::TestAsyncShutdownStorage_AsyncShutdownComplete, aToken));
   }
 
@@ -1142,7 +1163,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     nsCString response("retrieved shutdown-token ");
     response.Append(aToken);
     Expect(response,
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://example13.com"),
                     NS_LITERAL_STRING("http://example14.com"),
@@ -1155,7 +1176,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     Shutdown();
 
     Expect(NS_LITERAL_CSTRING("OP tests completed"),
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://example15.com"),
                     NS_LITERAL_STRING("http://example16.com"),
@@ -1166,7 +1187,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
 
   void TestPluginVoucher() {
     Expect(NS_LITERAL_CSTRING("retrieved plugin-voucher: gmp-fake placeholder voucher"),
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     CreateDecryptor(NS_LITERAL_STRING("http://example17.com"),
                     NS_LITERAL_STRING("http://example18.com"),
@@ -1210,12 +1231,12 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
       update.AppendLiteral(" test-data");
       AppendIntPadded(update, i);
 
-      nsIRunnable* continuation = nullptr;
+      nsCOMPtr<nsIRunnable> continuation;
       if (i + 1 == num) {
         continuation =
-          NS_NewRunnableMethod(this, &GMPStorageTest::TestGetRecordNames_QueryNames);
+          NewRunnableMethod(this, &GMPStorageTest::TestGetRecordNames_QueryNames);
       }
-      Expect(response, continuation);
+      Expect(response, continuation.forget());
     }
 
     CreateDecryptor(NS_LITERAL_STRING("http://foo.com"),
@@ -1228,7 +1249,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     nsCString response("record-names ");
     response.Append(mRecordNames);
     Expect(response,
-           NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+           NewRunnableMethod(this, &GMPStorageTest::SetFinished));
     Update(NS_LITERAL_CSTRING("retrieve-record-names"));
   }
 
@@ -1265,7 +1286,7 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     response.Append(longRecordName);
     response.AppendLiteral(" ");
     response.Append(data);
-    Expect(response, NS_NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+    Expect(response, NewRunnableMethod(this, &GMPStorageTest::SetFinished));
 
     nsCString update("store ");
     update.Append(longRecordName);
@@ -1277,8 +1298,26 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
                     update);
   }
 
-  void Expect(const nsCString& aMessage, nsIRunnable* aContinuation) {
-    mExpected.AppendElement(ExpectedMessage(aMessage, aContinuation));
+  void TestNodeId() {
+    // Calculate the nodeId, and the device bound nodeId. Start a GMP, and
+    // have it return the device bound nodeId that it's been passed. Assert
+    // they have the same value.
+    const nsString origin = NS_LITERAL_STRING("http://example-fuz-baz.com");
+    nsCString originSalt1 = GetNodeId(origin, origin, false);
+
+    nsCString salt = originSalt1;
+    std::string nodeId;
+    EXPECT_TRUE(CalculateGMPDeviceId(salt.BeginWriting(), salt.Length(), nodeId));
+
+    std::string expected = "node-id " + nodeId;
+    Expect(nsDependentCString(expected.c_str()), NewRunnableMethod(this, &GMPStorageTest::SetFinished));
+
+    CreateDecryptor(originSalt1,
+                    NS_LITERAL_CSTRING("retrieve-node-id"));
+  }
+
+  void Expect(const nsCString& aMessage, already_AddRefed<nsIRunnable> aContinuation) {
+    mExpected.AppendElement(ExpectedMessage(aMessage, Move(aContinuation)));
   }
 
   void AwaitFinished() {
@@ -1288,15 +1327,15 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     mFinished = false;
   }
 
-  void ShutdownThen(nsIRunnable* aContinuation) {
+  void ShutdownThen(already_AddRefed<nsIRunnable> aContinuation) {
     EXPECT_TRUE(!!mDecryptor);
     if (!mDecryptor) {
       return;
     }
     EXPECT_FALSE(mNodeId.IsEmpty());
     RefPtr<GMPShutdownObserver> task(
-      new GMPShutdownObserver(NS_NewRunnableMethod(this, &GMPStorageTest::Shutdown),
-                              aContinuation, mNodeId));
+      new GMPShutdownObserver(NewRunnableMethod(this, &GMPStorageTest::Shutdown),
+                              Move(aContinuation), mNodeId));
     NS_DispatchToMainThread(task, NS_DISPATCH_NORMAL);
   }
 
@@ -1314,12 +1353,12 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
   void SetFinished() {
     mFinished = true;
     Shutdown();
-    NS_DispatchToMainThread(NS_NewRunnableMethod(this, &GMPStorageTest::Dummy));
+    NS_DispatchToMainThread(NewRunnableMethod(this, &GMPStorageTest::Dummy));
   }
 
-  virtual void SessionMessage(const nsCString& aSessionId,
-                              GMPSessionMessageType aMessageType,
-                              const nsTArray<uint8_t>& aMessage) override
+  void SessionMessage(const nsCString& aSessionId,
+                      mozilla::dom::MediaKeyMessageType aMessageType,
+                      const nsTArray<uint8_t>& aMessage) override
   {
     MonitorAutoLock mon(mMonitor);
 
@@ -1336,29 +1375,39 @@ class GMPStorageTest : public GMPDecryptorProxyCallback
     }
   }
 
-  virtual void SetSessionId(uint32_t aCreateSessionToken,
-                            const nsCString& aSessionId) override { }
-  virtual void ResolveLoadSessionPromise(uint32_t aPromiseId,
-                                         bool aSuccess) override {}
-  virtual void ResolvePromise(uint32_t aPromiseId) override {}
-  virtual void RejectPromise(uint32_t aPromiseId,
-                             nsresult aException,
-                             const nsCString& aSessionId) override { }
-  virtual void ExpirationChange(const nsCString& aSessionId,
-                                GMPTimestamp aExpiryTime) override {}
-  virtual void SessionClosed(const nsCString& aSessionId) override {}
-  virtual void SessionError(const nsCString& aSessionId,
-                            nsresult aException,
-                            uint32_t aSystemCode,
-                            const nsCString& aMessage) override {}
-  virtual void KeyStatusChanged(const nsCString& aSessionId,
-                                const nsTArray<uint8_t>& aKeyId,
-                                GMPMediaKeyStatus aStatus) override { }
-  virtual void SetCaps(uint64_t aCaps) override {}
-  virtual void Decrypted(uint32_t aId,
-                         GMPErr aResult,
-                         const nsTArray<uint8_t>& aDecryptedData) override { }
-  virtual void Terminated() override {
+  void SetDecryptorId(uint32_t aId) override
+  {
+    if (!mSetDecryptorIdContinuation) {
+      return;
+    }
+    nsCOMPtr<nsIThread> thread(GetGMPThread());
+    thread->Dispatch(mSetDecryptorIdContinuation, NS_DISPATCH_NORMAL);
+    mSetDecryptorIdContinuation = nullptr;
+  }
+
+  void SetSessionId(uint32_t aCreateSessionToken,
+                    const nsCString& aSessionId) override { }
+  void ResolveLoadSessionPromise(uint32_t aPromiseId,
+                                 bool aSuccess) override {}
+  void ResolvePromise(uint32_t aPromiseId) override {}
+  void RejectPromise(uint32_t aPromiseId,
+                     nsresult aException,
+                     const nsCString& aSessionId) override { }
+  void ExpirationChange(const nsCString& aSessionId,
+                        UnixTime aExpiryTime) override {}
+  void SessionClosed(const nsCString& aSessionId) override {}
+  void SessionError(const nsCString& aSessionId,
+                    nsresult aException,
+                    uint32_t aSystemCode,
+                    const nsCString& aMessage) override {}
+  void Decrypted(uint32_t aId,
+                 mozilla::DecryptStatus aResult,
+                 const nsTArray<uint8_t>& aDecryptedData) override { }
+
+  void BatchedKeyStatusChanged(const nsCString& aSessionId,
+                               const nsTArray<CDMKeyInfo>& aKeyInfos) override { }
+
+  void Terminated() override {
     if (mDecryptor) {
       mDecryptor->Close();
       mDecryptor = nullptr;
@@ -1369,7 +1418,7 @@ private:
   ~GMPStorageTest() { }
 
   struct ExpectedMessage {
-    ExpectedMessage(const nsCString& aMessage, nsIRunnable* aContinuation)
+    ExpectedMessage(const nsCString& aMessage, already_AddRefed<nsIRunnable> aContinuation)
       : mMessage(aMessage)
       , mContinuation(aContinuation)
     {}
@@ -1378,6 +1427,8 @@ private:
   };
 
   nsTArray<ExpectedMessage> mExpected;
+
+  RefPtr<nsIRunnable> mSetDecryptorIdContinuation;
 
   GMPDecryptorProxy* mDecryptor;
   Monitor mMonitor;
@@ -1391,9 +1442,9 @@ GMPTestRunner::DoTest(void (GMPTestRunner::*aTestMethod)(GMPTestMonitor&))
   nsCOMPtr<nsIThread> thread(GetGMPThread());
 
   GMPTestMonitor monitor;
-  thread->Dispatch(NS_NewRunnableMethodWithArg<GMPTestMonitor&>(this,
-                                                                aTestMethod,
-                                                                monitor),
+  thread->Dispatch(NewRunnableMethod<GMPTestMonitor&>(this,
+                                                      aTestMethod,
+                                                      monitor),
                    NS_DISPATCH_NORMAL);
   monitor.AwaitFinished();
 }
@@ -1495,64 +1546,7 @@ TEST(GeckoMediaPlugins, GMPStorageLongRecordNames) {
   runner->DoTest(&GMPStorageTest::TestLongRecordNames);
 }
 
-#ifdef XP_WIN
-class GMPTrialCreateTest
-{
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPStorageTest)
-
-  void DoTest() {
-    EnsureNSSInitializedChromeOrContent();
-    mCreator = new mozilla::dom::GMPVideoDecoderTrialCreator();
-    mCreator->MaybeAwaitTrialCreate(NS_LITERAL_STRING("broken"), nullptr, this, nullptr);
-    AwaitFinished();
-  }
-
-  GMPTrialCreateTest()
-    : mMonitor("GMPTrialCreateTest")
-    , mFinished(false)
-    , mPassed(false)
-  {
-  }
-
-  void MaybeResolve(mozilla::dom::MediaKeySystemAccess* aAccess) {
-    mPassed = false;
-    SetFinished();
-  }
-
-  void MaybeReject(nsresult aResult, const nsACString& aUnusedMessage) {
-    mPassed = true;
-    SetFinished();
-  }
-
-private:
-  ~GMPTrialCreateTest() { }
-
-  void Dummy() {
-    // Intentionally left blank.
-  }
-
-  void SetFinished() {
-    mFinished = true;
-    NS_DispatchToMainThread(NS_NewRunnableMethod(this, &GMPTrialCreateTest::Dummy));
-  }
-
-  void AwaitFinished() {
-    while (!mFinished) {
-      NS_ProcessNextEvent(nullptr, true);
-    }
-    mFinished = false;
-  }
-
-  RefPtr<mozilla::dom::GMPVideoDecoderTrialCreator> mCreator;
-
-  Monitor mMonitor;
-  Atomic<bool> mFinished;
-  bool mPassed;
-};
-
-TEST(GeckoMediaPlugins, GMPTrialCreateFail) {
-  RefPtr<GMPTrialCreateTest> runner = new GMPTrialCreateTest();
-  runner->DoTest();
+TEST(GeckoMediaPlugins, GMPNodeId) {
+  RefPtr<GMPStorageTest> runner = new GMPStorageTest();
+  runner->DoTest(&GMPStorageTest::TestNodeId);
 }
-
-#endif // XP_WIN

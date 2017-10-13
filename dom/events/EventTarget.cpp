@@ -41,7 +41,7 @@ EventTarget::SetEventHandler(const nsAString& aType,
     return;
   }
   if (NS_IsMainThread()) {
-    nsCOMPtr<nsIAtom> type = do_GetAtom(aType);
+    nsCOMPtr<nsIAtom> type = NS_Atomize(aType);
     SetEventHandler(type, EmptyString(), aHandler);
     return;
   }
@@ -58,10 +58,20 @@ EventTarget::SetEventHandler(nsIAtom* aType, const nsAString& aTypeString,
 }
 
 bool
-EventTarget::HasApzAwareListeners() const
+EventTarget::IsApzAware() const
 {
   EventListenerManager* elm = GetExistingListenerManager();
   return elm && elm->HasApzAwareListeners();
+}
+
+bool
+EventTarget::DispatchEvent(JSContext* aCx,
+                           Event& aEvent,
+                           ErrorResult& aRv)
+{
+  bool result = false;
+  aRv = DispatchEvent(&aEvent, &result);
+  return !aEvent.DefaultPrevented(aCx);
 }
 
 } // namespace dom

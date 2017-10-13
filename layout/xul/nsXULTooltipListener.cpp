@@ -106,7 +106,7 @@ nsXULTooltipListener::MouseOut(nsIDOMEvent* aEvent)
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
       nsCOMPtr<nsIDOMNode> tooltipNode =
-        pm->GetLastTriggerTooltipNode(currentTooltip->GetCurrentDoc());
+        pm->GetLastTriggerTooltipNode(currentTooltip->GetUncomposedDoc());
       if (tooltipNode == targetNode) {
         // if the target node is the current tooltip target node, the mouse
         // left the node the tooltip appeared on, so close the tooltip.
@@ -473,7 +473,7 @@ SetTitletipLabel(nsITreeBoxObject* aTreeBox, nsIContent* aTooltip,
     nsresult rv = 
 #endif
       view->GetCellText(aRow, aCol, label);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Couldn't get the cell text!");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Couldn't get the cell text!");
     aTooltip->SetAttr(kNameSpaceID_None, nsGkAtoms::label, label, true);
   }
 }
@@ -564,7 +564,7 @@ nsXULTooltipListener::FindTooltip(nsIContent* aTarget, nsIContent** aTooltip)
     NS_WARNING("Unable to retrieve the tooltip node document.");
     return NS_ERROR_FAILURE;
   }
-  nsPIDOMWindow *window = document->GetWindow();
+  nsPIDOMWindowOuter *window = document->GetWindow();
   if (!window) {
     return NS_OK;
   }

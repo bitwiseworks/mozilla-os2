@@ -31,14 +31,15 @@ public:
   NS_IMETHOD SetDomain(nsIURI* aDomain) override;
   NS_IMETHOD GetCsp(nsIContentSecurityPolicy** aCsp) override;
   NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp) override;
+  NS_IMETHOD EnsureCSP(nsIDOMDocument* aDocument, nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP) override;
-  NS_IMETHOD SetPreloadCsp(nsIContentSecurityPolicy* aPreloadCSP) override;
+  NS_IMETHOD EnsurePreloadCSP(nsIDOMDocument* aDocument, nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetBaseDomain(nsACString& aBaseDomain) override;
   nsresult GetOriginInternal(nsACString& aOrigin) override;
 
   nsSystemPrincipal() {}
 
-  virtual void GetScriptLocation(nsACString &aStr) override;
+  virtual nsresult GetScriptLocation(nsACString &aStr) override;
 
 protected:
   virtual ~nsSystemPrincipal(void) {}

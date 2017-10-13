@@ -14,13 +14,13 @@
 
 class nsIContent;
 class nsIDOMMouseEvent;
-class nsIEditor;
 class nsINode;
 class nsPresContext;
 class nsISelection;
 
 namespace mozilla {
 
+class EditorBase;
 class EventDispatchingCallback;
 class IMEContentObserver;
 class TextCompositionArray;
@@ -70,6 +70,20 @@ public:
   static void WidgetDestroyed(nsIWidget* aWidget);
 
   /**
+   * GetWidgetForActiveInputContext() returns a widget which IMEStateManager
+   * is managing input context with.  If a widget instance needs to cache
+   * the last input context for nsIWidget::GetInputContext() or something,
+   * it should check if its cache is valid with this method before using it
+   * because if this method returns another instance, it means that
+   * IMEStateManager may have already changed shared input context via the
+   * widget.
+   */
+  static nsIWidget* GetWidgetForActiveInputContext()
+  {
+    return sActiveInputContextWidget;
+  }
+
+  /**
    * SetIMEContextForChildProcess() is called when aTabParent receives
    * SetInputContext() from the remote process.
    */
@@ -82,6 +96,18 @@ public:
    * IME state.
    */
   static void StopIMEStateManagement();
+
+  /**
+   * MaybeStartOffsetUpdatedInChild() is called when composition start offset
+   * is maybe updated in the child process.  I.e., even if it's not updated,
+   * this is called and never called if the composition is in this process.
+   * @param aWidget             The widget whose native IME context has the
+   *                            composition.
+   * @param aStartOffset        New composition start offset with native
+   *                            linebreaks.
+   */
+  static void MaybeStartOffsetUpdatedInChild(nsIWidget* aWidget,
+                                             uint32_t aStartOffset);
 
   static nsresult OnDestroyPresContext(nsPresContext* aPresContext);
   static nsresult OnRemoveContent(nsPresContext* aPresContext,
@@ -109,7 +135,7 @@ public:
   // widget.  So, the caller must have focus.
   static void UpdateIMEState(const IMEState &aNewIMEState,
                              nsIContent* aContent,
-                             nsIEditor* aEditor);
+                             EditorBase& aEditorBase);
 
   // This method is called when user operates mouse button in focused editor
   // and before the editor handles it.
@@ -210,6 +236,12 @@ public:
   static nsINode* GetRootEditableNode(nsPresContext* aPresContext,
                                       nsIContent* aContent);
 
+  /**
+   * Returns active IMEContentObserver but may be nullptr if focused content
+   * isn't editable or focus in a remote process.
+   */
+  static IMEContentObserver* GetActiveContentObserver();
+
 protected:
   static nsresult OnChangeFocusInternal(nsPresContext* aPresContext,
                                         nsIContent* aContent,
@@ -234,9 +266,30 @@ protected:
 
   static nsIContent* GetRootContent(nsPresContext* aPresContext);
 
+  /**
+   * CanHandleWith() returns false if aPresContext is nullptr or it's destroyed.
+   */
+  static bool CanHandleWith(nsPresContext* aPresContext);
+
+  // sContent and sPresContext are the focused content and PresContext.  If a
+  // document has focus but there is no focused element, sContent may be
+  // nullptr.
   static StaticRefPtr<nsIContent> sContent;
   static StaticRefPtr<nsPresContext> sPresContext;
+  // sWidget is cache for the root widget of sPresContext.  Even afer
+  // sPresContext has gone, we need to clean up some IME state on the widget
+  // if the widget is available.
+  static nsIWidget* sWidget;
+  // sFocusedIMEWidget is, the widget which was sent to "focus" notification
+  // from IMEContentObserver and not yet sent "blur" notification.
+  // So, if this is not nullptr, the widget needs to receive "blur"
+  // notification.
   static nsIWidget* sFocusedIMEWidget;
+  // sActiveInputContextWidget is the last widget whose SetInputContext() is
+  // called.  This is important to reduce sync IPC cost with parent process.
+  // If IMEStateManager set input context to different widget, PuppetWidget can
+  // return cached input context safely.
+  static nsIWidget* sActiveInputContextWidget;
   static StaticRefPtr<TabParent> sActiveTabParent;
   // sActiveIMEContentObserver points to the currently active
   // IMEContentObserver.  This is null if there is no focused editor.

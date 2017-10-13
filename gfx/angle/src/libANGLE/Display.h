@@ -14,11 +14,11 @@
 #include <set>
 #include <vector>
 
-#include "libANGLE/Error.h"
+#include "libANGLE/AttributeMap.h"
 #include "libANGLE/Caps.h"
 #include "libANGLE/Config.h"
-#include "libANGLE/AttributeMap.h"
-#include "libANGLE/renderer/Renderer.h"
+#include "libANGLE/Error.h"
+#include "libANGLE/Version.h"
 
 namespace gl
 {
@@ -35,6 +35,7 @@ namespace egl
 class Device;
 class Image;
 class Surface;
+class Stream;
 
 class Display final : angle::NonCopyable
 {
@@ -44,7 +45,8 @@ class Display final : angle::NonCopyable
     Error initialize();
     void terminate();
 
-    static egl::Display *getDisplay(EGLNativeDisplayType displayId, const AttributeMap &attribMap);
+    static egl::Display *GetDisplayFromDevice(void *native_display);
+    static egl::Display *GetDisplayFromAttribs(void *native_display, const AttributeMap &attribMap);
 
     static const ClientExtensions &getClientExtensions();
     static const std::string &getClientExtensionString();
@@ -55,7 +57,10 @@ class Display final : angle::NonCopyable
     Error createWindowSurface(const Config *configuration, EGLNativeWindowType window, const AttributeMap &attribs,
                               Surface **outSurface);
     Error createPbufferSurface(const Config *configuration, const AttributeMap &attribs, Surface **outSurface);
-    Error createPbufferFromClientBuffer(const Config *configuration, EGLClientBuffer shareHandle, const AttributeMap &attribs,
+    Error createPbufferFromClientBuffer(const Config *configuration,
+                                        EGLenum buftype,
+                                        EGLClientBuffer clientBuffer,
+                                        const AttributeMap &attribs,
                                         Surface **outSurface);
     Error createPixmapSurface(const Config *configuration, NativePixmapType nativePixmap, const AttributeMap &attribs,
                               Surface **outSurface);
@@ -66,6 +71,8 @@ class Display final : angle::NonCopyable
                       const AttributeMap &attribs,
                       Image **outImage);
 
+    Error createStream(const AttributeMap &attribs, Stream **outStream);
+
     Error createContext(const Config *configuration, gl::Context *shareContext, const AttributeMap &attribs,
                         gl::Context **outContext);
 
@@ -73,14 +80,21 @@ class Display final : angle::NonCopyable
 
     void destroySurface(egl::Surface *surface);
     void destroyImage(egl::Image *image);
+    void destroyStream(egl::Stream *stream);
     void destroyContext(gl::Context *context);
 
     bool isInitialized() const;
     bool isValidConfig(const Config *config) const;
-    bool isValidContext(gl::Context *context) const;
-    bool isValidSurface(egl::Surface *surface) const;
+    bool isValidContext(const gl::Context *context) const;
+    bool isValidSurface(const egl::Surface *surface) const;
     bool isValidImage(const Image *image) const;
+    bool isValidStream(const Stream *stream) const;
     bool isValidNativeWindow(EGLNativeWindowType window) const;
+
+    Error validateClientBuffer(const Config *configuration,
+                               EGLenum buftype,
+                               EGLClientBuffer clientBuffer,
+                               const AttributeMap &attribs);
 
     static bool isValidDisplay(const egl::Display *display);
     static bool isValidNativeDisplay(EGLNativeDisplayType display);
@@ -89,6 +103,9 @@ class Display final : angle::NonCopyable
     bool isDeviceLost() const;
     bool testDeviceLost();
     void notifyDeviceLost();
+
+    Error waitClient() const;
+    Error waitNative(EGLint engine, egl::Surface *drawSurface, egl::Surface *readSurface) const;
 
     const Caps &getCaps() const;
 
@@ -101,9 +118,12 @@ class Display final : angle::NonCopyable
 
     rx::DisplayImpl *getImplementation() { return mImplementation; }
     Device *getDevice() const;
+    EGLenum getPlatform() const { return mPlatform; }
+
+    gl::Version getMaxSupportedESVersion() const;
 
   private:
-    Display(EGLNativeDisplayType displayId);
+    Display(EGLenum platform, EGLNativeDisplayType displayId, Device *eglDevice);
 
     void setAttributes(rx::DisplayImpl *impl, const AttributeMap &attribMap);
 
@@ -125,7 +145,11 @@ class Display final : angle::NonCopyable
     typedef std::set<Image *> ImageSet;
     ImageSet mImageSet;
 
+    typedef std::set<Stream *> StreamSet;
+    StreamSet mStreamSet;
+
     bool mInitialized;
+    bool mDeviceLost;
 
     Caps mCaps;
 
@@ -135,6 +159,7 @@ class Display final : angle::NonCopyable
     std::string mVendorString;
 
     Device *mDevice;
+    EGLenum mPlatform;
 };
 
 }

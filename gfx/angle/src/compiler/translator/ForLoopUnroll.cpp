@@ -6,6 +6,12 @@
 
 #include "compiler/translator/ForLoopUnroll.h"
 
+#include "compiler/translator/ValidateLimitations.h"
+#include "angle_gl.h"
+
+namespace sh
+{
+
 bool ForLoopUnrollMarker::visitBinary(Visit, TIntermBinary *node)
 {
     if (mUnrollCondition != kSamplerArrayIndex)
@@ -38,23 +44,35 @@ bool ForLoopUnrollMarker::visitBinary(Visit, TIntermBinary *node)
 
 bool ForLoopUnrollMarker::visitLoop(Visit, TIntermLoop *node)
 {
-    if (mUnrollCondition == kIntegerIndex)
+    bool canBeUnrolled = mHasRunLoopValidation;
+    if (!mHasRunLoopValidation)
+    {
+        canBeUnrolled = ValidateLimitations::IsLimitedForLoop(node);
+    }
+    if (mUnrollCondition == kIntegerIndex && canBeUnrolled)
     {
         // Check if loop index type is integer.
-        // This is called after ValidateLimitations pass, so all the calls
-        // should be valid. See ValidateLimitations::validateForLoopInit().
-        TIntermSequence *declSeq = node->getInit()->getAsAggregate()->getSequence();
+        // This is called after ValidateLimitations pass, so the loop has the limited form specified
+        // in ESSL 1.00 appendix A.
+        TIntermSequence *declSeq = node->getInit()->getAsDeclarationNode()->getSequence();
         TIntermSymbol *symbol = (*declSeq)[0]->getAsBinaryNode()->getLeft()->getAsSymbolNode();
         if (symbol->getBasicType() == EbtInt)
             node->setUnrollFlag(true);
     }
 
     TIntermNode *body = node->getBody();
-    if (body != NULL)
+    if (body != nullptr)
     {
-        mLoopStack.push(node);
-        body->traverse(this);
-        mLoopStack.pop();
+        if (canBeUnrolled)
+        {
+            mLoopStack.push(node);
+            body->traverse(this);
+            mLoopStack.pop();
+        }
+        else
+        {
+            body->traverse(this);
+        }
     }
     // The loop is fully processed - no need to visit children.
     return false;
@@ -80,3 +98,5 @@ void ForLoopUnrollMarker::visitSymbol(TIntermSymbol* symbol)
         }
     }
 }
+
+}  // namespace sh

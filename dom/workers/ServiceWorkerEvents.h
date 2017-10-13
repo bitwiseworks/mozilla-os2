@@ -11,15 +11,11 @@
 #include "mozilla/dom/ExtendableEventBinding.h"
 #include "mozilla/dom/ExtendableMessageEventBinding.h"
 #include "mozilla/dom/FetchEventBinding.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/workers/bindings/ServiceWorker.h"
-
-#ifndef MOZ_SIMPLEPUSH
-#include "mozilla/dom/PushEventBinding.h"
-#include "mozilla/dom/PushMessageDataBinding.h"
-#include "mozilla/dom/File.h"
-#endif
+#include "mozilla/dom/workers/Workers.h"
 
 #include "nsProxyRelease.h"
 #include "nsContentUtils.h"
@@ -30,20 +26,25 @@ namespace mozilla {
 namespace dom {
 class Blob;
 class MessagePort;
-class MessagePortList;
 class Request;
 class ResponseOrPromise;
+
+struct PushEventInit;
 } // namespace dom
 } // namespace mozilla
 
 BEGIN_WORKERS_NAMESPACE
 
-class CancelChannelRunnable final : public nsRunnable
+class ServiceWorkerRegistrationInfo;
+
+class CancelChannelRunnable final : public Runnable
 {
   nsMainThreadPtrHandle<nsIInterceptedChannel> mChannel;
+  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> mRegistration;
   const nsresult mStatus;
 public:
   CancelChannelRunnable(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
+                        nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo>& aRegistration,
                         nsresult aStatus);
 
   NS_IMETHOD Run() override;
@@ -76,6 +77,7 @@ public:
     bool trusted = e->Init(aOwner);
     e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
     e->SetTrusted(trusted);
+    e->SetComposed(aOptions.mComposed);
     return e.forget();
   }
 
@@ -104,6 +106,7 @@ public:
 class FetchEvent final : public ExtendableEvent
 {
   nsMainThreadPtrHandle<nsIInterceptedChannel> mChannel;
+  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> mRegistration;
   RefPtr<Request> mRequest;
   nsCString mScriptSpec;
   nsCString mPreventDefaultScriptSpec;
@@ -130,6 +133,7 @@ public:
   }
 
   void PostInit(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
+                nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo>& aRegistration,
                 const nsACString& aScriptSpec);
 
   static already_AddRefed<FetchEvent>
@@ -145,8 +149,9 @@ public:
   }
 
   Request*
-  GetRequest_() const
+  Request_() const
   {
+    MOZ_ASSERT(mRequest);
     return mRequest;
   }
 
@@ -178,8 +183,6 @@ public:
   ReportCanceled();
 };
 
-#ifndef MOZ_SIMPLEPUSH
-
 class PushMessageData final : public nsISupports,
                               public nsWrapperCache
 {
@@ -187,10 +190,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PushMessageData)
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
-  {
-    return mozilla::dom::PushMessageDataBinding_workers::Wrap(aCx, this, aGivenProto);
-  }
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsISupports* GetParentObject() const {
     return mOwner;
@@ -203,14 +203,14 @@ public:
                    ErrorResult& aRv);
   already_AddRefed<mozilla::dom::Blob> Blob(ErrorResult& aRv);
 
-  PushMessageData(nsISupports* aOwner, const nsTArray<uint8_t>& aBytes);
+  PushMessageData(nsISupports* aOwner, nsTArray<uint8_t>&& aBytes);
 private:
   nsCOMPtr<nsISupports> mOwner;
   nsTArray<uint8_t> mBytes;
   nsString mDecodedText;
   ~PushMessageData();
 
-  NS_METHOD EnsureDecodedText();
+  nsresult EnsureDecodedText();
   uint8_t* GetContentsCopy();
 };
 
@@ -227,10 +227,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PushEvent, ExtendableEvent)
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
-  {
-    return mozilla::dom::PushEventBinding_workers::Wrap(aCx, this, aGivenProto);
-  }
+  virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static already_AddRefed<PushEvent>
   Constructor(mozilla::dom::EventTarget* aOwner,
@@ -254,7 +251,6 @@ public:
     return mData;
   }
 };
-#endif /* ! MOZ_SIMPLEPUSH */
 
 class ExtendableMessageEvent final : public ExtendableEvent
 {
@@ -264,7 +260,7 @@ class ExtendableMessageEvent final : public ExtendableEvent
   RefPtr<ServiceWorkerClient> mClient;
   RefPtr<ServiceWorker> mServiceWorker;
   RefPtr<MessagePort> mMessagePort;
-  RefPtr<MessagePortList> mPorts;
+  nsTArray<RefPtr<MessagePort>> mPorts;
 
 protected:
   explicit ExtendableMessageEvent(EventTarget* aOwner);
@@ -312,13 +308,7 @@ public:
     return NS_OK;
   }
 
-  MessagePortList* GetPorts() const;
-
-  void SetPorts(MessagePortList* aPorts);
-
-  void SetSource(ServiceWorkerClient* aClient);
-
-  void SetSource(ServiceWorker* aServiceWorker);
+  void GetPorts(nsTArray<RefPtr<MessagePort>>& aPorts);
 };
 
 END_WORKERS_NAMESPACE

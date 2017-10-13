@@ -361,12 +361,6 @@ txMozillaXSLTProcessor::txMozillaXSLTProcessor(nsISupports* aOwner)
 {
 }
 
-NS_IMETHODIMP
-txMozillaXSLTProcessor::Init(nsISupports* aOwner)
-{
-    return NS_OK;
-}
-
 txMozillaXSLTProcessor::~txMozillaXSLTProcessor()
 {
     if (mStylesheetDocument) {
@@ -402,7 +396,7 @@ NS_IMETHODIMP
 txMozillaXSLTProcessor::AddXSLTParamNamespace(const nsString& aPrefix,
                                               const nsString& aNamespace)
 {
-    nsCOMPtr<nsIAtom> pre = do_GetAtom(aPrefix);
+    nsCOMPtr<nsIAtom> pre = NS_Atomize(aPrefix);
     return mParamNamespaceMap.mapNamespace(pre, aNamespace);
 }
 
@@ -524,7 +518,7 @@ txMozillaXSLTProcessor::AddXSLTParam(const nsString& aName,
         value = new StringResult(aValue, nullptr);
     }
 
-    nsCOMPtr<nsIAtom> name = do_GetAtom(aName);
+    nsCOMPtr<nsIAtom> name = NS_Atomize(aName);
     int32_t nsId = kNameSpaceID_Unknown;
     rv = nsContentUtils::NameSpaceManager()->
         RegisterNameSpace(aNamespace, nsId);
@@ -534,7 +528,7 @@ txMozillaXSLTProcessor::AddXSLTParam(const nsString& aName,
     txVariable* var = static_cast<txVariable*>(mVariables.get(varName));
     if (var) {
         var->setValue(value);
-        
+
         return NS_OK;
     }
 
@@ -544,7 +538,7 @@ txMozillaXSLTProcessor::AddXSLTParam(const nsString& aName,
     return mVariables.add(varName, var);
 }
 
-class nsTransformBlockerEvent : public nsRunnable {
+class nsTransformBlockerEvent : public mozilla::Runnable {
 public:
   RefPtr<txMozillaXSLTProcessor> mProcessor;
 
@@ -559,7 +553,7 @@ public:
     document->UnblockOnload(true);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mProcessor->TransformToDoc(nullptr, false);
     return NS_OK;
@@ -594,7 +588,7 @@ NS_IMETHODIMP
 txMozillaXSLTProcessor::ImportStylesheet(nsIDOMNode *aStyle)
 {
     NS_ENSURE_TRUE(aStyle, NS_ERROR_NULL_POINTER);
-    
+
     // We don't support importing multiple stylesheets yet.
     NS_ENSURE_TRUE(!mStylesheetDocument && !mStylesheet,
                    NS_ERROR_NOT_IMPLEMENTED);
@@ -603,7 +597,7 @@ txMozillaXSLTProcessor::ImportStylesheet(nsIDOMNode *aStyle)
     if (!node || !nsContentUtils::SubjectPrincipalOrSystemIfNativeCaller()->Subsumes(node->NodePrincipal())) {
         return NS_ERROR_DOM_SECURITY_ERR;
     }
-    
+
     nsCOMPtr<nsINode> styleNode = do_QueryInterface(aStyle);
     NS_ENSURE_TRUE(styleNode &&
                    (styleNode->IsElement() ||
@@ -680,12 +674,12 @@ txMozillaXSLTProcessor::TransformToDoc(nsIDOMDocument **aResult,
     if (NS_SUCCEEDED(rv)) {
         rv = txXSLTProcessor::execute(es);
     }
-    
+
     nsresult endRv = es.end(rv);
     if (NS_SUCCEEDED(rv)) {
       rv = endRv;
     }
-    
+
     if (NS_SUCCEEDED(rv)) {
         if (aResult) {
             txAOutputXMLEventHandler* handler =
@@ -939,14 +933,14 @@ txMozillaXSLTProcessor::SetParameter(const nsAString & aNamespaceURI,
         default:
         {
             return NS_ERROR_FAILURE;
-        }        
+        }
     }
 
     int32_t nsId = kNameSpaceID_Unknown;
     nsresult rv = nsContentUtils::NameSpaceManager()->
         RegisterNameSpace(aNamespaceURI, nsId);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsIAtom> localName = do_GetAtom(aLocalName);
+    nsCOMPtr<nsIAtom> localName = NS_Atomize(aLocalName);
     txExpandedName varName(nsId, localName);
 
     txVariable* var = static_cast<txVariable*>(mVariables.get(varName));
@@ -968,7 +962,7 @@ txMozillaXSLTProcessor::GetParameter(const nsAString& aNamespaceURI,
     nsresult rv = nsContentUtils::NameSpaceManager()->
         RegisterNameSpace(aNamespaceURI, nsId);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsIAtom> localName = do_GetAtom(aLocalName);
+    nsCOMPtr<nsIAtom> localName = NS_Atomize(aLocalName);
     txExpandedName varName(nsId, localName);
 
     txVariable* var = static_cast<txVariable*>(mVariables.get(varName));
@@ -986,7 +980,7 @@ txMozillaXSLTProcessor::RemoveParameter(const nsAString& aNamespaceURI,
     nsresult rv = nsContentUtils::NameSpaceManager()->
         RegisterNameSpace(aNamespaceURI, nsId);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsIAtom> localName = do_GetAtom(aLocalName);
+    nsCOMPtr<nsIAtom> localName = NS_Atomize(aLocalName);
     txExpandedName varName(nsId, localName);
 
     mVariables.remove(varName);
@@ -1100,12 +1094,12 @@ txMozillaXSLTProcessor::reportError(nsresult aResult,
             if (bundle) {
                 const char16_t* error[] = { errorText.get() };
                 if (mStylesheet) {
-                    bundle->FormatStringFromName(MOZ_UTF16("TransformError"),
+                    bundle->FormatStringFromName(u"TransformError",
                                                  error, 1,
                                                  getter_Copies(errorMessage));
                 }
                 else {
-                    bundle->FormatStringFromName(MOZ_UTF16("LoadingError"),
+                    bundle->FormatStringFromName(u"LoadingError",
                                                  error, 1,
                                                  getter_Copies(errorMessage));
                 }
@@ -1179,7 +1173,7 @@ txMozillaXSLTProcessor::notifyError()
         if (NS_FAILED(rv)) {
             return;
         }
-    
+
         rv = element->AppendChild(sourceElement, getter_AddRefs(resultNode));
         if (NS_FAILED(rv)) {
             return;
@@ -1189,7 +1183,7 @@ txMozillaXSLTProcessor::notifyError()
         if (NS_FAILED(rv)) {
             return;
         }
-    
+
         rv = sourceElement->AppendChild(text, getter_AddRefs(resultNode));
         if (NS_FAILED(rv)) {
             return;

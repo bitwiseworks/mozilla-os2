@@ -6,21 +6,26 @@
 
 // Tests the CubicBezierWidget events
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/cubic-bezier-frame.xhtml";
 const {CubicBezierWidget} =
   require("devtools/client/shared/widgets/CubicBezierWidget");
 const {PREDEFINED} = require("devtools/client/shared/widgets/CubicBezierPresets");
 
-add_task(function*() {
-  yield addTab("about:blank");
+// In this test we have to use a slightly more complete HTML tree, with <body>
+// in order to remove its margin and prevent shifted positions
+const TEST_URI = `data:text/html,
+  <html><body>
+    <div id="cubic-bezier-container"/>
+  </body></html>`;
+
+add_task(function* () {
   let [host, win, doc] = yield createHost("bottom", TEST_URI);
 
   // Required or widget will be clipped inside of 'bottom'
   // host by -14. Setting `fixed` zeroes this which is needed for
   // calculating offsets. Occurs in test env only.
-  doc.body.setAttribute("style", "position: fixed");
+  doc.body.setAttribute("style", "position: fixed; margin: 0;");
 
-  let container = doc.querySelector("#container");
+  let container = doc.querySelector("#cubic-bezier-container");
   let w = new CubicBezierWidget(container, PREDEFINED.linear);
 
   let rect = w.curve.getBoundingClientRect();
@@ -34,7 +39,6 @@ add_task(function*() {
 
   w.destroy();
   host.destroy();
-  gBrowser.removeCurrentTab();
 });
 
 function* pointsCanBeDragged(widget, win, doc, offsets) {
@@ -107,9 +111,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   let shiftStep = 30;
 
   info("Moving P1 to the left");
-  let newOffset = parseInt(widget.p1.style.left) - singleStep;
-  let x = widget.bezierCanvas.
-          offsetsToCoordinates({style: {left: newOffset}})[0];
+  let newOffset = parseInt(widget.p1.style.left, 10) - singleStep;
+  let x = widget.bezierCanvas
+          .offsetsToCoordinates({style: {left: newOffset}})[0];
 
   let onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 37));
@@ -119,9 +123,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P1[1], 0.75, "The new P1 progress coordinate is correct");
 
   info("Moving P1 to the left, fast");
-  newOffset = parseInt(widget.p1.style.left) - shiftStep;
-  x = widget.bezierCanvas.
-      offsetsToCoordinates({style: {left: newOffset}})[0];
+  newOffset = parseInt(widget.p1.style.left, 10) - shiftStep;
+  x = widget.bezierCanvas
+      .offsetsToCoordinates({style: {left: newOffset}})[0];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 37, true));
@@ -130,9 +134,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P1[1], 0.75, "The new P1 progress coordinate is correct");
 
   info("Moving P1 to the right, fast");
-  newOffset = parseInt(widget.p1.style.left) + shiftStep;
-  x = widget.bezierCanvas.
-    offsetsToCoordinates({style: {left: newOffset}})[0];
+  newOffset = parseInt(widget.p1.style.left, 10) + shiftStep;
+  x = widget.bezierCanvas
+    .offsetsToCoordinates({style: {left: newOffset}})[0];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 39, true));
@@ -141,9 +145,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P1[1], 0.75, "The new P1 progress coordinate is correct");
 
   info("Moving P1 to the bottom");
-  newOffset = parseInt(widget.p1.style.top) + singleStep;
-  let y = widget.bezierCanvas.
-    offsetsToCoordinates({style: {top: newOffset}})[1];
+  newOffset = parseInt(widget.p1.style.top, 10) + singleStep;
+  let y = widget.bezierCanvas
+    .offsetsToCoordinates({style: {top: newOffset}})[1];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 40));
@@ -152,9 +156,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P1[1], y, "The new P1 progress coordinate is correct");
 
   info("Moving P1 to the bottom, fast");
-  newOffset = parseInt(widget.p1.style.top) + shiftStep;
-  y = widget.bezierCanvas.
-    offsetsToCoordinates({style: {top: newOffset}})[1];
+  newOffset = parseInt(widget.p1.style.top, 10) + shiftStep;
+  y = widget.bezierCanvas
+    .offsetsToCoordinates({style: {top: newOffset}})[1];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 40, true));
@@ -163,9 +167,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P1[1], y, "The new P1 progress coordinate is correct");
 
   info("Moving P1 to the top, fast");
-  newOffset = parseInt(widget.p1.style.top) - shiftStep;
-  y = widget.bezierCanvas.
-    offsetsToCoordinates({style: {top: newOffset}})[1];
+  newOffset = parseInt(widget.p1.style.top, 10) - shiftStep;
+  y = widget.bezierCanvas
+    .offsetsToCoordinates({style: {top: newOffset}})[1];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p1, 38, true));
@@ -175,9 +179,9 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
 
   info("Checking that keyboard events also work with P2");
   info("Moving P2 to the left");
-  newOffset = parseInt(widget.p2.style.left) - singleStep;
-  x = widget.bezierCanvas.
-    offsetsToCoordinates({style: {left: newOffset}})[0];
+  newOffset = parseInt(widget.p2.style.left, 10) - singleStep;
+  x = widget.bezierCanvas
+    .offsetsToCoordinates({style: {left: newOffset}})[0];
 
   onUpdated = widget.once("updated");
   widget._onPointKeyDown(getKeyEvent(widget.p2, 37));
@@ -186,7 +190,7 @@ function* pointsCanBeMovedWithKeyboard(widget, win, doc, offsets) {
   is(bezier.P2[1], 0.25, "The new P2 progress coordinate is correct");
 }
 
-function getKeyEvent(target, keyCode, shift=false) {
+function getKeyEvent(target, keyCode, shift = false) {
   return {
     target: target,
     keyCode: keyCode,

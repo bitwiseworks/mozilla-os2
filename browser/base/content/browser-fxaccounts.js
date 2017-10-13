@@ -4,12 +4,11 @@
 
 var gFxAccounts = {
 
-  PREF_SYNC_START_DOORHANGER: "services.sync.ui.showSyncStartDoorhanger",
-  DOORHANGER_ACTIVATE_DELAY_MS: 5000,
   SYNC_MIGRATION_NOTIFICATION_TITLE: "fxa-migration",
 
   _initialized: false,
   _inCustomizationMode: false,
+  _cachedProfile: null,
 
   get weave() {
     delete this.weave;
@@ -23,13 +22,12 @@ var gFxAccounts = {
     delete this.topics;
     return this.topics = [
       "weave:service:ready",
-      "weave:service:sync:start",
-      "weave:service:login:error",
+      "weave:service:login:change",
       "weave:service:setup-complete",
+      "weave:service:sync:error",
       "weave:ui:login:error",
       "fxa-migration:state-changed",
       this.FxAccountsCommon.ONLOGIN_NOTIFICATION,
-      this.FxAccountsCommon.ONVERIFIED_NOTIFICATION,
       this.FxAccountsCommon.ONLOGOUT_NOTIFICATION,
       this.FxAccountsCommon.ON_PROFILE_CHANGE_NOTIFICATION,
     ];
@@ -82,9 +80,13 @@ var gFxAccounts = {
     return Weave.Status.login == Weave.LOGIN_FAILED_LOGIN_REJECTED;
   },
 
-  get isActiveWindow() {
-    let fm = Services.focus;
-    return fm.activeWindow == window;
+  get sendTabToDeviceEnabled() {
+    return Services.prefs.getBoolPref("services.sync.sendTabToDevice.enabled");
+  },
+
+  get remoteClients() {
+    return Weave.Service.clientsEngine.remoteClients
+           .sort((a, b) => a.name.localeCompare(b.name));
   },
 
   init: function () {
@@ -97,7 +99,6 @@ var gFxAccounts = {
       Services.obs.addObserver(this, topic, false);
     }
 
-    addEventListener("activate", this);
     gNavToolbox.addEventListener("customizationstarting", this);
     gNavToolbox.addEventListener("customizationending", this);
 
@@ -121,38 +122,15 @@ var gFxAccounts = {
 
   observe: function (subject, topic, data) {
     switch (topic) {
-      case this.FxAccountsCommon.ONVERIFIED_NOTIFICATION:
-        Services.prefs.setBoolPref(this.PREF_SYNC_START_DOORHANGER, true);
-        break;
-      case "weave:service:sync:start":
-        this.onSyncStart();
-        break;
       case "fxa-migration:state-changed":
         this.onMigrationStateChanged(data, subject);
         break;
-      case this.FxAccountsCommon.ONPROFILE_IMAGE_CHANGE_NOTIFICATION:
-        this.updateUI();
-        break;
+      case this.FxAccountsCommon.ON_PROFILE_CHANGE_NOTIFICATION:
+        this._cachedProfile = null;
+        // Fallthrough intended
       default:
         this.updateUI();
         break;
-    }
-  },
-
-  onSyncStart: function () {
-    if (!this.isActiveWindow) {
-      return;
-    }
-
-    let showDoorhanger = false;
-
-    try {
-      showDoorhanger = Services.prefs.getBoolPref(this.PREF_SYNC_START_DOORHANGER);
-    } catch (e) { /* The pref might not exist. */ }
-
-    if (showDoorhanger) {
-      Services.prefs.clearUserPref(this.PREF_SYNC_START_DOORHANGER);
-      this.showSyncStartedDoorhanger();
     }
   },
 
@@ -199,33 +177,8 @@ var gFxAccounts = {
   },
 
   handleEvent: function (event) {
-    if (event.type == "activate") {
-      // Our window might have been in the background while we received the
-      // sync:start notification. If still needed, show the doorhanger after
-      // a short delay. Without this delay the doorhanger would not show up
-      // or with a too small delay show up while we're still animating the
-      // window.
-      setTimeout(() => this.onSyncStart(), this.DOORHANGER_ACTIVATE_DELAY_MS);
-    } else {
-      this._inCustomizationMode = event.type == "customizationstarting";
-      this.updateAppMenuItem();
-    }
-  },
-
-  showDoorhanger: function (id) {
-    let panel = document.getElementById(id);
-    let anchor = document.getElementById("PanelUI-menu-button");
-
-    let iconAnchor =
-      document.getAnonymousElementByAttribute(anchor, "class",
-                                              "toolbarbutton-icon");
-
-    panel.hidden = false;
-    panel.openPopup(iconAnchor || anchor, "bottomcenter topright");
-  },
-
-  showSyncStartedDoorhanger: function () {
-    this.showDoorhanger("sync-start-panel");
+    this._inCustomizationMode = event.type == "customizationstarting";
+    this.updateAppMenuItem();
   },
 
   updateUI: function () {
@@ -271,7 +224,8 @@ var gFxAccounts = {
     let defaultLabel = this.panelUIStatus.getAttribute("defaultlabel");
     let errorLabel = this.panelUIStatus.getAttribute("errorlabel");
     let unverifiedLabel = this.panelUIStatus.getAttribute("unverifiedlabel");
-    let signedInTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
+    // The localization string is for the signed in text, but it's the default text as well
+    let defaultTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
 
     let updateWithUserData = (userData) => {
       // Window might have been closed while fetching data.
@@ -281,13 +235,12 @@ var gFxAccounts = {
 
       // Reset the button to its original state.
       this.panelUILabel.setAttribute("label", defaultLabel);
-      this.panelUIStatus.removeAttribute("tooltiptext");
+      this.panelUIStatus.setAttribute("tooltiptext", defaultTooltiptext);
       this.panelUIFooter.removeAttribute("fxastatus");
       this.panelUIFooter.removeAttribute("fxaprofileimage");
       this.panelUIAvatar.style.removeProperty("list-style-image");
       let showErrorBadge = false;
-
-      if (!this._inCustomizationMode && userData) {
+      if (userData) {
         // At this point we consider the user as logged-in (but still can be in an error state)
         if (this.loginFailed) {
           let tooltipDescription = this.strings.formatStringFromName("reconnectDescription", [userData.email], 1);
@@ -305,7 +258,6 @@ var gFxAccounts = {
         } else {
           this.panelUIFooter.setAttribute("fxastatus", "signedin");
           this.panelUILabel.setAttribute("label", userData.email);
-          this.panelUIStatus.setAttribute("tooltiptext", signedInTooltiptext);
         }
         if (profileInfoEnabled) {
           this.panelUIFooter.setAttribute("fxaprofileimage", "enabled");
@@ -319,7 +271,7 @@ var gFxAccounts = {
     }
 
     let updateWithProfile = (profile) => {
-      if (!this._inCustomizationMode && profileInfoEnabled) {
+      if (profileInfoEnabled) {
         if (profile.displayName) {
           this.panelUILabel.setAttribute("label", profile.displayName);
         }
@@ -350,6 +302,9 @@ var gFxAccounts = {
       if (!userData || !userData.verified || !profileInfoEnabled) {
         return null; // don't even try to grab the profile.
       }
+      if (this._cachedProfile) {
+        return this._cachedProfile;
+      }
       return fxAccounts.getSignedInUserProfile().catch(err => {
         // Not fetching the profile is sad but the FxA logs will already have noise.
         return null;
@@ -359,6 +314,7 @@ var gFxAccounts = {
         return;
       }
       updateWithProfile(profile);
+      this._cachedProfile = profile; // Try to avoid fetching the profile on every UI update
     }).catch(error => {
       // This is most likely in tests, were we quickly log users in and out.
       // The most likely scenario is a user logged out, so reflect that.
@@ -395,13 +351,6 @@ var gFxAccounts = {
   },
 
   openAccountsPage: function (action, urlParams={}) {
-    // An entrypoint param is used for server-side metrics.  If the current tab
-    // is UITour, assume that it initiated the call to this method and override
-    // the entrypoint accordingly.
-    if (UITour.tourBrowsersByWindow.get(window) &&
-        UITour.tourBrowsersByWindow.get(window).has(gBrowser.selectedBrowser)) {
-      urlParams.entrypoint = "uitour";
-    }
     let params = new URLSearchParams();
     if (action) {
       params.set("action", action);
@@ -420,6 +369,83 @@ var gFxAccounts = {
   openSignInAgainPage: function (entryPoint) {
     this.openAccountsPage("reauth", { entrypoint: entryPoint });
   },
+
+  sendTabToDevice: function (url, clientId, title) {
+    Weave.Service.clientsEngine.sendURIToClientForDisplay(url, clientId, title);
+  },
+
+  populateSendTabToDevicesMenu: function (devicesPopup, url, title) {
+    // remove existing menu items
+    while (devicesPopup.hasChildNodes()) {
+      devicesPopup.removeChild(devicesPopup.firstChild);
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    const onTargetDeviceCommand = (event) => {
+      const clientId = event.target.getAttribute("clientId");
+      const clients = clientId
+                      ? [clientId]
+                      : this.remoteClients.map(client => client.id);
+
+      clients.forEach(clientId => this.sendTabToDevice(url, clientId, title));
+    }
+
+    function addTargetDevice(clientId, name) {
+      const targetDevice = document.createElement("menuitem");
+      targetDevice.addEventListener("command", onTargetDeviceCommand, true);
+      targetDevice.setAttribute("class", "sendtab-target");
+      targetDevice.setAttribute("clientId", clientId);
+      targetDevice.setAttribute("label", name);
+      fragment.appendChild(targetDevice);
+    }
+
+    const clients = this.remoteClients;
+    for (let client of clients) {
+      addTargetDevice(client.id, client.name);
+    }
+
+    // "All devices" menu item
+    if (clients.length > 1) {
+      const separator = document.createElement("menuseparator");
+      fragment.appendChild(separator);
+      const allDevicesLabel = this.strings.GetStringFromName("sendTabToAllDevices.menuitem");
+      addTargetDevice("", allDevicesLabel);
+    }
+
+    devicesPopup.appendChild(fragment);
+  },
+
+  updateTabContextMenu: function (aPopupMenu) {
+    if (!this.sendTabToDeviceEnabled) {
+      return;
+    }
+
+    const remoteClientPresent = this.remoteClients.length > 0;
+    ["context_sendTabToDevice", "context_sendTabToDevice_separator"]
+    .forEach(id => { document.getElementById(id).hidden = !remoteClientPresent });
+  },
+
+  initPageContextMenu: function (contextMenu) {
+    if (!this.sendTabToDeviceEnabled) {
+      return;
+    }
+
+    const remoteClientPresent = this.remoteClients.length > 0;
+    // showSendLink and showSendPage are mutually exclusive
+    const showSendLink = remoteClientPresent
+                         && (contextMenu.onSaveableLink || contextMenu.onPlainTextLink);
+    const showSendPage = !showSendLink && remoteClientPresent
+                         && !(contextMenu.isContentSelected ||
+                              contextMenu.onImage || contextMenu.onCanvas ||
+                              contextMenu.onVideo || contextMenu.onAudio ||
+                              contextMenu.onLink || contextMenu.onTextInput);
+
+    ["context-sendpagetodevice", "context-sep-sendpagetodevice"]
+    .forEach(id => contextMenu.showItem(id, showSendPage));
+    ["context-sendlinktodevice", "context-sep-sendlinktodevice"]
+    .forEach(id => contextMenu.showItem(id, showSendLink));
+  }
 };
 
 XPCOMUtils.defineLazyGetter(gFxAccounts, "FxAccountsCommon", function () {

@@ -48,15 +48,16 @@ public:
   {
     return mInternalResponse->Type();
   }
-
   void
-  GetUrl(DOMString& aUrl) const
+  GetUrl(nsAString& aUrl) const
   {
-    nsCString url;
-    mInternalResponse->GetUrl(url);
-    aUrl.AsAString() = NS_ConvertUTF8toUTF16(url);
+    CopyUTF8toUTF16(mInternalResponse->GetURL(), aUrl);
   }
-
+  bool
+  Redirected() const
+  {
+    return mInternalResponse->IsRedirected();
+  }
   uint16_t
   Status() const
   {
@@ -124,8 +125,11 @@ public:
   already_AddRefed<Response>
   Clone(ErrorResult& aRv) const;
 
+  already_AddRefed<Response>
+  CloneUnfiltered(ErrorResult& aRv) const;
+
   void
-  SetBody(nsIInputStream* aBody);
+  SetBody(nsIInputStream* aBody, int64_t aBodySize);
 
   already_AddRefed<InternalResponse>
   GetInternalResponse() const;

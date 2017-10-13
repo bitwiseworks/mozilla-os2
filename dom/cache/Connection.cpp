@@ -13,6 +13,8 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+using mozilla::dom::quota::QuotaObject;
+
 NS_IMPL_ISUPPORTS(cache::Connection, mozIStorageAsyncConnection,
                                      mozIStorageConnection);
 
@@ -20,13 +22,13 @@ Connection::Connection(mozIStorageConnection* aBase)
   : mBase(aBase)
   , mClosed(false)
 {
-  MOZ_ASSERT(mBase);
+  MOZ_DIAGNOSTIC_ASSERT(mBase);
 }
 
 Connection::~Connection()
 {
   NS_ASSERT_OWNINGTHREAD(Connection);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(Close()));
+  MOZ_ALWAYS_SUCCEEDS(Close());
 }
 
 NS_IMETHODIMP
@@ -41,7 +43,7 @@ Connection::Close()
 
   // If we are closing here, then Cache must not have a transaction
   // open anywhere else.  This should be guaranteed to succeed.
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(db::IncrementalVacuum(this)));
+  MOZ_ALWAYS_SUCCEEDS(db::IncrementalVacuum(this));
 
   return mBase->Close();
 }
@@ -270,6 +272,13 @@ NS_IMETHODIMP
 Connection::EnableModule(const nsACString& aModule)
 {
   return mBase->EnableModule(aModule);
+}
+
+NS_IMETHODIMP
+Connection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
+                            QuotaObject** aJournalQuotaObject)
+{
+  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
 }
 
 } // namespace cache

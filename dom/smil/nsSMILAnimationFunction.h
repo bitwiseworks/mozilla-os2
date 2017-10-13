@@ -14,7 +14,6 @@
 #include "nsSMILTimeValue.h"
 #include "nsSMILKeySpline.h"
 #include "nsSMILValue.h"
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsAttrValue.h"
 #include "nsSMILTypes.h"
@@ -246,6 +245,14 @@ public:
     mWasSkippedInPrevSample = true;
   }
 
+  /**
+   * Returns true if we need to recalculate the animation value on every sample.
+   * (e.g. because it depends on context like the font-size)
+   */
+  bool ValueNeedsReparsingEverySample() const {
+    return mValueNeedsReparsingEverySample;
+  }
+
   // Comparator utility class, used for sorting nsSMILAnimationFunctions
   class Comparator {
     public:
@@ -264,7 +271,7 @@ protected:
   typedef FallibleTArray<nsSMILValue> nsSMILValueArray;
 
   // Types
-  enum nsSMILCalcMode
+  enum nsSMILCalcMode : uint8_t
   {
     CALC_LINEAR,
     CALC_DISCRETE,

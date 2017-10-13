@@ -8,7 +8,6 @@
 
 #include "mozilla/RefPtr.h"
 #include "ImageContainer.h"
-#include "nsAutoPtr.h"
 #include "d3d9.h"
 #include "mozilla/layers/TextureClientRecycleAllocator.h"
 
@@ -20,7 +19,7 @@ class TextureClient;
 class D3D9RecycleAllocator : public TextureClientRecycleAllocator
 {
 public:
-  explicit D3D9RecycleAllocator(CompositableForwarder* aAllocator,
+  explicit D3D9RecycleAllocator(KnowsCompositor* aAllocator,
                                 IDirect3DDevice9* aDevice)
     : TextureClientRecycleAllocator(aAllocator)
     , mDevice(aDevice)
@@ -47,7 +46,7 @@ protected:
 // resource is ready to use.
 class D3D9SurfaceImage : public Image {
 public:
-  explicit D3D9SurfaceImage(bool aIsFirstFrame);
+  explicit D3D9SurfaceImage();
   virtual ~D3D9SurfaceImage();
 
   HRESULT AllocateAndCopy(D3D9RecycleAllocator* aAllocator,
@@ -61,21 +60,24 @@ public:
 
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
 
-  virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
+  virtual TextureClient* GetTextureClient(KnowsCompositor* aForwarder) override;
 
-  virtual bool IsValid() override;
+  already_AddRefed<IDirect3DSurface9> GetD3D9Surface();
+
+  HANDLE GetShareHandle() const;
+
+  virtual bool IsValid() override { return mValid; }
+
+  void Invalidate() { mValid = false; }
 
 private:
 
-  // Blocks the calling thread until the copy operation started in SetData()
-  // is complete, whereupon the texture is safe to use.
-  void EnsureSynchronized();
-
   gfx::IntSize mSize;
-  RefPtr<IDirect3DQuery9> mQuery;
   RefPtr<TextureClient> mTextureClient;
+  RefPtr<IDirect3DTexture9> mTexture;
+  HANDLE mShareHandle;
+  D3DSURFACE_DESC mDesc;
   bool mValid;
-  bool mIsFirstFrame;
 };
 
 } // namepace layers

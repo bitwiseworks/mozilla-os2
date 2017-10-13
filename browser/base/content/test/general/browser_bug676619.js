@@ -1,36 +1,36 @@
 function test () {
-  requestLongerTimeout(2);
+  requestLongerTimeout(3);
   waitForExplicitFinish();
 
   var isHTTPS = false;
 
   function loadListener() {
     function testLocation(link, url, next) {
-      var tabOpenListener = new TabOpenListener(url, function () {
-          gBrowser.removeTab(this.tab);
+      new TabOpenListener(url, function () {
+        gBrowser.removeTab(this.tab);
       }, function () {
         next();
       });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
+      ContentTask.spawn(gBrowser.selectedBrowser, link, contentLink => {
+        content.document.getElementById(contentLink).click();
       });
     }
 
     function testLink(link, name, next) {
       addWindowListener("chrome://mozapps/content/downloads/unknownContentType.xul", function (win) {
         ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
-          return content.document.getElementById("unload-flag").textContent;
-        }).then(unloadFlag => {
-          is(unloadFlag, "Okay", "beforeunload shouldn't have fired");
+          Assert.equal(content.document.getElementById("unload-flag").textContent,
+            "Okay", "beforeunload shouldn't have fired");
+        }).then(() => {
           is(win.document.getElementById("location").value, name, "file name should match");
           win.close();
           next();
         });
       });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
+      ContentTask.spawn(gBrowser.selectedBrowser, link, contentLink => {
+        content.document.getElementById(contentLink).click();
       });
     }
 

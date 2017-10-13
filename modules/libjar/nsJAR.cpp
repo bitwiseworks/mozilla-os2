@@ -84,8 +84,10 @@ nsJAR::nsJAR(): mZip(new nsZipArchive()),
                 mReleaseTime(PR_INTERVAL_NO_TIMEOUT),
                 mCache(nullptr),
                 mLock("nsJAR::mLock"),
+                mMtime(0),
                 mTotalItemsInManifest(0),
-                mOpened(false)
+                mOpened(false),
+                mIsOmnijar(false)
 {
 }
 
@@ -140,6 +142,7 @@ nsJAR::Open(nsIFile* zipFile)
   RefPtr<nsZipArchive> zip = mozilla::Omnijar::GetReader(zipFile);
   if (zip) {
     mZip = zip;
+    mIsOmnijar = true;
     return NS_OK;
   }
   return mZip->OpenArchive(zipFile);
@@ -200,19 +203,23 @@ nsJAR::GetFile(nsIFile* *result)
 NS_IMETHODIMP
 nsJAR::Close()
 {
+  if (!mOpened) {
+    return NS_ERROR_FAILURE; // Never opened or already closed.
+  }
+
   mOpened = false;
   mParsedManifest = false;
   mManifestData.Clear();
   mGlobalStatus = JAR_MANIFEST_NOT_PARSED;
   mTotalItemsInManifest = 0;
 
-  RefPtr<nsZipArchive> greOmni = mozilla::Omnijar::GetReader(mozilla::Omnijar::GRE);
-  RefPtr<nsZipArchive> appOmni = mozilla::Omnijar::GetReader(mozilla::Omnijar::APP);
-
-  if (mZip == greOmni || mZip == appOmni) {
+  if (mIsOmnijar) {
+    // Reset state, but don't close the omnijar because we did not open it.
+    mIsOmnijar = false;
     mZip = new nsZipArchive();
     return NS_OK;
   }
+
   return mZip->CloseArchive();
 }
 
@@ -318,10 +325,10 @@ nsJAR::GetInputStreamWithSpec(const nsACString& aJarDirSpec,
 
   // Watch out for the jar:foo.zip!/ (aDir is empty) top-level special case!
   nsZipItem *item = nullptr;
-  const char *entry = PromiseFlatCString(aEntryName).get();
-  if (*entry) {
+  const nsCString& entry = PromiseFlatCString(aEntryName);
+  if (*entry.get()) {
     // First check if item exists in jar
-    item = mZip->GetItem(entry);
+    item = mZip->GetItem(entry.get());
     if (!item) return NS_ERROR_FILE_TARGET_DOES_NOT_EXIST;
   }
   nsJARInputStream* jis = new nsJARInputStream();
@@ -330,7 +337,7 @@ nsJAR::GetInputStreamWithSpec(const nsACString& aJarDirSpec,
 
   nsresult rv = NS_OK;
   if (!item || item->IsDirectory()) {
-    rv = jis->InitDirectory(this, aJarDirSpec, entry);
+    rv = jis->InitDirectory(this, aJarDirSpec, entry.get());
   } else {
     rv = jis->InitFile(this, item);
   }
@@ -1055,6 +1062,7 @@ NS_IMPL_ISUPPORTS(nsZipReaderCache, nsIZipReaderCache, nsIObserver, nsISupportsW
 
 nsZipReaderCache::nsZipReaderCache()
   : mLock("nsZipReaderCache.mLock")
+  , mCacheSize(0)
   , mZips()
 #ifdef ZIP_CACHE_HIT_RATE
     ,
@@ -1104,7 +1112,6 @@ nsZipReaderCache::IsCached(nsIFile* zipFile, bool* aResult)
 {
   NS_ENSURE_ARG_POINTER(zipFile);
   nsresult rv;
-  nsCOMPtr<nsIZipReader> antiLockZipGrip;
   MutexAutoLock lock(mLock);
 
   nsAutoCString uri;
@@ -1123,7 +1130,6 @@ nsZipReaderCache::GetZip(nsIFile* zipFile, nsIZipReader* *result)
 {
   NS_ENSURE_ARG_POINTER(zipFile);
   nsresult rv;
-  nsCOMPtr<nsIZipReader> antiLockZipGrip;
   MutexAutoLock lock(mLock);
 
 #ifdef ZIP_CACHE_HIT_RATE

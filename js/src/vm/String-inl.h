@@ -58,7 +58,7 @@ NewInlineString(ExclusiveContext* cx, mozilla::Range<const CharT> chars)
     if (!str)
         return nullptr;
 
-    mozilla::PodCopy(storage, chars.start().get(), len);
+    mozilla::PodCopy(storage, chars.begin().get(), len);
     storage[len] = 0;
     return str;
 }
@@ -160,8 +160,10 @@ JSDependentString::new_(js::ExclusiveContext* cx, JSLinearString* baseArg, size_
      * entirely, however, due to how ropes are flattened.
      */
     if (baseArg->isDependent()) {
-        start += baseArg->asDependent().baseOffset();
-        baseArg = baseArg->asDependent().base();
+        if (mozilla::Maybe<size_t> offset = baseArg->asDependent().baseOffset()) {
+            start += *offset;
+            baseArg = baseArg->asDependent().base();
+        }
     }
 
     MOZ_ASSERT(start + length <= baseArg->length());
@@ -180,6 +182,9 @@ JSDependentString::new_(js::ExclusiveContext* cx, JSLinearString* baseArg, size_
                ? js::NewInlineString<JS::Latin1Char>(cx, base, start, length)
                : js::NewInlineString<char16_t>(cx, base, start, length);
     }
+
+    if (baseArg->isExternal() && !baseArg->ensureFlat(cx->asJSContext()))
+        return nullptr;
 
     JSDependentString* str = static_cast<JSDependentString*>(js::Allocate<JSString, js::NoGC>(cx));
     if (str) {
@@ -323,15 +328,13 @@ MOZ_ALWAYS_INLINE JSExternalString*
 JSExternalString::new_(JSContext* cx, const char16_t* chars, size_t length,
                        const JSStringFinalizer* fin)
 {
-    MOZ_ASSERT(chars[length] == 0);
-
     if (!validateLength(cx, length))
         return nullptr;
     JSExternalString* str = js::Allocate<JSExternalString>(cx);
     if (!str)
         return nullptr;
     str->init(chars, length, fin);
-    cx->runtime()->updateMallocCounter(cx->zone(), (length + 1) * sizeof(char16_t));
+    cx->updateMallocCounter((length + 1) * sizeof(char16_t));
     return str;
 }
 
@@ -404,8 +407,16 @@ JSAtom::finalize(js::FreeOp* fop)
 inline void
 JSExternalString::finalize(js::FreeOp* fop)
 {
+    if (!JSString::isExternal()) {
+        // This started out as an external string, but was turned into a
+        // non-external string by JSExternalString::ensureFlat.
+        MOZ_ASSERT(isFlat());
+        fop->free_(nonInlineCharsRaw());
+        return;
+    }
+
     const JSStringFinalizer* fin = externalFinalizer();
-    fin->finalize(fin, const_cast<char16_t*>(rawTwoByteChars()));
+    fin->finalize(zone(), fin, const_cast<char16_t*>(rawTwoByteChars()));
 }
 
 #endif /* vm_String_inl_h */

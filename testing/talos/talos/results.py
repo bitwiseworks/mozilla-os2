@@ -19,39 +19,15 @@ from talos import output, utils, filter
 class TalosResults(object):
     """Container class for Talos results"""
 
-    def __init__(self, title, date, browser_config):
+    def __init__(self):
         self.results = []
-
-        # info needed for graphserver
-        self.title = title
-        self.date = date
-        self.browser_config = browser_config
+        self.extra_options = []
 
     def add(self, test_results):
         self.results.append(test_results)
 
-    def check_output_formats(self, output_formats):
-        """check output formats"""
-
-        # ensure formats are available
-        formats = output_formats.keys()
-        missing = self.check_formats_exist(formats)
-        if missing:
-            raise utils.TalosError("Output format(s) unknown: %s"
-                                   % ','.join(missing))
-
-        # perform per-format check
-        for format, urls in output_formats.items():
-            cls = output.formats[format]
-            cls.check(urls)
-
-    @classmethod
-    def check_formats_exist(cls, formats):
-        """
-        ensure that all formats are registered
-        return missing formats
-        """
-        return [i for i in formats if i not in output.formats]
+    def add_extra_option(self, extra_option):
+        self.extra_options.append(extra_option)
 
     def output(self, output_formats):
         """
@@ -63,12 +39,12 @@ class TalosResults(object):
         try:
 
             for key, urls in output_formats.items():
-                _output = output.formats[key](self)
+                _output = output.Output(self)
                 results = _output()
                 for url in urls:
                     _output.output(results, url, tbpl_output)
 
-        except utils.TalosError, e:
+        except utils.TalosError as e:
             # print to results.out
             try:
                 _output = output.GraphserverOutput(self)
@@ -79,30 +55,27 @@ class TalosResults(object):
                 )
             except:
                 pass
-            print '\nFAIL: %s' % str(e).replace('\n', '\nRETURN:')
+            print('\nFAIL: %s' % str(e).replace('\n', '\nRETURN:'))
             raise e
 
         if tbpl_output:
-            print "TinderboxPrint: TalosResult: %s" % json.dumps(tbpl_output)
+            print("TinderboxPrint: TalosResult: %s" % json.dumps(tbpl_output))
 
 
 class TestResults(object):
     """container object for all test results across cycles"""
 
-    def __init__(self, test_config, global_counters=None, extensions=None):
+    def __init__(self, test_config, global_counters=None, framework=None):
         self.results = []
         self.test_config = test_config
         self.format = None
         self.global_counters = global_counters or {}
         self.all_counter_results = []
-        self.extensions = extensions
+        self.framework = framework
         self.using_xperf = False
 
     def name(self):
         return self.test_config['name']
-
-    def extension(self):
-        return self.test_config['test_name_extension']
 
     def mainthread(self):
         return self.test_config['mainthread']
@@ -394,7 +367,7 @@ class BrowserLogResults(object):
         try:
             parts, last_token = utils.tokenize(self.results_raw,
                                                start_token, end_token)
-        except AssertionError, e:
+        except AssertionError as e:
             self.error(str(e))
         if not parts:
             return None, -1  # no match
@@ -453,11 +426,11 @@ class BrowserLogResults(object):
 
         filename = 'etl_output_thread_stats.csv'
         if not os.path.exists(filename):
-            print ("Warning: we are looking for xperf results file %s, and"
-                   " didn't find it" % filename)
+            print("Warning: we are looking for xperf results file %s, and"
+                  " didn't find it" % filename)
             return
 
-        contents = file(filename).read()
+        contents = open(filename).read()
         lines = contents.splitlines()
         reader = csv.reader(lines)
         header = None
@@ -485,11 +458,11 @@ class BrowserLogResults(object):
         if (set(mainthread_counters).intersection(counter_results.keys())):
             filename = 'etl_output.csv'
             if not os.path.exists(filename):
-                print ("Warning: we are looking for xperf results file"
-                       " %s, and didn't find it" % filename)
+                print("Warning: we are looking for xperf results file"
+                      " %s, and didn't find it" % filename)
                 return
 
-            contents = file(filename).read()
+            contents = open(filename).read()
             lines = contents.splitlines()
             reader = csv.reader(lines)
             header = None
@@ -533,7 +506,7 @@ class BrowserLogResults(object):
             os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
         filename = os.path.join(SCRIPT_DIR, 'mainthread_io.json')
         try:
-            contents = file(filename).read()
+            contents = open(filename).read()
             counter_results.setdefault('mainthreadio', []).append(contents)
             self.using_xperf = True
         except:

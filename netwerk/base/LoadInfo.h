@@ -17,10 +17,13 @@
 #include "mozilla/BasePrincipal.h"
 
 class nsINode;
-class nsPIDOMWindow;
-class nsXMLHttpRequest;
+class nsPIDOMWindowOuter;
 
 namespace mozilla {
+
+namespace dom {
+class XMLHttpRequestMainThread;
+}
 
 namespace net {
 class OptionalLoadInfoArgs;
@@ -32,6 +35,8 @@ nsresult
 LoadInfoArgsToLoadInfo(const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
                        nsILoadInfo** outLoadInfo);
 } // namespace ipc
+
+namespace net {
 
 /**
  * Class that provides an nsILoadInfo implementation.
@@ -54,6 +59,12 @@ public:
            nsSecurityFlags aSecurityFlags,
            nsContentPolicyType aContentPolicyType);
 
+  // Constructor used for TYPE_DOCUMENT loads which have no reasonable
+  // loadingNode or loadingPrincipal
+  LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
+           nsIPrincipal* aTriggeringPrincipal,
+           nsSecurityFlags aSecurityFlags);
+
   // create an exact copy of the loadinfo
   already_AddRefed<nsILoadInfo> Clone() const;
   // hands off!!! don't use CloneWithNewSecFlags unless you know
@@ -75,13 +86,18 @@ private:
   // Please note that aRedirectChain uses swapElements.
   LoadInfo(nsIPrincipal* aLoadingPrincipal,
            nsIPrincipal* aTriggeringPrincipal,
+           nsIPrincipal* aPrincipalToInherit,
            nsSecurityFlags aSecurityFlags,
            nsContentPolicyType aContentPolicyType,
            LoadTainting aTainting,
            bool aUpgradeInsecureRequests,
+           bool aVerifySignedContent,
+           bool aEnforceSRI,
+           bool aForceInheritPrincipalDropped,
            uint64_t aInnerWindowID,
            uint64_t aOuterWindowID,
            uint64_t aParentOuterWindowID,
+           uint64_t aFrameOuterWindowID,
            bool aEnforceSecurity,
            bool aInitialSecurityCheckDone,
            bool aIsThirdPartyRequest,
@@ -90,7 +106,9 @@ private:
            nsTArray<nsCOMPtr<nsIPrincipal>>& aRedirectChain,
            const nsTArray<nsCString>& aUnsafeHeaders,
            bool aForcePreflight,
-           bool aIsPreflight);
+           bool aIsPreflight,
+           bool aForceHSTSPriming,
+           bool aMixedContentWouldBlock);
   LoadInfo(const LoadInfo& rhs);
 
   friend nsresult
@@ -100,25 +118,30 @@ private:
 
   ~LoadInfo();
 
-  void ComputeIsThirdPartyContext(nsPIDOMWindow* aOuterWindow);
+  void ComputeIsThirdPartyContext(nsPIDOMWindowOuter* aOuterWindow);
 
   // This function is the *only* function which can change the securityflags
   // of a loadinfo. It only exists because of the XHR code. Don't call it
   // from anywhere else!
   void SetIncludeCookiesSecFlag();
-  friend class ::nsXMLHttpRequest;
+  friend class mozilla::dom::XMLHttpRequestMainThread;
 
   // if you add a member, please also update the copy constructor
   nsCOMPtr<nsIPrincipal>           mLoadingPrincipal;
   nsCOMPtr<nsIPrincipal>           mTriggeringPrincipal;
+  nsCOMPtr<nsIPrincipal>           mPrincipalToInherit;
   nsWeakPtr                        mLoadingContext;
   nsSecurityFlags                  mSecurityFlags;
   nsContentPolicyType              mInternalContentPolicyType;
   LoadTainting                     mTainting;
   bool                             mUpgradeInsecureRequests;
+  bool                             mVerifySignedContent;
+  bool                             mEnforceSRI;
+  bool                             mForceInheritPrincipalDropped;
   uint64_t                         mInnerWindowID;
   uint64_t                         mOuterWindowID;
   uint64_t                         mParentOuterWindowID;
+  uint64_t                         mFrameOuterWindowID;
   bool                             mEnforceSecurity;
   bool                             mInitialSecurityCheckDone;
   bool                             mIsThirdPartyContext;
@@ -128,8 +151,12 @@ private:
   nsTArray<nsCString>              mCorsUnsafeHeaders;
   bool                             mForcePreflight;
   bool                             mIsPreflight;
+
+  bool                             mForceHSTSPriming : 1;
+  bool                             mMixedContentWouldBlock : 1;
 };
 
+} // namespace net
 } // namespace mozilla
 
 #endif // mozilla_LoadInfo_h

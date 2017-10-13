@@ -4,12 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _NSKEYGENHANDLER_H_
-#define _NSKEYGENHANDLER_H_
-// Form Processor
+#ifndef nsKeygenHandler_h
+#define nsKeygenHandler_h
+
+#include "ScopedNSSTypes.h"
+#include "keythi.h"
+#include "nsCOMPtr.h"
+#include "nsError.h"
 #include "nsIFormProcessor.h"
-#include "nsTArray.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsNSSShutDown.h"
+#include "nsTArray.h"
+#include "secmodt.h"
 
 nsresult GetSlotWithMechanism(uint32_t mechanism,
                               nsIInterfaceRequestor* ctx,
@@ -19,7 +25,7 @@ nsresult GetSlotWithMechanism(uint32_t mechanism,
 #define DEFAULT_RSA_KEYGEN_PE 65537L
 #define DEFAULT_RSA_KEYGEN_ALG SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION
 
-SECKEYECParams *decode_ec_params(const char *curve);
+mozilla::UniqueSECItem DecodeECParams(const char* curve);
 
 class nsKeygenFormProcessor : public nsIFormProcessor
                             , public nsNSSShutDownObject
@@ -73,4 +79,4 @@ private:
   SECKeySizeChoiceInfo mSECKeySizeChoiceList[number_of_key_size_choices];
 };
 
-#endif //_NSKEYGENHANDLER_H_
+#endif // nsKeygenHandler_h

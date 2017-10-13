@@ -60,7 +60,7 @@ class nsNativeTheme : public nsITimerCallback
   bool IsDisabled(nsIFrame* aFrame, mozilla::EventStates aEventStates);
 
   // RTL chrome direction
-  bool IsFrameRTL(nsIFrame* aFrame);
+  static bool IsFrameRTL(nsIFrame* aFrame);
 
   bool IsHTMLContent(nsIFrame *aFrame);
   
@@ -183,5 +183,5 @@ class nsNativeTheme : public nsITimerCallback
  private:
   uint32_t mAnimatedContentTimeout;
   nsCOMPtr<nsITimer> mAnimatedContentTimer;
-  nsAutoTArray<nsCOMPtr<nsIContent>, 20> mAnimatedContentList;
+  AutoTArray<nsCOMPtr<nsIContent>, 20> mAnimatedContentList;
 };

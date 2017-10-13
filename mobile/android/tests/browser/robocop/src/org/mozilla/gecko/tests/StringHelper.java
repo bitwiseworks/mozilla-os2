@@ -16,6 +16,8 @@ public class StringHelper {
     public static String STATIC_ABOUT_HOME_URL = "about:home";
 
     public final String OK;
+    public final String CANCEL;
+    public final String CLEAR;
 
     // Note: DEFAULT_BOOKMARKS_TITLES.length == DEFAULT_BOOKMARKS_URLS.length
     public final String[] DEFAULT_BOOKMARKS_TITLES;
@@ -25,15 +27,8 @@ public class StringHelper {
     // About pages
     public final String ABOUT_BLANK_URL = "about:blank";
     public final String ABOUT_FIREFOX_URL;
-    public final String ABOUT_RIGHTS_URL = "about:rights";
-    public final String ABOUT_BUILDCONFIG_URL = "about:buildconfig";
-    public final String ABOUT_FEEDBACK_URL = "about:feedback";
-    public final String ABOUT_HEALTHREPORT_URL = "about:healthreport";
-    public final String ABOUT_DOWNLOADS_URL = "about:downloads";
     public final String ABOUT_HOME_URL = "about:home";
     public final String ABOUT_ADDONS_URL = "about:addons";
-    public static final String ABOUT_LOGINS_URL = "about:logins";
-    public final String ABOUT_ABOUT_URL = "about:about";
     public final String ABOUT_SCHEME = "about:";
 
     // About pages' titles
@@ -93,6 +88,9 @@ public class StringHelper {
 
     private final String ROBOCOP_JS_HARNESS_URL = "/robocop/robocop_javascript.html";
 
+    // Robocop page images
+    public final String ROBOCOP_PICTURE_URL = "/robocop/Firefox.jpg";
+
     // Robocop page titles
     public final String ROBOCOP_BIG_LINK_TITLE = "Big Link";
     public final String ROBOCOP_BIG_MAILTO_TITLE = "Big Mailto";
@@ -111,7 +109,7 @@ public class StringHelper {
     public final String MOZILLA_SECTION_LABEL;
 
     // Mozilla
-    public final String BRAND_NAME = "(Fennec|Nightly|Aurora|Firefox Beta|Firefox)";
+    public final String BRAND_NAME = "(Fennec|Nightly|Firefox Aurora|Firefox Beta|Firefox)";
     public final String ABOUT_LABEL = "About " + BRAND_NAME ;
     public final String LOCATION_SERVICES_LABEL = "Mozilla Location Service";
 
@@ -119,7 +117,6 @@ public class StringHelper {
     public final String HISTORY_LABEL;
     public final String TOP_SITES_LABEL;
     public final String BOOKMARKS_LABEL;
-    public final String READING_LIST_LABEL;
     public final String TODAY_LABEL;
 
     // Desktop default bookmarks folders
@@ -218,6 +215,8 @@ public class StringHelper {
     private StringHelper(final Resources res) {
 
         OK = res.getString(R.string.button_ok);
+        CANCEL = res.getString(R.string.button_cancel);
+        CLEAR = res.getString(R.string.button_clear);
 
         // Note: DEFAULT_BOOKMARKS_TITLES.length == DEFAULT_BOOKMARKS_URLS.length
         DEFAULT_BOOKMARKS_TITLES = new String[] {
@@ -290,10 +289,9 @@ public class StringHelper {
         HISTORY_LABEL = res.getString(R.string.home_history_title);
         TOP_SITES_LABEL = res.getString(R.string.home_top_sites_title);
         BOOKMARKS_LABEL = res.getString(R.string.bookmarks_title);
-        READING_LIST_LABEL = res.getString(R.string.reading_list_title);
         TODAY_LABEL = res.getString(R.string.history_today_section);
 
-        BOOKMARKS_UP_TO = res.getString(R.string.home_move_up_to_filter);
+        BOOKMARKS_UP_TO = res.getString(R.string.home_move_back_to_filter);
         BOOKMARKS_ROOT_LABEL = res.getString(R.string.bookmarks_title);
         DESKTOP_FOLDER_LABEL = res.getString(R.string.bookmarks_folder_desktop);
         TOOLBAR_FOLDER_LABEL = res.getString(R.string.bookmarks_folder_toolbar);

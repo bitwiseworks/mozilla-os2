@@ -8,6 +8,7 @@
 // non-native version will be less than optimal.
 
 #include "MurmurHash3.h"
+#include <stdlib.h>
 
 namespace {
 
@@ -19,8 +20,6 @@ namespace {
 #if defined(_MSC_VER)
 
 #define FORCE_INLINE	__forceinline
-
-#include <stdlib.h>
 
 #define ROTL32(x,y)	_rotl(x,y)
 #define ROTL64(x,y)	_rotl64(x,y)
@@ -140,7 +139,7 @@ void MurmurHash3_x86_32 ( const void * key, int len,
   case 2: k1 ^= tail[1] << 8;
   case 1: k1 ^= tail[0];
           k1 *= c1; k1 = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
-  };
+  }
 
   //----------
   // finalization
@@ -233,7 +232,7 @@ void MurmurHash3_x86_128 ( const void * key, const int len,
   case  2: k1 ^= tail[ 1] << 8;
   case  1: k1 ^= tail[ 0] << 0;
            k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
-  };
+  }
 
   //----------
   // finalization
@@ -318,7 +317,7 @@ void MurmurHash3_x64_128 ( const void * key, const int len,
   case  2: k1 ^= uint64_t(tail[ 1]) << 8;
   case  1: k1 ^= uint64_t(tail[ 0]) << 0;
            k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
-  };
+  }
 
   //----------
   // finalization

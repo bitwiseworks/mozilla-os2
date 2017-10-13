@@ -69,33 +69,34 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMCSSAttributeDeclaration)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMCSSAttributeDeclaration)
 
 nsresult
-nsDOMCSSAttributeDeclaration::SetCSSDeclaration(css::Declaration* aDecl)
+nsDOMCSSAttributeDeclaration::SetCSSDeclaration(DeclarationBlock* aDecl)
 {
   NS_ASSERTION(mElement, "Must have Element to set the declaration!");
-  return
-    mIsSMILOverride ? mElement->SetSMILOverrideStyleDeclaration(aDecl, true) :
-    mElement->SetInlineStyleDeclaration(aDecl, nullptr, true);
+  return mIsSMILOverride
+    ? mElement->SetSMILOverrideStyleDeclaration(aDecl, true)
+    : mElement->SetInlineStyleDeclaration(aDecl, nullptr, true);
 }
 
 nsIDocument*
 nsDOMCSSAttributeDeclaration::DocToUpdate()
 {
-  // We need OwnerDoc() rather than GetCurrentDoc() because it might
+  // We need OwnerDoc() rather than GetUncomposedDoc() because it might
   // be the BeginUpdate call that inserts mElement into the document.
   return mElement->OwnerDoc();
 }
 
-css::Declaration*
+DeclarationBlock*
 nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
 {
   if (!mElement)
     return nullptr;
 
-  css::Declaration* declaration;
-  if (mIsSMILOverride)
+  DeclarationBlock* declaration;
+  if (mIsSMILOverride) {
     declaration = mElement->GetSMILOverrideStyleDeclaration();
-  else
+  } else {
     declaration = mElement->GetInlineStyleDeclaration();
+  }
 
   // Notify observers that our style="" attribute is going to change
   // unless:
@@ -127,15 +128,21 @@ nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
   }
 
   // cannot fail
-  RefPtr<css::Declaration> decl = new css::Declaration();
-  decl->InitializeEmpty();
+  RefPtr<DeclarationBlock> decl;
+  if (mElement->IsStyledByServo()) {
+    decl = new ServoDeclarationBlock();
+  } else {
+    decl = new css::Declaration();
+    decl->AsGecko()->InitializeEmpty();
+  }
 
   // this *can* fail (inside SetAttrAndNotify, at least).
   nsresult rv;
-  if (mIsSMILOverride)
+  if (mIsSMILOverride) {
     rv = mElement->SetSMILOverrideStyleDeclaration(decl, false);
-  else
+  } else {
     rv = mElement->SetInlineStyleDeclaration(decl, nullptr, false);
+  }
 
   if (NS_FAILED(rv)) {
     return nullptr; // the decl will be destroyed along with the style rule
@@ -172,21 +179,25 @@ nsDOMCSSAttributeDeclaration::GetParentObject()
 }
 
 NS_IMETHODIMP
-nsDOMCSSAttributeDeclaration::SetPropertyValue(const nsCSSProperty aPropID,
+nsDOMCSSAttributeDeclaration::SetPropertyValue(const nsCSSPropertyID aPropID,
                                                const nsAString& aValue)
 {
   // Scripted modifications to style.opacity or style.transform
   // could immediately force us into the animated state if heuristics suggest
   // this is scripted animation.
+  // FIXME: This is missing the margin shorthand and the logical versions of
+  // the margin properties, see bug 1266287.
   if (aPropID == eCSSProperty_opacity || aPropID == eCSSProperty_transform ||
       aPropID == eCSSProperty_left || aPropID == eCSSProperty_top ||
       aPropID == eCSSProperty_right || aPropID == eCSSProperty_bottom ||
       aPropID == eCSSProperty_margin_left || aPropID == eCSSProperty_margin_top ||
       aPropID == eCSSProperty_margin_right || aPropID == eCSSProperty_margin_bottom ||
+      aPropID == eCSSProperty_background_position_x ||
+      aPropID == eCSSProperty_background_position_y ||
       aPropID == eCSSProperty_background_position) {
     nsIFrame* frame = mElement->GetPrimaryFrame();
     if (frame) {
-      ActiveLayerTracker::NotifyInlineStyleRuleModified(frame, aPropID);
+      ActiveLayerTracker::NotifyInlineStyleRuleModified(frame, aPropID, aValue, this);
     }
   }
   return nsDOMCSSDeclaration::SetPropertyValue(aPropID, aValue);

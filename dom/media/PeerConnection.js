@@ -26,6 +26,7 @@ const PC_STATIC_CONTRACT = "@mozilla.org/dom/peerconnectionstatic;1";
 const PC_SENDER_CONTRACT = "@mozilla.org/dom/rtpsender;1";
 const PC_RECEIVER_CONTRACT = "@mozilla.org/dom/rtpreceiver;1";
 const PC_COREQUEST_CONTRACT = "@mozilla.org/dom/createofferrequest;1";
+const PC_DTMF_SENDER_CONTRACT = "@mozilla.org/dom/rtcdtmfsender;1";
 
 const PC_CID = Components.ID("{bdc2e533-b308-4708-ac8e-a8bfade6d851}");
 const PC_OBS_CID = Components.ID("{d1748d4c-7f6a-4dc5-add6-d55b7678537e}");
@@ -37,6 +38,7 @@ const PC_STATIC_CID = Components.ID("{0fb47c47-a205-4583-a9fc-cbadf8c95880}");
 const PC_SENDER_CID = Components.ID("{4fff5d46-d827-4cd4-a970-8fd53977440e}");
 const PC_RECEIVER_CID = Components.ID("{d974b814-8fde-411c-8c45-b86791b81030}");
 const PC_COREQUEST_CID = Components.ID("{74b2122d-65a8-4824-aa9e-3d664cb75dc2}");
+const PC_DTMF_SENDER_CID = Components.ID("{3610C242-654E-11E6-8EC0-6D1BE389A607}");
 
 // Global list of PeerConnection objects, so they can be cleaned up when
 // a page is torn down. (Maps inner window ID to an array of PC objects).
@@ -188,19 +190,6 @@ GlobalPCList.prototype = {
       } else if (data == "online") {
         this._networkdown = false;
       }
-    } else if (topic == "network:app-offline-status-changed") {
-      // App changed offline status. The subject contains the appId for which
-      // we need to check the status
-      let appId = subject.QueryInterface(Ci.nsIAppOfflineInfo).appId;
-      let ios = Cc['@mozilla.org/network/io-service;1'].getService(Ci.nsIIOService);
-      for (let winId in this._list) {
-        if (appId != this._list[winId]._appId) {
-          continue;
-        }
-        if (ios.isAppOffline(appId)) {
-          cleanupWinId(this._list, winId);
-        }
-      }
     } else if (topic == "gmp-plugin-crash") {
       if (subject instanceof Ci.nsIWritablePropertyBag2) {
         let pluginID = subject.getPropertyAsUint32("pluginID");
@@ -215,8 +204,9 @@ GlobalPCList.prototype = {
         if (topic == "PeerConnection:response:allow") {
           pc._settlePermission.allow();
         } else {
-          let err = new pc._win.DOMException("The operation is insecure.",
-                                             "SecurityError");
+          let err = new pc._win.DOMException("The request is not allowed by " +
+              "the user agent or the platform in the current context.",
+              "NotAllowedError");
           pc._settlePermission.deny(err);
         }
       }
@@ -277,44 +267,34 @@ RTCStatsReport.prototype = {
   contractID: PC_STATS_CONTRACT,
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports]),
 
-  // TODO: Change to use webidl getters once available (Bug 952122)
+  setInternal: function(aKey, aObj) {
+    return this.__DOM_IMPL__.__set(aKey, aObj);
+  },
+
+  // TODO: Remove legacy API eventually
   //
-  // Since webidl getters are not available, we make the stats available as
+  // Since maplike is recent, we still also make the stats available as legacy
   // enumerable read-only properties directly on our content-facing object.
   // Must be called after our webidl sandwich is made.
 
-  makeStatsPublic: function() {
-    let props = {};
-    this.forEach(function(stat) {
-        props[stat.id] = { enumerable: true, configurable: false,
-                           writable: false, value: stat };
-      });
-    Object.defineProperties(this.__DOM_IMPL__.wrappedJSObject, props);
-  },
+  makeStatsPublic: function(warnNullable) {
+    let legacyProps = {};
+    for (let key in this._report) {
+      let value = Cu.cloneInto(this._report[key], this._win);
+      this.setInternal(key, value);
 
-  forEach: function(cb, thisArg) {
-    for (var key in this._report) {
-      cb.call(thisArg || this._report, this.get(key), key, this._report);
+      legacyProps[key] = {
+        enumerable: true, configurable: false,
+        get: Cu.exportFunction(function() {
+          if (warnNullable.warn) {
+            warnNullable.warn();
+            warnNullable.warn = null;
+          }
+          return value;
+        }, this.__DOM_IMPL__.wrappedJSObject)
+      };
     }
-  },
-
-  get: function(key) {
-    function publifyReadonly(win, obj) {
-      let props = {};
-      for (let k in obj) {
-        props[k] = {enumerable:true, configurable:false, writable:false, value:obj[k]};
-      }
-      let pubobj = Cu.createObjectIn(win);
-      Object.defineProperties(pubobj, props);
-      return pubobj;
-    }
-
-    // Return a content object rather than a wrapped chrome one.
-    return publifyReadonly(this._win, this._report[key]);
-  },
-
-  has: function(key) {
-    return this._report[key] !== undefined;
+    Object.defineProperties(this.__DOM_IMPL__.wrappedJSObject, legacyProps);
   },
 
   get mozPcid() { return this._pcid; }
@@ -341,6 +321,10 @@ function RTCPeerConnection() {
 
   this._localType = null;
   this._remoteType = null;
+  // http://rtcweb-wg.github.io/jsep/#rfc.section.4.1.9
+  // canTrickle == null means unknown; when a remote description is received it
+  // is set to true or false based on the presence of the "trickle" ice-option
+  this._canTrickle = null;
 
   // States
   this._iceGatheringState = this._iceConnectionState = "new";
@@ -362,6 +346,8 @@ RTCPeerConnection.prototype = {
         Services.prefs.getBoolPref("media.peerconnection.ice.relay_only")) {
       rtcConfig.iceTransportPolicy = "relay";
     }
+    this._config = Object.assign({}, rtcConfig);
+
     if (!rtcConfig.iceServers ||
         !Services.prefs.getBoolPref("media.peerconnection.use_document_iceservers")) {
       try {
@@ -369,15 +355,14 @@ RTCPeerConnection.prototype = {
            JSON.parse(Services.prefs.getCharPref("media.peerconnection.default_iceservers") || "[]");
       } catch (e) {
         this.logWarning(
-            "Ignoring invalid media.peerconnection.default_iceservers in about:config",
-             null, 0);
+            "Ignoring invalid media.peerconnection.default_iceservers in about:config");
         rtcConfig.iceServers = [];
       }
       try {
         this._mustValidateRTCConfiguration(rtcConfig,
             "Ignoring invalid media.peerconnection.default_iceservers in about:config");
       } catch (e) {
-        this.logWarning(e.message, null, 0);
+        this.logWarning(e.message);
         rtcConfig.iceServers = [];
       }
     } else {
@@ -386,27 +371,18 @@ RTCPeerConnection.prototype = {
       this._mustValidateRTCConfiguration(rtcConfig,
         "RTCPeerConnection constructor passed invalid RTCConfiguration");
     }
-    // Save the appId
     var principal = Cu.getWebIDLCallerPrincipal();
-    this._appId = principal.appId;
     this._isChrome = Services.scriptSecurityManager.isSystemPrincipal(principal);
 
-    // Get the offline status for this appId
-    let appOffline = false;
-    if (this._appId != Ci.nsIScriptSecurityManager.NO_APP_ID &&
-        this._appId != Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID) {
-      let ios = Cc['@mozilla.org/network/io-service;1'].getService(Ci.nsIIOService);
-      appOffline = ios.isAppOffline(this._appId);
-    }
-
-    if (_globalPCList._networkdown || appOffline) {
+    if (_globalPCList._networkdown) {
       throw new this._win.DOMException(
           "Can't create RTCPeerConnections when the network is down",
           "InvalidStateError");
     }
 
-    this.makeGetterSetterEH("onaddstream");
-    this.makeGetterSetterEH("onaddtrack");
+    this.makeGetterSetterEH("ontrack");
+    this.makeLegacyGetterSetterEH("onaddstream", "Use peerConnection.ontrack instead.");
+    this.makeLegacyGetterSetterEH("onaddtrack", "Use peerConnection.ontrack instead.");
     this.makeGetterSetterEH("onicecandidate");
     this.makeGetterSetterEH("onnegotiationneeded");
     this.makeGetterSetterEH("onsignalingstatechange");
@@ -425,8 +401,11 @@ RTCPeerConnection.prototype = {
     this._observer = new this._win.PeerConnectionObserver(this.__DOM_IMPL__);
 
     var location = "" + this._win.location;
-    this._isLoop = location.startsWith("about:loop") ||
-                   location.startsWith("https://hello.firefox.com/");
+
+    // Warn just once per PeerConnection about deprecated getStats usage.
+    this._warnDeprecatedStatsAccessNullable = { warn: () =>
+      this.logWarning("non-maplike pc.getStats access is deprecated! " +
+                      "See http://w3c.github.io/webrtc-pc/#example for usage.") };
 
     // Add a reference to the PeerConnection to global list (before init).
     _globalPCList.addPC(this);
@@ -445,6 +424,10 @@ RTCPeerConnection.prototype = {
           "InvalidStateError");
     }
     return this._pc;
+  },
+
+  getConfiguration: function() {
+    return this._config;
   },
 
   _initCertificate: function(certificates) {
@@ -506,10 +489,13 @@ RTCPeerConnection.prototype = {
   // This wrapper helps implement legacy callbacks in a manner that produces
   // correct line-numbers in errors, provided that methods validate their inputs
   // before putting themselves on the pc's operations chain.
+  //
+  // It also serves as guard against settling promises past close().
 
-  _legacyCatch: function(onSuccess, onError, func) {
+  _legacyCatchAndCloseGuard: function(onSuccess, onError, func) {
     if (!onSuccess) {
-      return func();
+      return func().then(v => (this._closed ? new Promise(() => {}) : v),
+                         e => (this._closed ? new Promise(() => {}) : Promise.reject(e)));
     }
     try {
       return func().then(this._wrapLegacyCallback(onSuccess),
@@ -551,7 +537,7 @@ RTCPeerConnection.prototype = {
       } else if (!server.urls && server.url) {
         // TODO: Remove support for legacy iceServer.url eventually (Bug 1116766)
         server.urls = [server.url];
-        this.logWarning("RTCIceServer.url is deprecated! Use urls instead.", null, 0);
+        this.logWarning("RTCIceServer.url is deprecated! Use urls instead.");
       }
     });
 
@@ -573,13 +559,19 @@ RTCPeerConnection.prototype = {
       server.urls.forEach(urlStr => {
         let url = nicerNewURI(urlStr);
         if (url.scheme in { turn:1, turns:1 }) {
-          if (!server.username) {
+          if (server.username == undefined) {
             throw new this._win.DOMException(msg + " - missing username: " + urlStr,
                                              "InvalidAccessError");
           }
-          if (!server.credential) {
+          if (server.credential == undefined) {
             throw new this._win.DOMException(msg + " - missing credential: " + urlStr,
                                              "InvalidAccessError");
+          }
+          if (server.credentialType != "password") {
+            this.logWarning("RTCConfiguration TURN credentialType \""+
+                            server.credentialType +
+                            "\" is not yet implemented. Treating as password."+
+                            " https://bugzil.la/1247616");
           }
         }
         else if (!(url.scheme in { stun:1, stuns:1 })) {
@@ -587,7 +579,7 @@ RTCPeerConnection.prototype = {
                                            "SyntaxError");
         }
         if (url.scheme in { stuns:1, turns:1 }) {
-          this.logWarning(url.scheme.toUpperCase() + " is not yet supported.", null, 0);
+          this.logWarning(url.scheme.toUpperCase() + " is not yet supported.");
         }
       });
     });
@@ -606,8 +598,8 @@ RTCPeerConnection.prototype = {
 
   dispatchEvent: function(event) {
     // PC can close while events are firing if there is an async dispatch
-    // in c++ land
-    if (!this._closed) {
+    // in c++ land. But let through "closed" signaling and ice connection events.
+    if (!this._closed || this._inClose) {
       this.__DOM_IMPL__.dispatchEvent(event);
     }
   },
@@ -624,17 +616,22 @@ RTCPeerConnection.prototype = {
     } catch(e) {
       // If onerror itself throws, service it.
       try {
-        this.logError(e.message, e.fileName, e.lineNumber);
+        this.logMsg(e.message, e.fileName, e.lineNumber, Ci.nsIScriptError.errorFlag);
       } catch(e) {}
     }
   },
 
-  logError: function(msg, file, line) {
-    this.logMsg(msg, file, line, Ci.nsIScriptError.errorFlag);
+  logError: function(msg) {
+    this.logStackMsg(msg, Ci.nsIScriptError.errorFlag);
   },
 
-  logWarning: function(msg, file, line) {
-    this.logMsg(msg, file, line, Ci.nsIScriptError.warningFlag);
+  logWarning: function(msg) {
+    this.logStackMsg(msg, Ci.nsIScriptError.warningFlag);
+  },
+
+  logStackMsg: function(msg, flag) {
+    let err = this._win.Error();
+    this.logMsg(msg, err.fileName, err.lineNumber, flag);
   },
 
   logMsg: function(msg, file, line, flag) {
@@ -663,6 +660,17 @@ RTCPeerConnection.prototype = {
                           });
   },
 
+  makeLegacyGetterSetterEH: function(name, msg) {
+    Object.defineProperty(this, name,
+                          {
+                            get:function()  { return this.getEH(name); },
+                            set:function(h) {
+                              this.logWarning(name + " is deprecated! " + msg);
+                              return this.setEH(name, h);
+                            }
+                          });
+  },
+
   _addIdentityAssertion: function(sdpPromise, origin) {
     if (!this._localIdp.enabled) {
       return sdpPromise;
@@ -683,7 +691,7 @@ RTCPeerConnection.prototype = {
     } else {
       options = optionsOrOnSuccess;
     }
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       // TODO: Remove error on constraint-like RTCOptions next cycle (1197021).
       // Note that webidl bindings make o.mandatory implicit but not o.optional.
       function convertLegacyOptions(o) {
@@ -723,8 +731,7 @@ RTCPeerConnection.prototype = {
       if (options && convertLegacyOptions(options)) {
         this.logError(
           "Mandatory/optional in createOffer options no longer works! Use " +
-            JSON.stringify(options) + " instead (note the case difference)!",
-          null, 0);
+            JSON.stringify(options) + " instead (note the case difference)!");
         options = {};
       }
 
@@ -751,7 +758,7 @@ RTCPeerConnection.prototype = {
     } else {
       options = optionsOrOnSuccess;
     }
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       let origin = Cu.getWebIDLCallerPrincipal().origin;
       return this._chain(() => {
         let p = Promise.all([this.getPermission(), this._certificateReady])
@@ -801,7 +808,7 @@ RTCPeerConnection.prototype = {
   },
 
   setLocalDescription: function(desc, onSuccess, onError) {
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       this._localType = desc.type;
 
       let type;
@@ -885,7 +892,7 @@ RTCPeerConnection.prototype = {
   },
 
   setRemoteDescription: function(desc, onSuccess, onError) {
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       this._remoteType = desc.type;
 
       let type;
@@ -923,7 +930,7 @@ RTCPeerConnection.prototype = {
             this._onSetRemoteDescriptionSuccess = resolve;
             this._onSetRemoteDescriptionFailure = reject;
             this._impl.setRemoteDescription(type, desc.sdp);
-          }));
+          })).then(() => { this._updateCanTrickle(); });
 
         if (desc.type === "rollback") {
           return setRem;
@@ -951,13 +958,42 @@ RTCPeerConnection.prototype = {
     );
   },
 
-  updateIce: function(config) {
-    throw new this._win.DOMException("updateIce not yet implemented",
-                                     "NotSupportedError");
+  get canTrickleIceCandidates() {
+    return this._canTrickle;
   },
 
+  _updateCanTrickle: function() {
+    let containsTrickle = section => {
+      let lines = section.toLowerCase().split(/(?:\r\n?|\n)/);
+      return lines.some(line => {
+        let prefix = "a=ice-options:";
+        if (line.substring(0, prefix.length) !== prefix) {
+          return false;
+        }
+        let tokens = line.substring(prefix.length).split(" ");
+        return tokens.some(x => x === "trickle");
+      });
+    };
+
+    let desc = null;
+    try {
+      // The getter for remoteDescription can throw if the pc is closed.
+      desc = this.remoteDescription;
+    } catch (e) {}
+    if (!desc) {
+      this._canTrickle = null;
+      return;
+    }
+
+    let sections = desc.sdp.split(/(?:\r\n?|\n)m=/);
+    let topSection = sections.shift();
+    this._canTrickle =
+      containsTrickle(topSection) || sections.every(containsTrickle);
+  },
+
+
   addIceCandidate: function(c, onSuccess, onError) {
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       if (!c.candidate && !c.sdpMLineIndex) {
         throw new this._win.DOMException("Invalid candidate passed to addIceCandidate!",
                                          "InvalidParameterError");
@@ -974,12 +1010,6 @@ RTCPeerConnection.prototype = {
     stream.getTracks().forEach(track => this.addTrack(track, stream));
   },
 
-  removeStream: function(stream) {
-     // Bug 844295: Not implementing this functionality.
-     throw new this._win.DOMException("removeStream not yet implemented",
-                                      "NotSupportedError");
-  },
-
   getStreamById: function(id) {
     throw new this._win.DOMException("getStreamById not yet implemented",
                                      "NotSupportedError");
@@ -988,10 +1018,6 @@ RTCPeerConnection.prototype = {
   addTrack: function(track, stream) {
     if (stream.currentTime === undefined) {
       throw new this._win.DOMException("invalid stream.", "InvalidParameterError");
-    }
-    if (stream.getTracks().indexOf(track) < 0) {
-      throw new this._win.DOMException("track is not in stream.",
-                                       "InvalidParameterError");
     }
     this._checkClosed();
     this._senders.forEach(sender => {
@@ -1017,6 +1043,14 @@ RTCPeerConnection.prototype = {
     }
   },
 
+  _insertDTMF: function(sender, tones, duration, interToneGap) {
+    return this._impl.insertDTMF(sender.__DOM_IMPL__, tones, duration, interToneGap);
+  },
+
+  _getDTMFToneBuffer: function(sender) {
+    return this._impl.getDTMFToneBuffer(sender.__DOM_IMPL__);
+  },
+
   _replaceTrack: function(sender, withTrack) {
     // TODO: Do a (sender._stream.getTracks().indexOf(track) < 0) check
     //       on both track args someday.
@@ -1038,15 +1072,48 @@ RTCPeerConnection.prototype = {
     });
   },
 
+  _setParameters: function(sender, parameters) {
+    if (!Services.prefs.getBoolPref("media.peerconnection.simulcast")) {
+      return;
+    }
+    // validate parameters input
+    var encodings = parameters.encodings || [];
+
+    encodings.reduce((uniqueRids, encoding) => {
+      if (encoding.scaleResolutionDownBy < 1.0) {
+        throw new this._win.RangeError("scaleResolutionDownBy must be >= 1.0");
+      }
+      if (!encoding.rid && encodings.length > 1) {
+        throw new this._win.DOMException("Missing rid", "TypeError");
+      }
+      if (uniqueRids[encoding.rid]) {
+        throw new this._win.DOMException("Duplicate rid", "TypeError");
+      }
+      uniqueRids[encoding.rid] = true;
+      return uniqueRids;
+    }, {});
+
+    this._impl.setParameters(sender.track, parameters);
+  },
+
+  _getParameters: function(sender) {
+    if (!Services.prefs.getBoolPref("media.peerconnection.simulcast")) {
+      return;
+    }
+    return this._impl.getParameters(sender.track);
+  },
+
   close: function() {
     if (this._closed) {
       return;
     }
+    this._closed = true;
+    this._inClose = true;
     this.changeIceConnectionState("closed");
     this._localIdp.close();
     this._remoteIdp.close();
     this._impl.close();
-    this._closed = true;
+    this._inClose = false;
   },
 
   getLocalStreams: function() {
@@ -1067,6 +1134,10 @@ RTCPeerConnection.prototype = {
     return this._receivers;
   },
 
+  mozSelectSsrc: function(receiver, ssrcIndex) {
+    this._impl.selectSsrc(receiver.track, ssrcIndex);
+  },
+
   get localDescription() {
     this._checkClosed();
     let sdp = this._impl.localDescription;
@@ -1074,7 +1145,6 @@ RTCPeerConnection.prototype = {
       return null;
     }
 
-    sdp = this._localIdp.addIdentityAttribute(sdp);
     return new this._win.RTCSessionDescription({ type: this._localType,
                                                     sdp: sdp });
   },
@@ -1125,7 +1195,7 @@ RTCPeerConnection.prototype = {
   },
 
   getStats: function(selector, onSuccess, onError) {
-    return this._legacyCatch(onSuccess, onError, () => {
+    return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
       return this._chain(() => new this._win.Promise((resolve, reject) => {
         this._onGetStatsSuccess = resolve;
         this._onGetStatsFailure = reject;
@@ -1141,21 +1211,21 @@ RTCPeerConnection.prototype = {
     }
     if (dict.maxRetransmitNum != undefined) {
       dict.maxRetransmits = dict.maxRetransmitNum;
-      this.logWarning("Deprecated RTCDataChannelInit dictionary entry maxRetransmitNum used!", null, 0);
+      this.logWarning("Deprecated RTCDataChannelInit dictionary entry maxRetransmitNum used!");
     }
     if (dict.outOfOrderAllowed != undefined) {
       dict.ordered = !dict.outOfOrderAllowed; // the meaning is swapped with
                                               // the name change
-      this.logWarning("Deprecated RTCDataChannelInit dictionary entry outOfOrderAllowed used!", null, 0);
+      this.logWarning("Deprecated RTCDataChannelInit dictionary entry outOfOrderAllowed used!");
     }
 
     if (dict.preset != undefined) {
       dict.negotiated = dict.preset;
-      this.logWarning("Deprecated RTCDataChannelInit dictionary entry preset used!", null, 0);
+      this.logWarning("Deprecated RTCDataChannelInit dictionary entry preset used!");
     }
     if (dict.stream != undefined) {
       dict.id = dict.stream;
-      this.logWarning("Deprecated RTCDataChannelInit dictionary entry stream used!", null, 0);
+      this.logWarning("Deprecated RTCDataChannelInit dictionary entry stream used!");
     }
 
     if (dict.maxRetransmitTime !== null && dict.maxRetransmits !== null) {
@@ -1325,16 +1395,16 @@ PeerConnectionObserver.prototype = {
   //                 STUN requests.
 
   handleIceConnectionStateChange: function(iceConnectionState) {
-    if (this._dompc.iceConnectionState === 'new') {
+    let pc = this._dompc;
+    if (pc.iceConnectionState === 'new') {
       var checking_histogram = Services.telemetry.getHistogramById("WEBRTC_ICE_CHECKING_RATE");
       if (iceConnectionState === 'checking') {
         checking_histogram.add(true);
       } else if (iceConnectionState === 'failed') {
         checking_histogram.add(false);
       }
-    } else if (this._dompc.iceConnectionState === 'checking') {
-      var success_histogram = Services.telemetry.getHistogramById(this._dompc._isLoop ?
-        "LOOP_ICE_SUCCESS_RATE" : "WEBRTC_ICE_SUCCESS_RATE");
+    } else if (pc.iceConnectionState === 'checking') {
+      var success_histogram = Services.telemetry.getHistogramById("WEBRTC_ICE_SUCCESS_RATE");
       if (iceConnectionState === 'completed' ||
           iceConnectionState === 'connected') {
         success_histogram.add(true);
@@ -1344,10 +1414,10 @@ PeerConnectionObserver.prototype = {
     }
 
     if (iceConnectionState === 'failed') {
-      this._dompc.logError("ICE failed, see about:webrtc for more details", null, 0);
+      pc.logError("ICE failed, see about:webrtc for more details");
     }
 
-    this._dompc.changeIceConnectionState(iceConnectionState);
+    pc.changeIceConnectionState(iceConnectionState);
   },
 
   // This method is responsible for updating iceGatheringState. This
@@ -1396,17 +1466,17 @@ PeerConnectionObserver.prototype = {
         break;
 
       default:
-        this._dompc.logWarning("Unhandled state type: " + state, null, 0);
+        this._dompc.logWarning("Unhandled state type: " + state);
         break;
     }
   },
 
   onGetStatsSuccess: function(dict) {
-    let chromeobj = new RTCStatsReport(this._dompc._win, dict);
-    let webidlobj = this._dompc._win.RTCStatsReport._create(this._dompc._win,
-                                                            chromeobj);
-    chromeobj.makeStatsPublic();
-    this._dompc._onGetStatsSuccess(webidlobj);
+    let pc = this._dompc;
+    let chromeobj = new RTCStatsReport(pc._win, dict);
+    let webidlobj = pc._win.RTCStatsReport._create(pc._win, chromeobj);
+    chromeobj.makeStatsPublic(pc._warnDeprecatedStatsAccessNullable);
+    pc._onGetStatsSuccess(webidlobj);
   },
 
   onGetStatsError: function(code, message) {
@@ -1419,20 +1489,34 @@ PeerConnectionObserver.prototype = {
     this.dispatchEvent(ev);
   },
 
-  onRemoveStream: function(stream, type) {
+  onRemoveStream: function(stream) {
     this.dispatchEvent(new this._dompc._win.MediaStreamEvent("removestream",
                                                              { stream: stream }));
   },
 
-  onAddTrack: function(track) {
-    let ev = new this._dompc._win.MediaStreamTrackEvent("addtrack",
-                                                        { track: track });
+  onAddTrack: function(track, streams) {
+    let pc = this._dompc;
+    let receiver = pc._win.RTCRtpReceiver._create(pc._win,
+                                                  new RTCRtpReceiver(this,
+                                                                     track));
+    pc._receivers.push(receiver);
+    let ev = new pc._win.RTCTrackEvent("track",
+                                       { receiver: receiver,
+                                         track: track,
+                                         streams: streams });
+    this.dispatchEvent(ev);
+
+    // Fire legacy event as well for a little bit.
+    ev = new pc._win.MediaStreamTrackEvent("addtrack", { track: track });
     this.dispatchEvent(ev);
   },
 
-  onRemoveTrack: function(track, type) {
-    this.dispatchEvent(new this._dompc._win.MediaStreamTrackEvent("removetrack",
-                                                                  { track: track }));
+  onRemoveTrack: function(track) {
+    let pc = this._dompc;
+    let i = pc._receivers.findIndex(receiver => receiver.track == track);
+    if (i >= 0) {
+      pc._receivers.splice(i, 1);
+    }
   },
 
   onReplaceTrackSuccess: function() {
@@ -1458,6 +1542,13 @@ PeerConnectionObserver.prototype = {
   notifyDataChannel: function(channel) {
     this.dispatchEvent(new this._dompc._win.RTCDataChannelEvent("datachannel",
                                                                 { channel: channel }));
+  },
+
+  onDTMFToneChange: function(trackId, tone) {
+    var pc = this._dompc;
+    var sender = pc._senders.find(sender => sender.track.id == trackId)
+    sender.dtmf.dispatchEvent(new pc._win.RTCDTMFToneChangeEvent("tonechange",
+                                                                 { tone: tone }));
   }
 };
 
@@ -1481,10 +1572,54 @@ RTCPeerConnectionStatic.prototype = {
   },
 };
 
+function RTCDTMFSender(sender) {
+  this._sender = sender;
+}
+RTCDTMFSender.prototype = {
+  classDescription: "RTCDTMFSender",
+  classID: PC_DTMF_SENDER_CID,
+  contractID: PC_DTMF_SENDER_CONTRACT,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports]),
+
+  get toneBuffer() {
+    return this._sender._pc._getDTMFToneBuffer(this._sender);
+  },
+
+  get ontonechange() {
+    return this.__DOM_IMPL__.getEventHandler("ontonechange");
+  },
+
+  set ontonechange(handler) {
+    this.__DOM_IMPL__.setEventHandler("ontonechange", handler);
+  },
+
+  insertDTMF: function(tones, duration, interToneGap) {
+    this._sender._pc._checkClosed();
+
+    if (this._sender._pc._senders.indexOf(this._sender.__DOM_IMPL__) == -1) {
+      throw new this._sender._pc._win.DOMException("RTCRtpSender is stopped",
+                                                   "InvalidStateError");
+    }
+
+    duration = Math.max(40, Math.min(duration, 6000));
+    if (interToneGap < 30) interToneGap = 30;
+
+    tones = tones.toUpperCase();
+
+    if (tones.match(/[^0-9A-D#*,]/)) {
+      throw new this._sender._pc._win.DOMException("Invalid DTMF characters",
+                                                   "InvalidCharacterError");
+    }
+
+    this._sender._pc._insertDTMF(this._sender, tones, duration, interToneGap);
+  },
+};
+
 function RTCRtpSender(pc, track, stream) {
   this._pc = pc;
   this.track = track;
   this._stream = stream;
+  this.dtmf = pc._win.RTCDTMFSender._create(pc._win, new RTCDTMFSender(this));
 }
 RTCRtpSender.prototype = {
   classDescription: "RTCRtpSender",
@@ -1494,11 +1629,20 @@ RTCRtpSender.prototype = {
 
   replaceTrack: function(withTrack) {
     return this._pc._chain(() => this._pc._replaceTrack(this, withTrack));
+  },
+
+  setParameters: function(parameters) {
+    return this._pc._win.Promise.resolve()
+      .then(() => this._pc._setParameters(this, parameters));
+  },
+
+  getParameters: function() {
+    return this._pc._getParameters(this);
   }
 };
 
 function RTCRtpReceiver(pc, track) {
-  this.pc = pc;
+  this._pc = pc;
   this.track = track;
 }
 RTCRtpReceiver.prototype = {
@@ -1523,6 +1667,7 @@ CreateOfferRequest.prototype = {
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(
   [GlobalPCList,
+   RTCDTMFSender,
    RTCIceCandidate,
    RTCSessionDescription,
    RTCPeerConnection,

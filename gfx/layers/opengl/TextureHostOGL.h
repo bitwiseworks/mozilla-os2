@@ -25,7 +25,6 @@
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsISupportsImpl.h"            // for TextureImage::Release, etc
@@ -48,12 +47,12 @@ class CompositorOGL;
 class TextureImageTextureSourceOGL;
 class GLTextureSource;
 
-inline void ApplyFilterToBoundTexture(gl::GLContext* aGL,
-                                      gfx::Filter aFilter,
-                                      GLuint aTarget = LOCAL_GL_TEXTURE_2D)
+inline void ApplySamplingFilterToBoundTexture(gl::GLContext* aGL,
+                                              gfx::SamplingFilter aSamplingFilter,
+                                              GLuint aTarget = LOCAL_GL_TEXTURE_2D)
 {
   GLenum filter =
-    (aFilter == gfx::Filter::POINT ? LOCAL_GL_NEAREST : LOCAL_GL_LINEAR);
+    (aSamplingFilter == gfx::SamplingFilter::POINT ? LOCAL_GL_NEAREST : LOCAL_GL_LINEAR);
 
   aGL->fTexParameteri(aTarget, LOCAL_GL_TEXTURE_MIN_FILTER, filter);
   aGL->fTexParameteri(aTarget, LOCAL_GL_TEXTURE_MAG_FILTER, filter);
@@ -82,12 +81,13 @@ class TextureSourceOGL
 {
 public:
   TextureSourceOGL()
-    : mHasCachedFilter(false)
+    : mHasCachedSamplingFilter(false)
   {}
 
   virtual bool IsValid() const = 0;
 
-  virtual void BindTexture(GLenum aTextureUnit, gfx::Filter aFilter) = 0;
+  virtual void BindTexture(GLenum aTextureUnit,
+                           gfx::SamplingFilter aSamplingFilter) = 0;
 
   virtual gfx::IntSize GetSize() const = 0;
 
@@ -103,22 +103,22 @@ public:
 
   virtual GLTextureSource* AsGLTextureSource() { return nullptr; }
 
-  void SetFilter(gl::GLContext* aGL, gfx::Filter aFilter)
+  void SetSamplingFilter(gl::GLContext* aGL, gfx::SamplingFilter aSamplingFilter)
   {
-    if (mHasCachedFilter &&
-        mCachedFilter == aFilter) {
+    if (mHasCachedSamplingFilter &&
+        mCachedSamplingFilter == aSamplingFilter) {
       return;
     }
-    mHasCachedFilter = true;
-    mCachedFilter = aFilter;
-    ApplyFilterToBoundTexture(aGL, aFilter, GetTextureTarget());
+    mHasCachedSamplingFilter = true;
+    mCachedSamplingFilter = aSamplingFilter;
+    ApplySamplingFilterToBoundTexture(aGL, aSamplingFilter, GetTextureTarget());
   }
 
-  void ClearCachedFilter() { mHasCachedFilter = false; }
+  void ClearCachedFilter() { mHasCachedSamplingFilter = false; }
 
 private:
-  gfx::Filter mCachedFilter;
-  bool mHasCachedFilter;
+  gfx::SamplingFilter mCachedSamplingFilter;
+  bool mHasCachedSamplingFilter;
 };
 
 /**
@@ -142,6 +142,7 @@ public:
     , mIterating(false)
   {}
 
+  virtual const char* Name() const override { return "TextureImageTextureSourceOGL"; }
   // DataTextureSource
 
   virtual bool Update(gfx::DataSourceSurface* aSurface,
@@ -167,7 +168,8 @@ public:
 
   virtual TextureSourceOGL* AsSourceOGL() override { return this; }
 
-  virtual void BindTexture(GLenum aTextureUnit, gfx::Filter aFilter) override;
+  virtual void BindTexture(GLenum aTextureUnit,
+                           gfx::SamplingFilter aSamplingFilter) override;
 
   virtual gfx::IntSize GetSize() const override;
 
@@ -237,11 +239,14 @@ public:
 
   ~GLTextureSource();
 
+  virtual const char* Name() const override { return "GLTextureSource"; }
+
   virtual GLTextureSource* AsGLTextureSource() override { return this; }
 
   virtual TextureSourceOGL* AsSourceOGL() override { return this; }
 
-  virtual void BindTexture(GLenum activetex, gfx::Filter aFilter) override;
+  virtual void BindTexture(GLenum activetex,
+                           gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool IsValid() const override;
 
@@ -295,6 +300,8 @@ public:
 
   virtual void SetCompositor(Compositor* aCompositor) override;
 
+  virtual Compositor* GetCompositor() override { return mCompositor; }
+
   virtual bool Lock() override;
 
   virtual void Unlock() override {}
@@ -344,9 +351,12 @@ public:
                        GLenum aWrapMode,
                        gfx::IntSize aSize);
 
-  virtual TextureSourceOGL* AsSourceOGL() { return this; }
+  virtual const char* Name() const override { return "SurfaceTextureSource"; }
 
-  virtual void BindTexture(GLenum activetex, gfx::Filter aFilter) override;
+  virtual TextureSourceOGL* AsSourceOGL() override { return this; }
+
+  virtual void BindTexture(GLenum activetex,
+                           gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool IsValid() const override;
 
@@ -356,12 +366,11 @@ public:
 
   virtual gfx::Matrix4x4 GetTextureTransform() override;
 
-  virtual GLenum GetTextureTarget() const { return mTextureTarget; }
+  virtual GLenum GetTextureTarget() const override { return mTextureTarget; }
 
   virtual GLenum GetWrapMode() const override { return mWrapMode; }
 
-  // We don't own anything.
-  virtual void DeallocateDeviceData() override {}
+  virtual void DeallocateDeviceData() override;
 
   virtual void SetCompositor(Compositor* aCompositor) override;
 
@@ -369,7 +378,7 @@ public:
 
 protected:
   RefPtr<CompositorOGL> mCompositor;
-  mozilla::gl::AndroidSurfaceTexture* const mSurfTex;
+  RefPtr<gl::AndroidSurfaceTexture> mSurfTex;
   const gfx::SurfaceFormat mFormat;
   const GLenum mTextureTarget;
   const GLenum mWrapMode;
@@ -385,10 +394,11 @@ public:
 
   virtual ~SurfaceTextureHost();
 
-  // We don't own anything.
-  virtual void DeallocateDeviceData() override {}
+  virtual void DeallocateDeviceData() override;
 
   virtual void SetCompositor(Compositor* aCompositor) override;
+
+  virtual Compositor* GetCompositor() override { return mCompositor; }
 
   virtual bool Lock() override;
 
@@ -411,10 +421,10 @@ public:
 
   virtual gfx::IntSize GetSize() const override { return mSize; }
 
-  virtual const char* Name() { return "SurfaceTextureHost"; }
+  virtual const char* Name() override { return "SurfaceTextureHost"; }
 
 protected:
-  mozilla::gl::AndroidSurfaceTexture* const mSurfTex;
+  RefPtr<gl::AndroidSurfaceTexture> mSurfTex;
   const gfx::IntSize mSize;
   RefPtr<CompositorOGL> mCompositor;
   RefPtr<SurfaceTextureSource> mTextureSource;
@@ -436,9 +446,12 @@ public:
                         GLenum aWrapMode,
                         gfx::IntSize aSize);
 
+  virtual const char* Name() const override { return "EGLImageTextureSource"; }
+
   virtual TextureSourceOGL* AsSourceOGL() override { return this; }
 
-  virtual void BindTexture(GLenum activetex, gfx::Filter aFilter) override;
+  virtual void BindTexture(GLenum activetex,
+                           gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool IsValid() const override;
 
@@ -484,6 +497,8 @@ public:
 
   virtual void SetCompositor(Compositor* aCompositor) override;
 
+  virtual Compositor* GetCompositor() override { return mCompositor; }
+
   virtual bool Lock() override;
 
   virtual void Unlock() override;
@@ -515,6 +530,8 @@ protected:
   RefPtr<CompositorOGL> mCompositor;
   RefPtr<EGLImageTextureSource> mTextureSource;
 };
+
+CompositorOGL* AssertGLCompositor(Compositor* aCompositor);
 
 } // namespace layers
 } // namespace mozilla

@@ -1,7 +1,7 @@
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Check that users can inspect objects logged from cross-domain iframes -
 // bug 869003.
@@ -11,7 +11,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "test/test-bug-869003-top-window.html";
 
-var test = asyncTest(function* () {
+add_task(function* () {
   // This test is slightly more involved: it opens the web console, then the
   // variables view for a given object, it updates a property in the view and
   // checks the result. We can get a timeout with debug builds on slower
@@ -21,7 +21,7 @@ var test = asyncTest(function* () {
   yield loadTab("data:text/html;charset=utf8,<p>hello");
   let hud = yield openConsole();
 
-  content.location = TEST_URI;
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, TEST_URI);
 
   let [result] = yield waitForMessages({
     webconsole: hud,
@@ -75,4 +75,3 @@ var test = asyncTest(function* () {
     { name: "bug", value: 869003 },
   ], { webconsole: hud });
 });
-

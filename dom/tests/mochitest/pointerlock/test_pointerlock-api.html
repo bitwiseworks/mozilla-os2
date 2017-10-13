@@ -30,6 +30,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
 
         SpecialPowers.pushPrefEnv({"set": [
           ["full-screen-api.enabled", true],
+          ["full-screen-api.unprefix.enabled", true],
           ["full-screen-api.allow-trusted-requests-only", false],
           ["full-screen-api.transition-duration.enter", "0 0"],
           ["full-screen-api.transition-duration.leave", "0 0"]
@@ -55,13 +56,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
           "file_suppressSomeMouseEvents.html",
           "file_targetOutOfFocus.html",
           "file_withoutDOM.html",
-          "file_allowPointerLockSandboxFlag.html"
+          "file_allowPointerLockSandboxFlag.html",
+          "file_changeLockElement.html",
         ];
 
         var gDisableList = [
-          // Bug 1174323
-          { file: "file_screenClientXYConst.html",
-            platform: "MacIntel" }
         ];
 
         var gTestWindow = null;

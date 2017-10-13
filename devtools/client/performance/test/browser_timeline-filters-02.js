@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests markers filtering mechanism.
  */
@@ -20,7 +21,7 @@ function* spawnTest() {
            markers.some(m => m.name == "Javascript");
   });
 
-  let waterfallRendered = WaterfallView.once(EVENTS.WATERFALL_RENDERED);
+  let waterfallRendered = WaterfallView.once(EVENTS.UI_WATERFALL_RENDERED);
   yield stopRecording(panel);
 
   $("#filter-button").click();
@@ -33,7 +34,7 @@ function* spawnTest() {
 
   EventUtils.synthesizeMouseAtCenter(filterJS, {type: "mouseup"}, panel.panelWin);
   yield Promise.all([
-    WaterfallView.once(EVENTS.WATERFALL_RENDERED),
+    WaterfallView.once(EVENTS.UI_WATERFALL_RENDERED),
     once(filterJS, "command")
   ]);
 
@@ -44,3 +45,4 @@ function* spawnTest() {
   yield teardown(panel);
   finish();
 }
+/* eslint-enable */

@@ -31,27 +31,27 @@ xul|scrollbar {
 /* Scrollbar code will reset the margin to the correct side depending on
    where layout actually puts the scrollbar */
 xul|scrollbar[orient="vertical"] {
-  margin-left: -8px;
-  min-width: 8px;
-  max-width: 8px;
+  margin-left: -6px;
+  min-width: 6px;
+  max-width: 6px;
 }
 
 xul|scrollbar[orient="vertical"] xul|thumb {
   -moz-appearance: scrollbarthumb-vertical !important;
-  max-width: 6px !important;
-  min-width: 6px !important;
+  max-width: 2px !important;
+  min-width: 2px !important;
 }
 
 xul|scrollbar[orient="horizontal"] {
-  margin-top: -8px;
-  min-height: 8px;
-  max-height: 8px;
+  margin-top: -6px;
+  min-height: 6px;
+  max-height: 6px;
 }
 
 xul|scrollbar[orient="horizontal"] xul|thumb {
   -moz-appearance: scrollbarthumb-horizontal !important;
-  max-height: 6px !important;
-  min-height: 6px !important;
+  max-height: 2px !important;
+  min-height: 2px !important;
 }
 
 xul|scrollbar:not([active="true"]),
@@ -60,8 +60,8 @@ xul|scrollbar[disabled] {
 }
 
 xul|scrollbarbutton {
-  min-height: 8px !important;
-  min-width: 8px !important;
+  min-height: 6px !important;
+  min-width: 6px !important;
   -moz-appearance: none !important;
   visibility: hidden;
 }
@@ -72,13 +72,13 @@ xul|scrollbarbutton[sbattr="scrollbar-bottom-top"] {
 }
 
 xul|scrollbar xul|thumb {
-  background-color: rgba(0, 0, 0, 0.4) !important;
+  background-color: rgba(119, 119, 119, 0.4) !important;
   -moz-border-top-colors: none !important;
   -moz-border-bottom-colors: none !important;
   -moz-border-right-colors: none !important;
   -moz-border-left-colors: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.4) !important;
-  border-radius: 3px;
+  border: none;
+  border-radius: 4px;
 }
 
 xul|scrollbarbutton {
@@ -160,8 +160,8 @@ select[size="1"] {
 textarea {
   resize: none;
   border-width: 1px;
-  -moz-padding-start: 1px;
-  -moz-padding-end: 1px;
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
   padding-block-start: 2px;
   padding-block-end: 2px;
 }
@@ -171,8 +171,8 @@ input[type="submit"],
 input[type="reset"],
 button {
   border-width: 1px;
-  -moz-padding-start: 7px;
-  -moz-padding-end: 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
   padding-block-start: 0;
   padding-block-end: 0;
 }
@@ -180,8 +180,8 @@ button {
 input[type="radio"],
 input[type="checkbox"] {
   border: 1px solid var(--form_border) !important;
-  -moz-padding-start: 1px;
-  -moz-padding-end: 1px;
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
   padding-block-start: 2px;
   padding-block-end: 2px;
 }
@@ -273,8 +273,8 @@ input[type="reset"]:disabled,
 input[type="reset"]:disabled:active,
 button:disabled,
 button:disabled:active {
-  -moz-padding-start: 7px;
-  -moz-padding-end: 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
   padding-block-start: 0;
   padding-block-end: 0;
   background: var(--form_background_disabled);
@@ -293,8 +293,8 @@ input[type="checkbox"]:disabled:hover:active {
 
 select:disabled > button {
   opacity: 0.6;
-  -moz-padding-start: 7px;
-  -moz-padding-end: 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
   padding-block-start: 1px;
   padding-block-end: 1px;
 }
@@ -310,7 +310,7 @@ video:not([controls]) > xul|videocontrols {
   -moz-binding: url("chrome://global/content/bindings/videocontrols.xml#noControls");
 }
 
-*:-moz-any-link:active,
+*:any-link:active,
 *[role=button]:active,
 button:not(:disabled):active,
 input:not(:focus):not(:disabled):active,
@@ -327,8 +327,8 @@ input[type="color"]:-moz-system-metric(color-picker-available):active:hover,
 input[type="reset"]:active:hover,
 input[type="button"]:active:hover,
 input[type="submit"]:active:hover {
-  -moz-padding-end: 7px;
-  -moz-padding-start: 7px;
+  padding-inline-end: 7px;
+  padding-inline-start: 7px;
 }
 
 input[type=number] > div > div, /* work around bug 946184 */
@@ -336,3 +336,79 @@ input[type=number]::-moz-number-spin-box {
   display: none;
 }
 
+/* Override accessiblecaret css in layout/style/ua.css */
+div:-moz-native-anonymous.moz-accessiblecaret > #text-overlay,
+div:-moz-native-anonymous.moz-accessiblecaret > #image {
+  /* border: 0.1px solid red; */ /* Uncomment border to see the touch target. */
+  padding-left: 59%; /* Enlarge the touch area. ((48-22)/2)px / 22px ~= 59% */
+  padding-right: 59%; /* Enlarge the touch area. */
+  left: -59%;
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret > #image {
+  padding-bottom: 59%; /* Enlarge the touch area. */
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret.normal > #image {
+  background-image: url("chrome://browser/skin/images/accessiblecaret-normal-hdpi.png");
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret.left > #text-overlay,
+div:-moz-native-anonymous.moz-accessiblecaret.left > #image {
+  margin-left: -50%;
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret.left > #image {
+  background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-left-hdpi.png");
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret.right > #text-overlay,
+div:-moz-native-anonymous.moz-accessiblecaret.right > #image {
+  margin-left: 47%;
+}
+
+div:-moz-native-anonymous.moz-accessiblecaret.right > #image {
+  background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-right-hdpi.png");
+}
+
+@media (min-resolution: 1.5dppx) {
+  div:-moz-native-anonymous.moz-accessiblecaret.normal > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-normal-hdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.left > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-left-hdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.right > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-right-hdpi.png");
+  }
+}
+
+@media (min-resolution: 2dppx) {
+  div:-moz-native-anonymous.moz-accessiblecaret.normal > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-normal-xhdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.left > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-left-xhdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.right > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-right-xhdpi.png");
+  }
+}
+
+@media (min-resolution: 2.25dppx) {
+  div:-moz-native-anonymous.moz-accessiblecaret.normal > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-normal-xxhdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.left > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-left-xxhdpi.png");
+  }
+
+  div:-moz-native-anonymous.moz-accessiblecaret.right > #image {
+    background-image: url("chrome://browser/skin/images/accessiblecaret-tilt-right-xxhdpi.png");
+  }
+}

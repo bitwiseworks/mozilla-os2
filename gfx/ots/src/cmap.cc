@@ -36,10 +36,6 @@ struct Subtable314Range {
   uint32_t id_range_offset_offset;
 };
 
-// The maximum number of groups in format 12, 13 or 14 subtables.
-// Note: 0xFFFF is the maximum number of glyphs in a single font file.
-const unsigned kMaxCMAPGroups = 0xFFFF;
-
 // Glyph array size for the Mac Roman (format 0) table.
 const size_t kFormat0ArraySize = 256;
 
@@ -286,7 +282,7 @@ bool Parse31012(ots::Font *font,
   if (!subtable.ReadU32(&num_groups)) {
     return OTS_FAILURE_MSG("can't read number of format 12 subtable groups");
   }
-  if (num_groups == 0 || num_groups > kMaxCMAPGroups) {
+  if (num_groups == 0 || subtable.remaining() / 12 < num_groups) {
     return OTS_FAILURE_MSG("Bad format 12 subtable group count %d", num_groups);
   }
 
@@ -306,21 +302,6 @@ bool Parse31012(ots::Font *font,
         groups[i].start_glyph_id > 0xFFFF) {
       return OTS_FAILURE_MSG("bad format 12 subtable group (startCharCode=0x%4X, endCharCode=0x%4X, startGlyphID=%d)",
                              groups[i].start_range, groups[i].end_range, groups[i].start_glyph_id);
-    }
-
-    // [0xD800, 0xDFFF] are surrogate code points.
-    if (groups[i].start_range >= 0xD800 &&
-        groups[i].start_range <= 0xDFFF) {
-      return OTS_FAILURE_MSG("format 12 subtable out of range group startCharCode (0x%4X)", groups[i].start_range);
-    }
-    if (groups[i].end_range >= 0xD800 &&
-        groups[i].end_range <= 0xDFFF) {
-      return OTS_FAILURE_MSG("format 12 subtable out of range group endCharCode (0x%4X)", groups[i].end_range);
-    }
-    if (groups[i].start_range < 0xD800 &&
-        groups[i].end_range > 0xDFFF) {
-      return OTS_FAILURE_MSG("bad format 12 subtable group startCharCode (0x%4X) or endCharCode (0x%4X)",
-                             groups[i].start_range, groups[i].end_range);
     }
 
     // We assert that the glyph value is within range. Because of the range
@@ -375,7 +356,7 @@ bool Parse31013(ots::Font *font,
 
   // We limit the number of groups in the same way as in 3.10.12 tables. See
   // the comment there in
-  if (num_groups == 0 || num_groups > kMaxCMAPGroups) {
+  if (num_groups == 0 || subtable.remaining() / 12 < num_groups) {
     return OTS_FAILURE_MSG("Bad format 13 subtable group count %d", num_groups);
   }
 
@@ -483,7 +464,7 @@ bool Parse0514(ots::Font *font,
       if (!subtable.ReadU32(&num_ranges)) {
         return OTS_FAILURE_MSG("Can't read number of ranges in record %d", i);
       }
-      if (num_ranges == 0 || num_ranges > kMaxCMAPGroups) {
+      if (num_ranges == 0 || subtable.remaining() / 4 < num_ranges) {
         return OTS_FAILURE_MSG("Bad number of ranges (%d) in record %d", num_ranges, i);
       }
 
@@ -517,7 +498,7 @@ bool Parse0514(ots::Font *font,
       if (!subtable.ReadU32(&num_mappings)) {
         return OTS_FAILURE_MSG("Can't read number of mappings in variation selector record %d", i);
       }
-      if (num_mappings == 0) {
+      if (num_mappings == 0 || subtable.remaining() / 5 < num_mappings) {
         return OTS_FAILURE_MSG("Bad number of mappings (%d) in variation selector record %d", num_mappings, i);
       }
 
@@ -677,20 +658,21 @@ bool ots_cmap_parse(Font *font, const uint8_t *data, size_t length) {
   }
 
   // check if the table is sorted first by platform ID, then by encoding ID.
-  uint32_t last_id = 0;
-  for (unsigned i = 0; i < num_tables; ++i) {
-    uint32_t current_id
-        = (subtable_headers[i].platform << 24)
-        + (subtable_headers[i].encoding << 16)
-        + subtable_headers[i].language;
-    if ((i != 0) && (last_id >= current_id)) {
+  for (unsigned i = 1; i < num_tables; ++i) {
+    if (subtable_headers[i - 1].platform > subtable_headers[i].platform ||
+        (subtable_headers[i - 1].platform == subtable_headers[i].platform &&
+         (subtable_headers[i - 1].encoding > subtable_headers[i].encoding ||
+          (subtable_headers[i - 1].encoding == subtable_headers[i].encoding &&
+           subtable_headers[i - 1].language > subtable_headers[i].language))))
       OTS_WARNING("subtable %d with platform ID %d, encoding ID %d, language ID %d "
                   "following subtable with platform ID %d, encoding ID %d, language ID %d",
                   i,
-                  (uint8_t)(current_id >> 24), (uint8_t)(current_id >> 16), (uint8_t)(current_id),
-                  (uint8_t)(last_id >> 24), (uint8_t)(last_id >> 16), (uint8_t)(last_id));
-    }
-    last_id = current_id;
+                  subtable_headers[i].platform,
+                  subtable_headers[i].encoding,
+                  subtable_headers[i].language,
+                  subtable_headers[i - 1].platform,
+                  subtable_headers[i - 1].encoding,
+                  subtable_headers[i - 1].language);
   }
 
   // Now, verify that all the lengths are sane

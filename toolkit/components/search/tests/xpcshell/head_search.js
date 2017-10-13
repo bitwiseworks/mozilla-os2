@@ -27,40 +27,20 @@ const CACHE_FILENAME = "search.json.mozlz4";
 var XULRuntime = Components.classesByID["{95d89e3e-a169-41a3-8e56-719978e15b12}"]
                            .getService(Ci.nsIXULRuntime);
 
-var XULAppInfo = {
-  vendor: "Mozilla",
+var isChild = XULRuntime.processType == XULRuntime.PROCESS_TYPE_CONTENT;
+
+updateAppInfo({
   name: "XPCShell",
   ID: "xpcshell@test.mozilla.org",
   version: "5",
-  appBuildID: "2007010101",
   platformVersion: "1.9",
-  platformBuildID: "2007010101",
-  inSafeMode: false,
-  logConsoleErrors: true,
   // mirror OS from the base impl as some of the "location" tests rely on it
   OS: XULRuntime.OS,
-  XPCOMABI: "noarch-spidermonkey",
   // mirror processType from the base implementation
-  processType: XULRuntime.processType,
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIXULAppInfo, Ci.nsIXULRuntime,
-                                         Ci.nsISupports])
-};
-
-var XULAppInfoFactory = {
-  createInstance: function (outer, iid) {
-    if (outer != null)
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    return XULAppInfo.QueryInterface(iid);
-  }
-};
-
-var isChild = XULRuntime.processType == XULRuntime.PROCESS_TYPE_CONTENT;
-
-Components.manager.QueryInterface(Ci.nsIComponentRegistrar)
-          .registerFactory(Components.ID("{ecff8849-cee8-40a7-bd4a-3f4fdfeddb5c}"),
-                           "XULAppInfo", "@mozilla.org/xre/app-info;1",
-                           XULAppInfoFactory);
+  extraProps: {
+    processType: XULRuntime.processType,
+  },
+});
 
 var gProfD;
 if (!isChild) {
@@ -79,8 +59,6 @@ function dumpn(text)
  */
 function configureToLoadJarEngines()
 {
-  let defaultBranch = Services.prefs.getDefaultBranch(null);
-
   let url = "chrome://testsearchplugin/locale/searchplugins/";
   let resProt = Services.io.getProtocolHandler("resource")
                         .QueryInterface(Ci.nsIResProtocolHandler);
@@ -101,9 +79,9 @@ function configureToLoadJarEngines()
 function installAddonEngine(name = "engine-addon")
 {
   const XRE_EXTENSIONS_DIR_LIST = "XREExtDL";
-  const gProfD = do_get_profile().QueryInterface(Ci.nsILocalFile);
+  const profD = do_get_profile().QueryInterface(Ci.nsILocalFile);
 
-  let dir = gProfD.clone();
+  let dir = profD.clone();
   dir.append("extensions");
   if (!dir.exists())
     dir.create(dir.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
@@ -153,9 +131,9 @@ function installDistributionEngine()
 {
   const XRE_APP_DISTRIBUTION_DIR = "XREAppDist";
 
-  const gProfD = do_get_profile().QueryInterface(Ci.nsILocalFile);
+  const profD = do_get_profile().QueryInterface(Ci.nsILocalFile);
 
-  let dir = gProfD.clone();
+  let dir = profD.clone();
   dir.append("distribution");
   dir.create(dir.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
   let distDir = dir.clone();
@@ -194,17 +172,6 @@ function removeMetadata()
   if (file.exists()) {
     file.remove(false);
   }
-}
-
-function getSearchMetadata()
-{
-  // Check that search-metadata.json has been created
-  let metadata = gProfD.clone();
-  metadata.append("search-metadata.json");
-  do_check_true(metadata.exists());
-
-  do_print("Parsing metadata");
-  return readJSONFile(metadata);
 }
 
 function promiseCacheData() {
@@ -330,7 +297,7 @@ function readJSONFile(aFile) {
   try {
     stream.init(aFile, MODE_RDONLY, FileUtils.PERMS_FILE, 0);
     return parseJsonFromStream(stream, stream.available());
-  } catch(ex) {
+  } catch (ex) {
     dumpn("readJSONFile: Error reading JSON file: " + ex);
   } finally {
     stream.close();
@@ -348,6 +315,8 @@ function isSubObjectOf(expectedObj, actualObj) {
       do_check_eq(expectedObj[prop].length, actualObj[prop].length);
       isSubObjectOf(expectedObj[prop], actualObj[prop]);
     } else {
+      if (expectedObj[prop] != actualObj[prop])
+        do_print("comparing property " + prop);
       do_check_eq(expectedObj[prop], actualObj[prop]);
     }
   }
@@ -362,7 +331,7 @@ if (!isChild) {
   // The geo-specific search tests assume certain prefs are already setup, which
   // might not be true when run in comm-central etc.  So create them here.
   Services.prefs.setBoolPref("browser.search.geoSpecificDefaults", true);
-  Services.prefs.setIntPref("browser.search.geoip.timeout", 2000);
+  Services.prefs.setIntPref("browser.search.geoip.timeout", 3000);
   // But still disable geoip lookups - tests that need it will re-configure this.
   Services.prefs.setCharPref("browser.search.geoip.url", "");
   // Also disable region defaults - tests using it will also re-configure it.
@@ -465,18 +434,14 @@ function installTestEngine() {
 }
 
 /**
- * Wrapper for nsIPrefBranch::setComplexValue.
+ * Set a localized preference on the default branch
  * @param aPrefName
  *        The name of the pref to set.
  */
-function setLocalizedPref(aPrefName, aValue) {
-  const nsIPLS = Ci.nsIPrefLocalizedString;
-  try {
-    var pls = Components.classes["@mozilla.org/pref-localizedstring;1"]
-                        .createInstance(Ci.nsIPrefLocalizedString);
-    pls.data = aValue;
-    Services.prefs.setComplexValue(aPrefName, nsIPLS, pls);
-  } catch (ex) {}
+function setLocalizedDefaultPref(aPrefName, aValue) {
+  let value = "data:text/plain," + BROWSER_SEARCH_PREF + aPrefName + "=" + aValue;
+  Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF)
+          .setCharPref(aPrefName, value);
 }
 
 
@@ -503,8 +468,8 @@ function setUpGeoDefaults() {
 
   do_get_file("data/engine2.xml").copyTo(engineDir, "engine2.xml");
 
-  setLocalizedPref("browser.search.defaultenginename",    "Test search engine");
-  setLocalizedPref("browser.search.defaultenginename.US", "A second test engine");
+  setLocalizedDefaultPref("defaultenginename",    "Test search engine");
+  setLocalizedDefaultPref("defaultenginename.US", "A second test engine");
 
   do_register_cleanup(function() {
     removeMetadata();
@@ -571,7 +536,7 @@ function checkCountryResultTelemetry(aExpectedValue) {
   let histogram = Services.telemetry.getHistogramById("SEARCH_SERVICE_COUNTRY_FETCH_RESULT");
   let snapshot = histogram.snapshot();
   // The probe is declared with 8 values, but we get 9 back from .counts
-  let expectedCounts = [0,0,0,0,0,0,0,0,0];
+  let expectedCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   if (aExpectedValue != null) {
     expectedCounts[aExpectedValue] = 1;
   }

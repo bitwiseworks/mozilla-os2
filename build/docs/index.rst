@@ -24,6 +24,9 @@ Important Concepts
    preprocessor
    jar-manifests
    defining-binaries
+   toolchains
+   locales
+   rust
 
 integrated development environment (IDE)
 ========================================

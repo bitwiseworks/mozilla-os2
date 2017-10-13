@@ -93,13 +93,19 @@ class Taskcluster(LogMixin):
 
     @property
     def expiration(self):
-        return datetime.utcnow() + timedelta(weeks=52)
+        weeks = 52
+        if self.buildbot == 'buildbot-try':
+            weeks = 3
+        return datetime.utcnow() + timedelta(weeks=weeks)
 
     def create_artifact(self, task, filename):
         mime_type = self.get_mime_type(os.path.splitext(filename)[1])
         content_length = os.path.getsize(filename)
         self.info("Uploading to S3: filename=%s mimetype=%s length=%s" % (
             filename, mime_type, content_length))
+        # reclaim the task to avoid "claim-expired" errors
+        self.taskcluster_queue.reclaimTask(
+            task['status']['taskId'], task['status']['runs'][-1]['runId'])
         artifact = self.taskcluster_queue.createArtifact(
             task['status']['taskId'],
             task['status']['runs'][-1]['runId'],

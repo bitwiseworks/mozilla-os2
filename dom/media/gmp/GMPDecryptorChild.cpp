@@ -6,8 +6,9 @@
 #include "GMPDecryptorChild.h"
 #include "GMPContentChild.h"
 #include "GMPChild.h"
+#include "base/task.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "runnable_utils.h"
 #include <ctime>
 
@@ -61,8 +62,9 @@ GMPDecryptorChild::CallOnGMPThread(MethodType aMethod, ParamType&&... aParams)
     // Use const reference when we have to.
     auto m = &GMPDecryptorChild::CallMethod<
         decltype(aMethod), typename AddConstReference<ParamType>::Type...>;
-    auto t = NewRunnableMethod(this, m, aMethod, Forward<ParamType>(aParams)...);
-    mPlugin->GMPMessageLoop()->PostTask(FROM_HERE, t);
+    RefPtr<mozilla::Runnable> t =
+      dont_add_new_uses_of_this::NewRunnableMethod(this, m, aMethod, Forward<ParamType>(aParams)...);
+    mPlugin->GMPMessageLoop()->PostTask(t.forget());
   }
 }
 
@@ -71,6 +73,11 @@ GMPDecryptorChild::Init(GMPDecryptor* aSession)
 {
   MOZ_ASSERT(aSession);
   mSession = aSession;
+  // The ID of this decryptor is the IPDL actor ID. Note it's unique inside
+  // the child process, but not necessarily across all gecko processes. However,
+  // since GMPDecryptors are segregated by node ID/origin, we shouldn't end up
+  // with clashes in the content process.
+  SendSetDecryptorId(Id());
 }
 
 void
@@ -157,11 +164,31 @@ GMPDecryptorChild::KeyStatusChanged(const char* aSessionId,
                                     uint32_t aKeyIdLength,
                                     GMPMediaKeyStatus aStatus)
 {
-  nsAutoTArray<uint8_t, 16> kid;
+  AutoTArray<uint8_t, 16> kid;
   kid.AppendElements(aKeyId, aKeyIdLength);
-  CALL_ON_GMP_THREAD(SendKeyStatusChanged,
-                     nsCString(aSessionId, aSessionIdLength), kid,
-                     aStatus);
+
+  nsTArray<GMPKeyInformation> keyInfos;
+  keyInfos.AppendElement(GMPKeyInformation(kid, aStatus));
+  CALL_ON_GMP_THREAD(SendBatchedKeyStatusChanged,
+                     nsCString(aSessionId, aSessionIdLength),
+                     keyInfos);
+}
+
+void
+GMPDecryptorChild::BatchedKeyStatusChanged(const char* aSessionId,
+                                           uint32_t aSessionIdLength,
+                                           const GMPMediaKeyInfo* aKeyInfos,
+                                           uint32_t aKeyInfosLength)
+{
+  nsTArray<GMPKeyInformation> keyInfos;
+  for (uint32_t i = 0; i < aKeyInfosLength; i++) {
+    nsTArray<uint8_t> keyId;
+    keyId.AppendElements(aKeyInfos[i].keyid, aKeyInfos[i].keyid_size);
+    keyInfos.AppendElement(GMPKeyInformation(keyId, aKeyInfos[i].status));
+  }
+  CALL_ON_GMP_THREAD(SendBatchedKeyStatusChanged,
+                     nsCString(aSessionId, aSessionIdLength),
+                     keyInfos);
 }
 
 void
@@ -170,8 +197,10 @@ GMPDecryptorChild::Decrypted(GMPBuffer* aBuffer, GMPErr aResult)
   if (!ON_GMP_THREAD()) {
     // We should run this whole method on the GMP thread since the buffer needs
     // to be deleted after the SendDecrypted call.
-    auto t = NewRunnableMethod(this, &GMPDecryptorChild::Decrypted, aBuffer, aResult);
-    mPlugin->GMPMessageLoop()->PostTask(FROM_HERE, t);
+    mPlugin->GMPMessageLoop()->PostTask(NewRunnableMethod
+                                        <GMPBuffer*, GMPErr>(this,
+                                                             &GMPDecryptorChild::Decrypted,
+                                                             aBuffer, aResult));
     return;
   }
 
@@ -190,7 +219,7 @@ GMPDecryptorChild::Decrypted(GMPBuffer* aBuffer, GMPErr aResult)
 void
 GMPDecryptorChild::SetCapabilities(uint64_t aCaps)
 {
-  CALL_ON_GMP_THREAD(SendSetCaps, aCaps);
+  // Deprecated.
 }
 
 void
@@ -216,12 +245,13 @@ GMPDecryptorChild::GetPluginVoucher(const uint8_t** aVoucher,
 }
 
 bool
-GMPDecryptorChild::RecvInit()
+GMPDecryptorChild::RecvInit(const bool& aDistinctiveIdentifierRequired,
+                            const bool& aPersistentStateRequired)
 {
   if (!mSession) {
     return false;
   }
-  mSession->Init(this);
+  mSession->Init(this, aDistinctiveIdentifierRequired, aPersistentStateRequired);
   return true;
 }
 

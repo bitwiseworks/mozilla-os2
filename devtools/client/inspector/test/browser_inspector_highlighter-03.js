@@ -34,10 +34,10 @@ add_task(function* () {
 
   info("Waiting for box mode to show.");
   let body = yield getNodeFront("body", inspector);
-  yield toolbox.highlighter.showBoxModel(body);
+  yield inspector.highlighter.showBoxModel(body);
 
   info("Waiting for element picker to become active.");
-  yield toolbox.highlighterUtils.startPicker();
+  yield startPicker(toolbox);
 
   info("Moving mouse over iframe padding.");
   yield moveMouseOver("iframe", 1, 1);
@@ -55,7 +55,8 @@ add_task(function* () {
   info("Moving mouse over iframe body");
   yield moveMouseOver("iframe", 40, 40);
 
-  ok((yield testActor.assertHighlightedNode(iframeBodySelector)), "highlighter shows the right node");
+  ok((yield testActor.assertHighlightedNode(iframeBodySelector)),
+     "highlighter shows the right node");
   yield testActor.isNodeCorrectlyHighlighted(iframeBodySelector, is);
 
   info("Waiting for the element picker to deactivate.");

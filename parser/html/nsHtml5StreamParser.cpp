@@ -114,7 +114,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsHtml5StreamParser)
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-class nsHtml5ExecutorFlusher : public nsRunnable
+class nsHtml5ExecutorFlusher : public Runnable
 {
   private:
     RefPtr<nsHtml5TreeOpExecutor> mExecutor;
@@ -122,7 +122,7 @@ class nsHtml5ExecutorFlusher : public nsRunnable
     explicit nsHtml5ExecutorFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
     {}
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       if (!mExecutor->isInList()) {
         mExecutor->RunFlushLoop();
@@ -131,7 +131,7 @@ class nsHtml5ExecutorFlusher : public nsRunnable
     }
 };
 
-class nsHtml5LoadFlusher : public nsRunnable
+class nsHtml5LoadFlusher : public Runnable
 {
   private:
     RefPtr<nsHtml5TreeOpExecutor> mExecutor;
@@ -139,7 +139,7 @@ class nsHtml5LoadFlusher : public nsRunnable
     explicit nsHtml5LoadFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
     {}
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mExecutor->FlushSpeculativeLoads();
       return NS_OK;
@@ -286,7 +286,10 @@ nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL)
       // UTF-8 for an ellipsis.
       mViewSourceTitle.AssignLiteral("data:\xE2\x80\xA6");
     } else {
-      temp->GetSpec(mViewSourceTitle);
+      nsresult rv = temp->GetSpec(mViewSourceTitle);
+      if (NS_FAILED(rv)) {
+        mViewSourceTitle.AssignLiteral("\xE2\x80\xA6");
+      }
     }
   }
 }
@@ -1041,7 +1044,7 @@ nsHtml5StreamParser::DoStopRequest()
   ParseAvailableData(); 
 }
 
-class nsHtml5RequestStopper : public nsRunnable
+class nsHtml5RequestStopper : public Runnable
 {
   private:
     nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1049,7 +1052,7 @@ class nsHtml5RequestStopper : public nsRunnable
     explicit nsHtml5RequestStopper(nsHtml5StreamParser* aStreamParser)
       : mStreamParser(aStreamParser)
     {}
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mozilla::MutexAutoLock autoLock(mStreamParser->mTokenizerMutex);
       mStreamParser->DoStopRequest();
@@ -1123,7 +1126,7 @@ nsHtml5StreamParser::DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength)
   mFlushTimerArmed = true;
 }
 
-class nsHtml5DataAvailable : public nsRunnable
+class nsHtml5DataAvailable : public Runnable
 {
   private:
     nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1137,7 +1140,7 @@ class nsHtml5DataAvailable : public nsRunnable
       , mData(Move(aData))
       , mLength(aLength)
     {}
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mozilla::MutexAutoLock autoLock(mStreamParser->mTokenizerMutex);
       mStreamParser->DoDataAvailable(mData.get(), mLength);
@@ -1192,8 +1195,7 @@ nsHtml5StreamParser::OnDataAvailable(nsIRequest* aRequest,
   }
 }
 
-/* static */
-NS_METHOD
+/* static */ nsresult
 nsHtml5StreamParser::CopySegmentsToParser(nsIInputStream *aInStream,
                                           void *aClosure,
                                           const char *aFromSegment,
@@ -1446,7 +1448,7 @@ nsHtml5StreamParser::ParseAvailableData()
   }
 }
 
-class nsHtml5StreamParserContinuation : public nsRunnable
+class nsHtml5StreamParserContinuation : public Runnable
 {
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1454,7 +1456,7 @@ public:
   explicit nsHtml5StreamParserContinuation(nsHtml5StreamParser* aStreamParser)
     : mStreamParser(aStreamParser)
   {}
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     mozilla::MutexAutoLock autoLock(mStreamParser->mTokenizerMutex);
     mStreamParser->Uninterrupt();
@@ -1612,7 +1614,7 @@ nsHtml5StreamParser::ContinueAfterFailedCharsetSwitch()
   }
 }
 
-class nsHtml5TimerKungFu : public nsRunnable
+class nsHtml5TimerKungFu : public Runnable
 {
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1620,7 +1622,7 @@ public:
   explicit nsHtml5TimerKungFu(nsHtml5StreamParser* aStreamParser)
     : mStreamParser(aStreamParser)
   {}
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     if (mStreamParser->mFlushTimer) {
       mStreamParser->mFlushTimer->Cancel();

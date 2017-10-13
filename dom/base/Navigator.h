@@ -12,23 +12,18 @@
 #include "mozilla/ErrorResult.h"
 #include "nsIDOMNavigator.h"
 #include "nsIMozNavigatorNetwork.h"
-#include "nsAutoPtr.h"
 #include "nsWrapperCache.h"
 #include "nsHashKeys.h"
 #include "nsInterfaceHashtable.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsWeakPtr.h"
-#ifdef MOZ_EME
 #include "mozilla/dom/MediaKeySystemAccessManager.h"
-#endif
 
 class nsPluginArray;
 class nsMimeTypeArray;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 class nsIDOMNavigatorSystemMessages;
-class nsDOMCameraManager;
-class nsDOMDeviceStorage;
 class nsIPrincipal;
 class nsIURI;
 
@@ -40,8 +35,10 @@ class MediaDevices;
 struct MediaStreamConstraints;
 class WakeLock;
 class ArrayBufferViewOrBlobOrStringOrFormData;
-struct MobileIdOptions;
 class ServiceWorkerContainer;
+class DOMRequest;
+struct FlyWebPublishOptions;
+struct FlyWebFilter;
 } // namespace dom
 } // namespace mozilla
 
@@ -58,48 +55,27 @@ namespace battery {
 class BatteryManager;
 } // namespace battery
 
-#ifdef MOZ_B2G_FM
-class FMRadio;
-#endif
-
 class Promise;
 
 class DesktopNotificationCenter;
-class MobileMessageManager;
 class MozIdleObserver;
 #ifdef MOZ_GAMEPAD
 class Gamepad;
+class GamepadServiceTest;
 #endif // MOZ_GAMEPAD
-#ifdef MOZ_MEDIA_NAVIGATOR
 class NavigatorUserMediaSuccessCallback;
 class NavigatorUserMediaErrorCallback;
 class MozGetUserMediaDevicesSuccessCallback;
-#endif // MOZ_MEDIA_NAVIGATOR
 
 namespace network {
 class Connection;
 } // namespace network
 
-#ifdef MOZ_B2G_BT
-namespace bluetooth {
-class BluetoothManager;
-} // namespace bluetooth
-#endif // MOZ_B2G_BT
-
-#ifdef MOZ_B2G_RIL
-class MobileConnectionArray;
-#endif
-
 class PowerManager;
-class CellBroadcast;
-class IccManager;
-class Telephony;
-class Voicemail;
-class TVManager;
-class InputPortManager;
-class DeviceStorageAreaListener;
 class Presentation;
 class LegacyMozTCPSocket;
+class VRDisplay;
+class StorageManager;
 
 namespace time {
 class TimeManager;
@@ -116,7 +92,7 @@ class Navigator final : public nsIDOMNavigator
                       , public nsWrapperCache
 {
 public:
-  explicit Navigator(nsPIDOMWindow* aInnerWindow);
+  explicit Navigator(nsPIDOMWindowInner* aInnerWindow);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Navigator,
@@ -127,7 +103,7 @@ public:
   static void Init();
 
   void Invalidate();
-  nsPIDOMWindow *GetWindow() const
+  nsPIDOMWindowInner *GetWindow() const
   {
     return mWindow;
   }
@@ -139,18 +115,19 @@ public:
   /**
    * For use during document.write where our inner window changes.
    */
-  void SetWindow(nsPIDOMWindow *aInnerWindow);
+  void SetWindow(nsPIDOMWindowInner *aInnerWindow);
 
   /**
    * Called when the inner window navigates to a new page.
    */
   void OnNavigation();
 
-  // Helper to initialize mMessagesManager.
-  nsresult EnsureMessagesManager();
-
   // The XPCOM GetProduct is OK
   // The XPCOM GetLanguage is OK
+  void GetUserAgent(nsString& aUserAgent, ErrorResult& /* unused */)
+  {
+    GetUserAgent(aUserAgent);
+  }
   bool OnLine();
   void RegisterProtocolHandler(const nsAString& aScheme, const nsAString& aURL,
                                const nsAString& aTitle, ErrorResult& aRv);
@@ -162,13 +139,10 @@ public:
   // The XPCOM GetDoNotTrack is ok
   Geolocation* GetGeolocation(ErrorResult& aRv);
   Promise* GetBattery(ErrorResult& aRv);
-  battery::BatteryManager* GetDeprecatedBattery(ErrorResult& aRv);
 
-  static already_AddRefed<Promise> GetDataStores(nsPIDOMWindow* aWindow,
-                                                 const nsAString& aName,
-                                                 const nsAString& aOwner,
-                                                 ErrorResult& aRv);
-
+  already_AddRefed<Promise> PublishServer(const nsAString& aName,
+                                          const FlyWebPublishOptions& aOptions,
+                                          ErrorResult& aRv);
   static void AppName(nsAString& aAppName, bool aUsePrefOverriddenValue);
 
   static nsresult GetPlatform(nsAString& aPlatform,
@@ -177,24 +151,18 @@ public:
   static nsresult GetAppVersion(nsAString& aAppVersion,
                                 bool aUsePrefOverriddenValue);
 
-  static nsresult GetUserAgent(nsPIDOMWindow* aWindow,
+  static nsresult GetUserAgent(nsPIDOMWindowInner* aWindow,
                                nsIURI* aURI,
                                bool aIsCallerChrome,
                                nsAString& aUserAgent);
 
-  already_AddRefed<Promise> GetDataStores(const nsAString& aName,
-                                          const nsAString& aOwner,
-                                          ErrorResult& aRv);
-
-  // Feature Detection API
-  already_AddRefed<Promise> GetFeature(const nsAString& aName,
-                                       ErrorResult& aRv);
-
-  already_AddRefed<Promise> HasFeature(const nsAString &aName,
-                                       ErrorResult& aRv);
+  // Clears the user agent cache by calling:
+  // NavigatorBinding::ClearCachedUserAgentValue(this);
+  void ClearUserAgentCache();
 
   bool Vibrate(uint32_t aDuration);
   bool Vibrate(const nsTArray<uint32_t>& aDuration);
+  void SetVibrationPermission(bool aPermitted, bool aPersistent);
   uint32_t MaxTouchPoints();
   void GetAppCodeName(nsString& aAppCodeName, ErrorResult& aRv)
   {
@@ -214,6 +182,8 @@ public:
   }
   PowerManager* GetMozPower(ErrorResult& aRv);
   bool JavaEnabled(ErrorResult& aRv);
+  uint64_t HardwareConcurrency();
+  bool CpuHasSSE2();
   bool TaintEnabled()
   {
     return false;
@@ -222,54 +192,18 @@ public:
   void RemoveIdleObserver(MozIdleObserver& aObserver, ErrorResult& aRv);
   already_AddRefed<WakeLock> RequestWakeLock(const nsAString &aTopic,
                                              ErrorResult& aRv);
-  DeviceStorageAreaListener* GetDeviceStorageAreaListener(ErrorResult& aRv);
-
-  already_AddRefed<nsDOMDeviceStorage> GetDeviceStorage(const nsAString& aType,
-                                                        ErrorResult& aRv);
-
-  void GetDeviceStorages(const nsAString& aType,
-                         nsTArray<RefPtr<nsDOMDeviceStorage> >& aStores,
-                         ErrorResult& aRv);
-
-  already_AddRefed<nsDOMDeviceStorage>
-  GetDeviceStorageByNameAndType(const nsAString& aName, const nsAString& aType,
-                                ErrorResult& aRv);
 
   DesktopNotificationCenter* GetMozNotification(ErrorResult& aRv);
-  CellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
-  IccManager* GetMozIccManager(ErrorResult& aRv);
-  MobileMessageManager* GetMozMobileMessage();
-  Telephony* GetMozTelephony(ErrorResult& aRv);
-  Voicemail* GetMozVoicemail(ErrorResult& aRv);
-  TVManager* GetTv();
-  InputPortManager* GetInputPortManager(ErrorResult& aRv);
   already_AddRefed<LegacyMozTCPSocket> MozTCPSocket();
   network::Connection* GetConnection(ErrorResult& aRv);
-  nsDOMCameraManager* GetMozCameras(ErrorResult& aRv);
   MediaDevices* GetMediaDevices(ErrorResult& aRv);
-  void MozSetMessageHandler(const nsAString& aType,
-                            systemMessageCallback* aCallback,
-                            ErrorResult& aRv);
-  bool MozHasPendingMessage(const nsAString& aType, ErrorResult& aRv);
-  void MozSetMessageHandlerPromise(Promise& aPromise, ErrorResult& aRv);
 
-#ifdef MOZ_B2G
-  already_AddRefed<Promise> GetMobileIdAssertion(const MobileIdOptions& options,
-                                                 ErrorResult& aRv);
-#endif
-#ifdef MOZ_B2G_RIL
-  MobileConnectionArray* GetMozMobileConnections(ErrorResult& aRv);
-#endif // MOZ_B2G_RIL
 #ifdef MOZ_GAMEPAD
   void GetGamepads(nsTArray<RefPtr<Gamepad> >& aGamepads, ErrorResult& aRv);
+  GamepadServiceTest* RequestGamepadServiceTest();
 #endif // MOZ_GAMEPAD
-  already_AddRefed<Promise> GetVRDevices(ErrorResult& aRv);
-#ifdef MOZ_B2G_FM
-  FMRadio* GetMozFMRadio(ErrorResult& aRv);
-#endif
-#ifdef MOZ_B2G_BT
-  bluetooth::BluetoothManager* GetMozBluetooth(ErrorResult& aRv);
-#endif // MOZ_B2G_BT
+  already_AddRefed<Promise> GetVRDisplays(ErrorResult& aRv);
+  void GetActiveVRDisplays(nsTArray<RefPtr<VRDisplay>>& aDisplays) const;
 #ifdef MOZ_TIME_MANAGER
   time::TimeManager* GetMozTime(ErrorResult& aRv);
 #endif // MOZ_TIME_MANAGER
@@ -283,7 +217,6 @@ public:
                   const Nullable<ArrayBufferViewOrBlobOrStringOrFormData>& aData,
                   ErrorResult& aRv);
 
-#ifdef MOZ_MEDIA_NAVIGATOR
   void MozGetUserMedia(const MediaStreamConstraints& aConstraints,
                        NavigatorUserMediaSuccessCallback& aOnSuccess,
                        NavigatorUserMediaErrorCallback& aOnError,
@@ -294,51 +227,27 @@ public:
                               uint64_t aInnerWindowID,
                               const nsAString& aCallID,
                               ErrorResult& aRv);
-#endif // MOZ_MEDIA_NAVIGATOR
 
   already_AddRefed<ServiceWorkerContainer> ServiceWorker();
 
-  bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
-                 JS::Handle<jsid> aId,
-                 JS::MutableHandle<JSPropertyDescriptor> aDesc);
-  // The return value is whether DoResolve might end up resolving the given id.
-  // If in doubt, return true.
-  static bool MayResolve(jsid aId);
-  void GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
-                           ErrorResult& aRv);
   void GetLanguages(nsTArray<nsString>& aLanguages);
 
   bool MozE10sEnabled();
+
+  StorageManager* Storage();
 
   static void GetAcceptLanguages(nsTArray<nsString>& aLanguages);
 
   // WebIDL helper methods
   static bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
-  static bool HasCameraSupport(JSContext* /* unused */,
-                               JSObject* aGlobal);
   static bool HasWifiManagerSupport(JSContext* /* unused */,
                                   JSObject* aGlobal);
-#ifdef MOZ_NFC
-  static bool HasNFCSupport(JSContext* /* unused */, JSObject* aGlobal);
-#endif // MOZ_NFC
-#ifdef MOZ_MEDIA_NAVIGATOR
   static bool HasUserMediaSupport(JSContext* /* unused */,
                                   JSObject* /* unused */);
-#endif // MOZ_MEDIA_NAVIGATOR
-
-  static bool HasDataStoreSupport(nsIPrincipal* aPrincipal);
-
-  static bool HasDataStoreSupport(JSContext* cx, JSObject* aGlobal);
-
-#ifdef MOZ_B2G
-  static bool HasMobileIdSupport(JSContext* aCx, JSObject* aGlobal);
-#endif
-
-  static bool HasPresentationSupport(JSContext* aCx, JSObject* aGlobal);
 
   static bool IsE10sEnabled(JSContext* aCx, JSObject* aGlobal);
 
-  nsPIDOMWindow* GetParentObject() const
+  nsPIDOMWindowInner* GetParentObject() const
   {
     return GetWindow();
   }
@@ -347,25 +256,24 @@ public:
 
   // GetWindowFromGlobal returns the inner window for this global, if
   // any, else null.
-  static already_AddRefed<nsPIDOMWindow> GetWindowFromGlobal(JSObject* aGlobal);
+  static already_AddRefed<nsPIDOMWindowInner> GetWindowFromGlobal(JSObject* aGlobal);
 
-#ifdef MOZ_EME
   already_AddRefed<Promise>
   RequestMediaKeySystemAccess(const nsAString& aKeySystem,
                               const Sequence<MediaKeySystemConfiguration>& aConfig,
                               ErrorResult& aRv);
 private:
   RefPtr<MediaKeySystemAccessManager> mMediaKeySystemAccessManager;
-#endif
+
+public:
+  void NotifyVRDisplaysUpdated();
+  void NotifyActiveVRDisplaysChanged();
 
 private:
   virtual ~Navigator();
 
   bool CheckPermission(const char* type);
-  static bool CheckPermission(nsPIDOMWindow* aWindow, const char* aType);
-
-  already_AddRefed<nsDOMDeviceStorage> FindDeviceStorage(const nsAString& aName,
-                                                         const nsAString& aType);
+  static bool CheckPermission(nsPIDOMWindowInner* aWindow, const char* aType);
 
   RefPtr<nsMimeTypeArray> mMimeTypes;
   RefPtr<nsPluginArray> mPlugins;
@@ -374,43 +282,22 @@ private:
   RefPtr<DesktopNotificationCenter> mNotification;
   RefPtr<battery::BatteryManager> mBatteryManager;
   RefPtr<Promise> mBatteryPromise;
-#ifdef MOZ_B2G_FM
-  RefPtr<FMRadio> mFMRadio;
-#endif
   RefPtr<PowerManager> mPowerManager;
-  RefPtr<CellBroadcast> mCellBroadcast;
-  RefPtr<IccManager> mIccManager;
-  RefPtr<MobileMessageManager> mMobileMessageManager;
-  RefPtr<Telephony> mTelephony;
-  RefPtr<Voicemail> mVoicemail;
-  RefPtr<TVManager> mTVManager;
-  RefPtr<InputPortManager> mInputPortManager;
   RefPtr<network::Connection> mConnection;
-#ifdef MOZ_B2G_RIL
-  RefPtr<MobileConnectionArray> mMobileConnections;
-#endif
-#ifdef MOZ_B2G_BT
-  RefPtr<bluetooth::BluetoothManager> mBluetooth;
-#endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   RefPtr<system::AudioChannelManager> mAudioChannelManager;
 #endif
-  RefPtr<nsDOMCameraManager> mCameraManager;
   RefPtr<MediaDevices> mMediaDevices;
-  nsCOMPtr<nsIDOMNavigatorSystemMessages> mMessagesManager;
-  nsTArray<nsWeakPtr> mDeviceStorageStores;
   RefPtr<time::TimeManager> mTimeManager;
   RefPtr<ServiceWorkerContainer> mServiceWorkerContainer;
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  RefPtr<DeviceStorageAreaListener> mDeviceStorageAreaListener;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
   RefPtr<Presentation> mPresentation;
-
-  // Hashtable for saving cached objects DoResolve created, so we don't create
-  // the object twice if asked for it twice, whether due to use of "delete" or
-  // due to Xrays.  We could probably use a nsJSThingHashtable here, but then
-  // we'd need to figure out exactly how to trace that, and that seems to be
-  // rocket science.  :(
-  nsInterfaceHashtable<nsStringHashKey, nsISupports> mCachedResolveResults;
+#ifdef MOZ_GAMEPAD
+  RefPtr<GamepadServiceTest> mGamepadServiceTest;
+#endif
+  nsTArray<RefPtr<Promise> > mVRGetDisplaysPromises;
+  nsTArray<uint32_t> mRequestedVibrationPattern;
+  RefPtr<StorageManager> mStorageManager;
 };
 
 } // namespace dom

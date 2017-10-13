@@ -20,12 +20,23 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
 const nsIDM = Ci.nsIDownloadManager;
 
 var gTestTargetFile = FileUtils.getFile("TmpD", ["dm-ui-test.file"]);
 gTestTargetFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
+
+// Load mocking/stubbing library, sinon
+// docs: http://sinonjs.org/docs/
+Services.scriptloader.loadSubScript("resource://testing-common/sinon-1.16.1.js");
+
 registerCleanupFunction(function () {
   gTestTargetFile.remove(false);
+
+  delete window.sinon;
+  delete window.setImmediate;
+  delete window.clearImmediate;
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -130,7 +141,7 @@ function promisePanelOpened()
   return deferred.promise;
 }
 
-function task_resetState()
+function* task_resetState()
 {
   // Remove all downloads.
   let publicList = yield Downloads.getList(Downloads.PUBLIC);
@@ -145,30 +156,145 @@ function task_resetState()
   yield promiseFocus();
 }
 
-function task_addDownloads(aItems)
+function* task_addDownloads(aItems)
 {
   let startTimeMs = Date.now();
 
   let publicList = yield Downloads.getList(Downloads.PUBLIC);
   for (let item of aItems) {
-    publicList.add(yield Downloads.createDownload({
-      source: "http://www.example.com/test-download.txt",
-      target: gTestTargetFile,
+    let download = {
+      source: {
+        url: "http://www.example.com/test-download.txt",
+      },
+      target: {
+        path: gTestTargetFile.path,
+      },
       succeeded: item.state == nsIDM.DOWNLOAD_FINISHED,
       canceled: item.state == nsIDM.DOWNLOAD_CANCELED ||
                 item.state == nsIDM.DOWNLOAD_PAUSED,
       error: item.state == nsIDM.DOWNLOAD_FAILED ? new Error("Failed.") : null,
       hasPartialData: item.state == nsIDM.DOWNLOAD_PAUSED,
+      hasBlockedData: item.hasBlockedData || false,
       startTime: new Date(startTimeMs++),
-    }));
+    };
+    // `"errorObj" in download` must be false when there's no error.
+    if (item.errorObj) {
+      download.errorObj = item.errorObj;
+    }
+    yield publicList.add(yield Downloads.createDownload(download));
   }
 }
 
-function task_openPanel()
+function* task_openPanel()
 {
   yield promiseFocus();
 
   let promise = promisePanelOpened();
   DownloadsPanel.showPanel();
   yield promise;
+}
+
+function* setDownloadDir() {
+  let tmpDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
+  tmpDir.append("testsavedir");
+  if (!tmpDir.exists()) {
+    tmpDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
+    registerCleanupFunction(function () {
+      try {
+        tmpDir.remove(true);
+      } catch (e) {
+        // On Windows debug build this may fail.
+      }
+    });
+  }
+
+  yield new Promise(resolve => {
+    SpecialPowers.pushPrefEnv({"set": [
+      ["browser.download.folderList", 2],
+      ["browser.download.dir", tmpDir, Ci.nsIFile],
+    ]}, resolve);
+  });
+}
+
+
+let gHttpServer = null;
+function startServer() {
+  gHttpServer = new HttpServer();
+  gHttpServer.start(-1);
+  registerCleanupFunction(function*() {
+     yield new Promise(function(resolve) {
+      gHttpServer.stop(resolve);
+    });
+  });
+
+  gHttpServer.registerPathHandler("/file1.txt", (request, response) => {
+    response.setStatusLine(null, 200, "OK");
+    response.write("file1");
+    response.processAsync();
+    response.finish();
+  });
+  gHttpServer.registerPathHandler("/file2.txt", (request, response) => {
+    response.setStatusLine(null, 200, "OK");
+    response.write("file2");
+    response.processAsync();
+    response.finish();
+  });
+  gHttpServer.registerPathHandler("/file3.txt", (request, response) => {
+    response.setStatusLine(null, 200, "OK");
+    response.write("file3");
+    response.processAsync();
+    response.finish();
+  });
+}
+
+function httpUrl(aFileName) {
+  return "http://localhost:" + gHttpServer.identity.primaryPort + "/" +
+    aFileName;
+}
+
+function task_clearHistory() {
+  return new Promise(function(resolve) {
+    Services.obs.addObserver(function observeCH(aSubject, aTopic, aData) {
+      Services.obs.removeObserver(observeCH, PlacesUtils.TOPIC_EXPIRATION_FINISHED);
+      resolve();
+    }, PlacesUtils.TOPIC_EXPIRATION_FINISHED, false);
+    PlacesUtils.history.clear();
+  });
+}
+
+function openLibrary(aLeftPaneRoot) {
+  let library = window.openDialog("chrome://browser/content/places/places.xul",
+                                  "", "chrome,toolbar=yes,dialog=no,resizable",
+                                  aLeftPaneRoot);
+
+  return new Promise(resolve => {
+    waitForFocus(resolve, library);
+  });
+}
+
+function promiseAlertDialogOpen(buttonAction) {
+  return new Promise(resolve => {
+    Services.ww.registerNotification(function onOpen(subj, topic, data) {
+      if (topic == "domwindowopened" && subj instanceof Ci.nsIDOMWindow) {
+        // The test listens for the "load" event which guarantees that the alert
+        // class has already been added (it is added when "DOMContentLoaded" is
+        // fired).
+        subj.addEventListener("load", function onLoad() {
+          subj.removeEventListener("load", onLoad);
+          if (subj.document.documentURI ==
+              "chrome://global/content/commonDialog.xul") {
+            Services.ww.unregisterNotification(onOpen);
+
+            let dialog = subj.document.getElementById("commonDialog");
+            ok(dialog.classList.contains("alert-dialog"),
+               "The dialog element should contain an alert class.");
+
+            let doc = subj.document.documentElement;
+            doc.getButton(buttonAction).click();
+            resolve();
+          }
+        });
+      }
+    });
+  });
 }

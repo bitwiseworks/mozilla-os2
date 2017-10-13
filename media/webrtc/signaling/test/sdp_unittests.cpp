@@ -22,6 +22,7 @@
 #include "nsThreadUtils.h"
 #include "FakeMediaStreams.h"
 #include "FakeMediaStreamsImpl.h"
+#include "FakeLogging.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionCtx.h"
 
@@ -45,6 +46,8 @@ extern "C" {
 
 #include "FakeIPC.h"
 #include "FakeIPC.cpp"
+
+#include "TestHarness.h"
 
 using namespace mozilla;
 
@@ -84,6 +87,9 @@ class SdpTest : public ::testing::Test {
     }
 
     static void TearDownTestCase() {
+      if (gThread) {
+        gThread->Shutdown();
+      }
       gThread = nullptr;
     }
 
@@ -205,6 +211,16 @@ class SdpTest : public ::testing::Test {
                                  &inst_num), SDP_SUCCESS);
       EXPECT_EQ(sdp_attr_set_rtcp_fb_trr_int(sdp_ptr_, level, payload, inst_num,
                                              interval), SDP_SUCCESS);
+      return inst_num;
+    }
+
+    uint16_t AddNewRtcpFbRemb(int level,
+                              uint16_t payload = SDP_ALL_PAYLOADS) {
+      uint16_t inst_num = 0;
+      EXPECT_EQ(sdp_add_new_attr(sdp_ptr_, level, 0, SDP_ATTR_RTCP_FB,
+                                 &inst_num), SDP_SUCCESS);
+      EXPECT_EQ(sdp_attr_set_rtcp_fb_remb(sdp_ptr_, level, payload, inst_num
+                                          ), SDP_SUCCESS);
       return inst_num;
     }
 
@@ -349,6 +365,17 @@ TEST_F(SdpTest, parseRtcpFbNackFooBarBaz) {
             SDP_RTCP_FB_NACK_UNKNOWN);
 }
 
+TEST_F(SdpTest, parseRtcpFbRemb) {
+  ParseSdp(kVideoSdp + "a=rtcp-fb:120 goog-remb\r\n");
+  ASSERT_EQ(sdp_attr_get_rtcp_fb_remb_enabled(sdp_ptr_, 1, 120), true);
+}
+
+TEST_F(SdpTest, parseRtcpRbRembAllPt) {
+  ParseSdp(kVideoSdp + "a=rtcp-fb:* goog-remb\r\n");
+  ASSERT_EQ(sdp_attr_get_rtcp_fb_remb_enabled(sdp_ptr_, 1, SDP_ALL_PAYLOADS),
+                                              true);
+}
+
 TEST_F(SdpTest, parseRtcpFbTrrInt0) {
   ParseSdp(kVideoSdp + "a=rtcp-fb:120 trr-int 0\r\n");
   ASSERT_EQ(sdp_attr_get_rtcp_fb_trr_int(sdp_ptr_, 1, 120, 1), 0U);
@@ -414,6 +441,20 @@ TEST_F(SdpTest, parseRtcpFbFooBarBaz) {
   ParseSdp(kVideoSdp + "a=rtcp-fb:120 foo bar baz\r\n");
 }
 
+static const std::string kVideoSdpWithUnknonwBrokenFtmp =
+  "v=0\r\n"
+  "o=- 4294967296 2 IN IP4 127.0.0.1\r\n"
+  "s=SIP Call\r\n"
+  "c=IN IP4 198.51.100.7\r\n"
+  "t=0 0\r\n"
+  "m=video 56436 RTP/SAVPF 120\r\n"
+  "a=rtpmap:120 VP8/90000\r\n"
+  "a=fmtp:122 unknown=10\n"
+  "a=rtpmap:122 red/90000\r\n";
+
+TEST_F(SdpTest, parseUnknownBrokenFtmp) {
+  ParseSdp(kVideoSdpWithUnknonwBrokenFtmp);
+}
 
 TEST_F(SdpTest, parseRtcpFbKitchenSink) {
   ParseSdp(kVideoSdp +
@@ -432,6 +473,7 @@ TEST_F(SdpTest, parseRtcpFbKitchenSink) {
     "a=rtcp-fb:120 nack foo bar baz\r\n"
     "a=rtcp-fb:120 trr-int 0\r\n"
     "a=rtcp-fb:120 trr-int 123\r\n"
+    "a=rtcp-fb:120 goog-remb\r\n"
     "a=rtcp-fb:120 ccm fir\r\n"
     "a=rtcp-fb:120 ccm tmmbr\r\n"
     "a=rtcp-fb:120 ccm tmmbr smaxpr=456\r\n"
@@ -475,6 +517,9 @@ TEST_F(SdpTest, parseRtcpFbKitchenSink) {
   ASSERT_EQ(sdp_attr_get_rtcp_fb_trr_int(sdp_ptr_, 1, 120, 1), 0U);
   ASSERT_EQ(sdp_attr_get_rtcp_fb_trr_int(sdp_ptr_, 1, 120, 2), 123U);
   ASSERT_EQ(sdp_attr_get_rtcp_fb_trr_int(sdp_ptr_, 1, 120, 3), 0xFFFFFFFF);
+
+  ASSERT_EQ(sdp_attr_get_rtcp_fb_remb_enabled(sdp_ptr_, 1, 120), true);
+  ASSERT_EQ(sdp_attr_get_rtcp_fb_remb_enabled(sdp_ptr_, 2, 120), false);
 
   ASSERT_EQ(sdp_attr_get_rtcp_fb_ccm(sdp_ptr_, 1, 120, 1), SDP_RTCP_FB_CCM_FIR);
   ASSERT_EQ(sdp_attr_get_rtcp_fb_ccm(sdp_ptr_, 1, 120, 2),
@@ -671,6 +716,22 @@ TEST_F(SdpTest, addRtcpFbNackEcnAllPt) {
   ASSERT_NE(body.find("a=rtcp-fb:* nack ecn\r\n"), std::string::npos);
 }
 
+TEST_F(SdpTest, addRtcpFbRemb) {
+  InitLocalSdp();
+  int level = AddNewMedia(SDP_MEDIA_VIDEO);
+  AddNewRtcpFbRemb(level, 120);
+  std::string body = SerializeSdp();
+  ASSERT_NE(body.find("a=rtcp-fb:120 goog-remb\r\n"), std::string::npos);
+}
+
+TEST_F(SdpTest, addRtcpFbRembAllPt) {
+  InitLocalSdp();
+  int level = AddNewMedia(SDP_MEDIA_VIDEO);
+  AddNewRtcpFbRemb(level);
+  std::string body = SerializeSdp();
+  ASSERT_NE(body.find("a=rtcp-fb:* goog-remb\r\n"), std::string::npos);
+}
+
 TEST_F(SdpTest, addRtcpFbTrrInt) {
   InitLocalSdp();
   int level = AddNewMedia(SDP_MEDIA_VIDEO);
@@ -776,17 +837,632 @@ TEST_F(SdpTest, parseExtMap) {
 
 }
 
+TEST_F(SdpTest, parseFmtpBitrate) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bitrate=400\r\n");
+  ASSERT_EQ(400, sdp_attr_get_fmtp_bitrate_type(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBitrateWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bitrate=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_bitrate_type(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBitrateWith32001) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bitrate=32001\r\n");
+  ASSERT_EQ(32001, sdp_attr_get_fmtp_bitrate_type(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBitrateWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bitrate=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_bitrate_type(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpMode) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 mode=200\r\n");
+  ASSERT_EQ(200U, sdp_attr_get_fmtp_mode_for_payload_type(sdp_ptr_, 1, 0, 120));
+}
+
+TEST_F(SdpTest, parseFmtpModeWith4294967295) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 mode=4294967295\r\n");
+  ASSERT_EQ(4294967295, sdp_attr_get_fmtp_mode_for_payload_type(sdp_ptr_, 1, 0, 120));
+}
+
+TEST_F(SdpTest, parseFmtpModeWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 mode=4294967296\r\n");
+  // returns 0 if not found
+  ASSERT_EQ(0U, sdp_attr_get_fmtp_mode_for_payload_type(sdp_ptr_, 1, 0, 120));
+}
+
+TEST_F(SdpTest, parseFmtpQcif) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 qcif=20\r\n");
+  ASSERT_EQ(20, sdp_attr_get_fmtp_qcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpQcifWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 qcif=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_qcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpQcifWith33) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 qcif=33\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_qcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif=11\r\n");
+  ASSERT_EQ(11, sdp_attr_get_fmtp_cif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCifWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCifWith33) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif=33\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpMaxbr) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxbr=21\r\n");
+  ASSERT_EQ(21, sdp_attr_get_fmtp_maxbr(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpMaxbrWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxbr=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_maxbr(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpMaxbrWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxbr=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_maxbr(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpSqcif) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sqcif=6\r\n");
+  ASSERT_EQ(6, sdp_attr_get_fmtp_sqcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpSqcifWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sqcif=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_sqcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpSqcifWith33) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sqcif=33\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_sqcif(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif4) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif4=11\r\n");
+  ASSERT_EQ(11, sdp_attr_get_fmtp_cif4(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif4With0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif4=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif4(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif4With33) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif4=33\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif4(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif16) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif16=11\r\n");
+  ASSERT_EQ(11, sdp_attr_get_fmtp_cif16(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif16With0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif16=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif16(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpCif16With33) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cif16=33\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_cif16(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBpp) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bpp=7\r\n");
+  ASSERT_EQ(7, sdp_attr_get_fmtp_bpp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBppWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bpp=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_bpp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpBppWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 bpp=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_bpp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpHrd) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 hrd=800\r\n");
+  ASSERT_EQ(800, sdp_attr_get_fmtp_hrd(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpHrdWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 hrd=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_hrd(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpHrdWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 hrd=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_hrd(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpProfile) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 profile=4\r\n");
+  ASSERT_EQ(4, sdp_attr_get_fmtp_profile(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpProfileWith11) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 profile=11\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_profile(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpLevel) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 level=56\r\n");
+  ASSERT_EQ(56, sdp_attr_get_fmtp_level(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpLevelWith101) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 level=101\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_level(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpPacketizationMode) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 packetization-mode=1\r\n");
+  uint16_t packetizationMode;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_pack_mode(sdp_ptr_, 1, 0, 1, &packetizationMode));
+  ASSERT_EQ(1, packetizationMode);
+}
+
+TEST_F(SdpTest, parseFmtpPacketizationModeWith3) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 packetization-mode=3\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_pack_mode(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpInterleavingDepth) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-interleaving-depth=566\r\n");
+  uint16_t interleavingDepth;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_interleaving_depth(sdp_ptr_, 1, 0, 1, &interleavingDepth));
+  ASSERT_EQ(566, interleavingDepth);
+}
+
+TEST_F(SdpTest, parseFmtpInterleavingDepthWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-interleaving-depth=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_interleaving_depth(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpInterleavingDepthWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-interleaving-depth=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_interleaving_depth(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpDeintBuf) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-deint-buf-req=4294967295\r\n");
+  uint32_t deintBuf;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_deint_buf_req(sdp_ptr_, 1, 0, 1, &deintBuf));
+  ASSERT_EQ(4294967295, deintBuf);
+}
+
+TEST_F(SdpTest, parseFmtpDeintBufWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-deint-buf-req=0\r\n");
+  uint32_t deintBuf;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_deint_buf_req(sdp_ptr_, 1, 0, 1, &deintBuf));
+  ASSERT_EQ(0U, deintBuf);
+}
+
+TEST_F(SdpTest, parseFmtpDeintBufWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-deint-buf-req=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_deint_buf_req(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxDonDiff) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-max-don-diff=5678\r\n");
+  uint32_t maxDonDiff;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_don_diff(sdp_ptr_, 1, 0, 1, &maxDonDiff));
+  ASSERT_EQ(5678U, maxDonDiff);
+}
+
+TEST_F(SdpTest, parseFmtpMaxDonDiffWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-max-don-diff=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_don_diff(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxDonDiffWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-max-don-diff=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_don_diff(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpInitBufTime) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-init-buf-time=4294967295\r\n");
+  uint32_t initBufTime;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_init_buf_time(sdp_ptr_, 1, 0, 1, &initBufTime));
+  ASSERT_EQ(4294967295, initBufTime);
+}
+
+TEST_F(SdpTest, parseFmtpInitBufTimeWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-init-buf-time=0\r\n");
+  uint32_t initBufTime;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_init_buf_time(sdp_ptr_, 1, 0, 1, &initBufTime));
+  ASSERT_EQ(0U, initBufTime);
+}
+
+TEST_F(SdpTest, parseFmtpInitBufTimeWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 sprop-init-buf-time=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_init_buf_time(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxMbps) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-mbps=46789\r\n");
+  uint32_t maxMpbs;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_mbps(sdp_ptr_, 1, 0, 1, &maxMpbs));
+  ASSERT_EQ(46789U, maxMpbs);
+}
+
+TEST_F(SdpTest, parseFmtpMaxMbpsWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-mbps=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_mbps(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxMbpsWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-mbps=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_mbps(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxCpb) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-cpb=47891\r\n");
+  uint32_t maxCpb;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_cpb(sdp_ptr_, 1, 0, 1, &maxCpb));
+  ASSERT_EQ(47891U, maxCpb);
+}
+
+TEST_F(SdpTest, parseFmtpMaxCpbWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-cpb=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_cpb(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxCpbWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-cpb=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_cpb(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxDpb) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-dpb=47892\r\n");
+  uint32_t maxDpb;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_dpb(sdp_ptr_, 1, 0, 1, &maxDpb));
+  ASSERT_EQ(47892U, maxDpb);
+}
+
+TEST_F(SdpTest, parseFmtpMaxDpbWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-dpb=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_dpb(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxDpbWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-dpb=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_dpb(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxBr) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-br=47893\r\n");
+  uint32_t maxBr;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_br(sdp_ptr_, 1, 0, 1, &maxBr));
+  ASSERT_EQ(47893U, maxBr);
+}
+
+TEST_F(SdpTest, parseFmtpMaxBrWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-br=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_br(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxBrWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-br=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_br(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpRedundantPicCap) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 redundant-pic-cap=1\r\n");
+  ASSERT_EQ(1, sdp_attr_fmtp_is_redundant_pic_cap(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpRedundantPicCapWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 redundant-pic-cap=0\r\n");
+  ASSERT_EQ(0, sdp_attr_fmtp_is_redundant_pic_cap(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpRedundantPicCapWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 redundant-pic-cap=2\r\n");
+  ASSERT_EQ(0, sdp_attr_fmtp_is_redundant_pic_cap(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpDeintBufCap) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 deint-buf-cap=4294967295\r\n");
+  uint32_t deintBufCap;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_deint_buf_cap(sdp_ptr_, 1, 0, 1, &deintBufCap));
+  ASSERT_EQ(4294967295, deintBufCap);
+}
+
+TEST_F(SdpTest, parseFmtpDeintBufCapWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 deint-buf-cap=0\r\n");
+  uint32_t deintBufCap;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_deint_buf_cap(sdp_ptr_, 1, 0, 1, &deintBufCap));
+  ASSERT_EQ(0U, deintBufCap);
+}
+
+TEST_F(SdpTest, parseFmtpDeintBufCapWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 deint-buf-cap=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_deint_buf_cap(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxRcmdNaluSize) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-rcmd-nalu-size=4294967295\r\n");
+  uint32_t maxRcmdNaluSize;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_rcmd_nalu_size(sdp_ptr_, 1, 0, 1, &maxRcmdNaluSize));
+  ASSERT_EQ(4294967295, maxRcmdNaluSize);
+}
+
+TEST_F(SdpTest, parseFmtpMaxRcmdNaluSizeWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-rcmd-nalu-size=0\r\n");
+  uint32_t maxRcmdNaluSize;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_rcmd_nalu_size(sdp_ptr_, 1, 0, 1, &maxRcmdNaluSize));
+  ASSERT_EQ(0U, maxRcmdNaluSize);
+}
+
+TEST_F(SdpTest, parseFmtpMaxRcmdNaluSizeWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-rcmd-nalu-size=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_rcmd_nalu_size(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpParameterAdd) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 parameter-add=1\r\n");
+  ASSERT_EQ(1, sdp_attr_fmtp_is_parameter_add(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpParameterAddWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 parameter-add=0\r\n");
+  ASSERT_EQ(0, sdp_attr_fmtp_is_parameter_add(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpParameterAddWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 parameter-add=2\r\n");
+  ASSERT_EQ(0, sdp_attr_fmtp_is_parameter_add(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexK) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 K=566\r\n");
+  ASSERT_EQ(566, sdp_attr_get_fmtp_annex_k_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexKWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 K=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_annex_k_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexKWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 K=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_annex_k_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexN) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 N=4567\r\n");
+  ASSERT_EQ(4567, sdp_attr_get_fmtp_annex_n_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexNWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 N=0\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_annex_n_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexNWith65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 N=65536\r\n");
+  ASSERT_EQ(SDP_INVALID_VALUE, sdp_attr_get_fmtp_annex_n_val(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexP) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 P=5678,2\r\n");
+  ASSERT_EQ(5678, sdp_attr_get_fmtp_annex_p_picture_resize(sdp_ptr_, 1, 0, 1));
+  ASSERT_EQ(2, sdp_attr_get_fmtp_annex_p_warp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexPWithResize0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 P=0,3\r\n");
+  ASSERT_EQ(0, sdp_attr_get_fmtp_annex_p_picture_resize(sdp_ptr_, 1, 0, 1));
+  ASSERT_EQ(3, sdp_attr_get_fmtp_annex_p_warp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexPWithResize65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 P=65536,4\r\n");
+  ASSERT_EQ(0, sdp_attr_get_fmtp_annex_p_picture_resize(sdp_ptr_, 1, 0, 1));
+  // if the first fails, the second will too.  Both default to 0 on failure.
+  ASSERT_EQ(0, sdp_attr_get_fmtp_annex_p_warp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpAnnexPWithWarp65536) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 P=346,65536\r\n");
+  ASSERT_EQ(346, sdp_attr_get_fmtp_annex_p_picture_resize(sdp_ptr_, 1, 0, 1));
+  ASSERT_EQ(0, sdp_attr_get_fmtp_annex_p_warp(sdp_ptr_, 1, 0, 1));
+}
+
+TEST_F(SdpTest, parseFmtpLevelAsymmetryAllowed) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 level-asymmetry-allowed=1\r\n");
+
+  uint16_t levelAsymmetryAllowed;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_level_asymmetry_allowed(sdp_ptr_, 1, 0, 1, &levelAsymmetryAllowed));
+  ASSERT_EQ(1U, levelAsymmetryAllowed);
+}
+
+TEST_F(SdpTest, parseFmtpLevelAsymmetryAllowedWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 level-asymmetry-allowed=0\r\n");
+  uint16_t levelAsymmetryAllowed;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_level_asymmetry_allowed(sdp_ptr_, 1, 0, 1, &levelAsymmetryAllowed));
+  ASSERT_EQ(0U, levelAsymmetryAllowed);
+}
+
+TEST_F(SdpTest, parseFmtpLevelAsymmetryAllowedWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 level-asymmetry-allowed=2\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_level_asymmetry_allowed(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxAverageBitrate) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxaveragebitrate=47893\r\n");
+  uint32_t maxAverageBitrate;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_max_average_bitrate(sdp_ptr_, 1, 0, 1, &maxAverageBitrate));
+  ASSERT_EQ(47893U, maxAverageBitrate);
+}
+
+TEST_F(SdpTest, parseFmtpMaxAverageBitrateWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxaveragebitrate=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_average_bitrate(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxAverageBitrateWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxaveragebitrate=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_average_bitrate(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpUsedTx) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 usedtx=1\r\n");
+  tinybool usedTx;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_usedtx(sdp_ptr_, 1, 0, 1, &usedTx));
+  ASSERT_EQ(1, usedTx);
+}
+
+TEST_F(SdpTest, parseFmtpUsedTxWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 usedtx=0\r\n");
+  tinybool usedTx;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_usedtx(sdp_ptr_, 1, 0, 1, &usedTx));
+  ASSERT_EQ(0, usedTx);
+}
+
+TEST_F(SdpTest, parseFmtpUsedTxWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 usedtx=2\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_usedtx(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpStereo) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 stereo=1\r\n");
+  tinybool stereo;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_stereo(sdp_ptr_, 1, 0, 1, &stereo));
+  ASSERT_EQ(1, stereo);
+}
+
+TEST_F(SdpTest, parseFmtpStereoWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 stereo=0\r\n");
+  tinybool stereo;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_stereo(sdp_ptr_, 1, 0, 1, &stereo));
+  ASSERT_EQ(0, stereo);
+}
+
+TEST_F(SdpTest, parseFmtpStereoWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 stereo=2\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_stereo(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpUseInBandFec) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 useinbandfec=1\r\n");
+  tinybool useInbandFec;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_useinbandfec(sdp_ptr_, 1, 0, 1, &useInbandFec));
+  ASSERT_EQ(1, useInbandFec);
+}
+
+TEST_F(SdpTest, parseFmtpUseInBandWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 useinbandfec=0\r\n");
+  tinybool useInbandFec;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_useinbandfec(sdp_ptr_, 1, 0, 1, &useInbandFec));
+  ASSERT_EQ(0, useInbandFec);
+}
+
+TEST_F(SdpTest, parseFmtpUseInBandWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 useinbandfec=2\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_useinbandfec(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxCodedAudioBandwidth) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxcodedaudiobandwidth=abcdefg\r\n");
+  char* maxCodedAudioBandwith = sdp_attr_get_fmtp_maxcodedaudiobandwidth(sdp_ptr_, 1, 0, 1);
+  ASSERT_EQ(0, strcmp("abcdefg", maxCodedAudioBandwith));
+}
+
+TEST_F(SdpTest, parseFmtpMaxCodedAudioBandwidthBad) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxcodedaudiobandwidth=\r\n");
+  char* maxCodedAudioBandwith = sdp_attr_get_fmtp_maxcodedaudiobandwidth(sdp_ptr_, 1, 0, 1);
+  ASSERT_EQ(0, *maxCodedAudioBandwith);
+}
+
+TEST_F(SdpTest, parseFmtpCbr) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cbr=1\r\n");
+  tinybool cbr;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_cbr(sdp_ptr_, 1, 0, 1, &cbr));
+  ASSERT_EQ(1, cbr);
+}
+
+TEST_F(SdpTest, parseFmtpCbrWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cbr=0\r\n");
+  tinybool cbr;
+  ASSERT_EQ(SDP_SUCCESS, sdp_attr_get_fmtp_cbr(sdp_ptr_, 1, 0, 1, &cbr));
+  ASSERT_EQ(0, cbr);
+}
+
+TEST_F(SdpTest, parseFmtpCbrWith2) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 cbr=2\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_cbr(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxPlaybackRate) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxplaybackrate=47900\r\n");
+  sdp_attr_t *attr_p = sdp_find_attr(sdp_ptr_, 1, 0, SDP_ATTR_FMTP, 1);
+  ASSERT_NE(NULL, attr_p);
+  ASSERT_EQ(47900U, attr_p->attr.fmtp.maxplaybackrate);
+}
+
+TEST_F(SdpTest, parseFmtpMaxPlaybackRateWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxplaybackrate=0\r\n");
+  sdp_attr_t *attr_p = sdp_find_attr(sdp_ptr_, 1, 0, SDP_ATTR_FMTP, 1);
+  ASSERT_EQ(NULL, attr_p);
+}
+
+TEST_F(SdpTest, parseFmtpMaxPlaybackRateWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 maxplaybackrate=4294967296\r\n");
+  sdp_attr_t *attr_p = sdp_find_attr(sdp_ptr_, 1, 0, SDP_ATTR_FMTP, 1);
+  ASSERT_EQ(NULL, attr_p);
+}
+
 TEST_F(SdpTest, parseFmtpMaxFs) {
   uint32_t val = 0;
   ParseSdp(kVideoSdp + "a=fmtp:120 max-fs=300;max-fr=30\r\n");
   ASSERT_EQ(sdp_attr_get_fmtp_max_fs(sdp_ptr_, 1, 0, 1, &val), SDP_SUCCESS);
   ASSERT_EQ(val, 300U);
 }
+TEST_F(SdpTest, parseFmtpMaxFsWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-fs=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_fs(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxFsWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-fs=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_fs(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
 TEST_F(SdpTest, parseFmtpMaxFr) {
   uint32_t val = 0;
   ParseSdp(kVideoSdp + "a=fmtp:120 max-fs=300;max-fr=30\r\n");
   ASSERT_EQ(sdp_attr_get_fmtp_max_fr(sdp_ptr_, 1, 0, 1, &val), SDP_SUCCESS);
   ASSERT_EQ(val, 30U);
+}
+
+TEST_F(SdpTest, parseFmtpMaxFrWith0) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-fr=0\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_fr(sdp_ptr_, 1, 0, 1, nullptr));
+}
+
+TEST_F(SdpTest, parseFmtpMaxFrWith4294967296) {
+  ParseSdp(kVideoSdp + "a=fmtp:120 max-fr=4294967296\r\n");
+  ASSERT_EQ(SDP_INVALID_PARAMETER, sdp_attr_get_fmtp_max_fr(sdp_ptr_, 1, 0, 1, nullptr));
 }
 
 TEST_F(SdpTest, addFmtpMaxFs) {
@@ -953,6 +1629,22 @@ class NewSdpTest : public ::testing::Test,
       ASSERT_EQ(extra, feedback.extra);
     }
 
+    void CheckDtmfFmtp(const std::string& expectedDtmfTones) const {
+      ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+                  SdpAttribute::kFmtpAttribute));
+      auto audio_format_params =
+          mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+      ASSERT_EQ(2U, audio_format_params.size());
+
+      ASSERT_EQ("101", audio_format_params[1].format);
+      ASSERT_TRUE(!!audio_format_params[1].parameters);
+      const SdpFmtpAttributeList::TelephoneEventParameters* te_parameters =
+        static_cast<SdpFmtpAttributeList::TelephoneEventParameters*>(
+            audio_format_params[1].parameters.get());
+      ASSERT_NE(0U, te_parameters->dtmfTones.size());
+      ASSERT_EQ(expectedDtmfTones, te_parameters->dtmfTones);
+    }
+
     void CheckSerialize(const std::string& expected,
                         const SdpAttribute& attr) const {
       std::stringstream str;
@@ -1043,12 +1735,18 @@ TEST_P(NewSdpTest, CheckGetBandwidth) {
            "s=SIP Call" CRLF
            "c=IN IP4 198.51.100.7" CRLF
            "b=CT:5000" CRLF
+           "b=FOOBAR:10" CRLF
+           "b=AS:4" CRLF
            "t=0 0" CRLF
            "m=video 56436 RTP/SAVPF 120" CRLF
            "a=rtpmap:120 VP8/90000" CRLF
            );
   ASSERT_EQ(5000U, mSdp->GetBandwidth("CT"))
-    << "Wrong bandwidth in session";
+    << "Wrong CT bandwidth in session";
+  ASSERT_EQ(0U, mSdp->GetBandwidth("FOOBAR"))
+    << "Wrong FOOBAR bandwidth in session";
+  ASSERT_EQ(4U, mSdp->GetBandwidth("AS"))
+    << "Wrong AS bandwidth in session";
 }
 
 TEST_P(NewSdpTest, CheckGetMediaSectionsCount) {
@@ -1117,6 +1815,16 @@ TEST_P(NewSdpTest, CheckMediaSectionGetBandwidth) {
     << "Wrong bandwidth in media section";
 }
 
+// Define a string that is 258 characters long. We use a long string here so
+// that we can test that we are able to parse and handle a string longer than
+// the default maximum length of 256 in sipcc.
+#define ID_A "1234567890abcdef"
+#define ID_B ID_A ID_A ID_A ID_A
+#define LONG_IDENTITY ID_B ID_B ID_B ID_B "xx"
+
+#define BASE64_DTLS_HELLO "FgEAAAAAAAAAAAAAagEAAF4AAAAAAAAAXgEARI11KHx3QB6Ky" \
+  "CKgoBj/kwjKrApkL8kiZLwIqBaJGT8AAAA2ADkAOAA1ABYAEwAKADMAMgAvAAcAZgAFAAQAYw" \
+  "BiAGEAFQASAAkAZQBkAGAAFAARAAgABgADAQA="
 
 // SDP from a basic A/V apprtc call FFX/FFX
 const std::string kBasicAudioVideoOffer =
@@ -1125,6 +1833,7 @@ const std::string kBasicAudioVideoOffer =
 "s=SIP Call" CRLF
 "c=IN IP4 224.0.0.1/100/12" CRLF
 "t=0 0" CRLF
+"a=dtls-message:client " BASE64_DTLS_HELLO CRLF
 "a=ice-ufrag:4a799b2e" CRLF
 "a=ice-pwd:e4cc12a910f106a0a744719425510e17" CRLF
 "a=ice-lite" CRLF
@@ -1132,7 +1841,7 @@ const std::string kBasicAudioVideoOffer =
 "a=msid-semantic:WMS stream streama" CRLF
 "a=msid-semantic:foo stream" CRLF
 "a=fingerprint:sha-256 DF:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C" CRLF
-"a=identity:blahblahblah foo;bar" CRLF
+"a=identity:" LONG_IDENTITY CRLF
 "a=group:BUNDLE first second" CRLF
 "a=group:BUNDLE third" CRLF
 "a=group:LS first third" CRLF
@@ -1140,13 +1849,14 @@ const std::string kBasicAudioVideoOffer =
 "c=IN IP4 0.0.0.0" CRLF
 "a=mid:first" CRLF
 "a=rtpmap:109 opus/48000/2" CRLF
+"a=fmtp:109 maxplaybackrate=32000;stereo=1" CRLF
 "a=ptime:20" CRLF
 "a=maxptime:20" CRLF
 "a=rtpmap:9 G722/8000" CRLF
 "a=rtpmap:0 PCMU/8000" CRLF
 "a=rtpmap:8 PCMA/8000" CRLF
 "a=rtpmap:101 telephone-event/8000" CRLF
-"a=fmtp:101 0-15" CRLF
+"a=fmtp:101 0-15,66,32-34,67" CRLF
 "a=ice-ufrag:00000000" CRLF
 "a=ice-pwd:0000000000000000000000000000000" CRLF
 "a=sendonly" CRLF
@@ -1165,7 +1875,7 @@ const std::string kBasicAudioVideoOffer =
 "a=rtcp:62454 IN IP4 162.222.183.171" CRLF
 "a=end-of-candidates" CRLF
 "a=ssrc:5150" CRLF
-"m=video 9 RTP/SAVPF 120 121" CRLF
+"m=video 9 RTP/SAVPF 120 121 122 123" CRLF
 "c=IN IP6 ::1" CRLF
 "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
 "a=mid:second" CRLF
@@ -1173,6 +1883,8 @@ const std::string kBasicAudioVideoOffer =
 "a=fmtp:120 max-fs=3600;max-fr=30" CRLF
 "a=rtpmap:121 VP9/90000" CRLF
 "a=fmtp:121 max-fs=3600;max-fr=30" CRLF
+"a=rtpmap:122 red/90000" CRLF
+"a=rtpmap:123 ulpfec/90000" CRLF
 "a=recvonly" CRLF
 "a=rtcp-fb:120 nack" CRLF
 "a=rtcp-fb:120 nack pli" CRLF
@@ -1210,6 +1922,41 @@ const std::string kBasicAudioVideoOffer =
 
 TEST_P(NewSdpTest, BasicAudioVideoSdpParse) {
   ParseSdp(kBasicAudioVideoOffer);
+}
+
+TEST_P(NewSdpTest, CheckRemoveFmtp) {
+  ParseSdp(kBasicAudioVideoOffer);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(3U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  SdpAttributeList& audioAttrList = mSdp->GetMediaSection(0).GetAttributeList();
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(2U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  mSdp->GetMediaSection(0).RemoveFmtp("101");
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(1U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  mSdp->GetMediaSection(0).RemoveFmtp("109");
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(0U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  // make sure we haven't disturbed the video fmtps
+  SdpAttributeList& videoAttrList = mSdp->GetMediaSection(1).GetAttributeList();
+  ASSERT_TRUE(videoAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(2U, videoAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(1).FindFmtp("120"));
+  ASSERT_TRUE(mSdp->GetMediaSection(1).FindFmtp("121"));
 }
 
 TEST_P(NewSdpTest, CheckIceUfrag) {
@@ -1326,7 +2073,19 @@ TEST_P(NewSdpTest, CheckIdentity) {
   ASSERT_TRUE(mSdp->GetAttributeList().HasAttribute(
         SdpAttribute::kIdentityAttribute));
   auto identity = mSdp->GetAttributeList().GetIdentity();
-  ASSERT_EQ("blahblahblah", identity) << "Wrong identity assertion";
+  ASSERT_EQ(LONG_IDENTITY, identity) << "Wrong identity assertion";
+}
+
+TEST_P(NewSdpTest, CheckDtlsMessage) {
+  ParseSdp(kBasicAudioVideoOffer);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_TRUE(mSdp->GetAttributeList().HasAttribute(
+        SdpAttribute::kDtlsMessageAttribute));
+  auto dtls_message = mSdp->GetAttributeList().GetDtlsMessage();
+  ASSERT_EQ(SdpDtlsMessageAttribute::kClient, dtls_message.mRole)
+    << "Wrong dtls-message role";
+  ASSERT_EQ(BASE64_DTLS_HELLO, dtls_message.mValue)
+    << "Wrong dtls-message value";
 }
 
 TEST_P(NewSdpTest, CheckNumberOfMediaSections) {
@@ -1358,9 +2117,11 @@ TEST_P(NewSdpTest, CheckMlines) {
             mSdp->GetMediaSection(1).GetProtocol())
     << "Wrong protocol for video";
   auto video_formats = mSdp->GetMediaSection(1).GetFormats();
-  ASSERT_EQ(2U, video_formats.size()) << "Wrong number of formats for video";
+  ASSERT_EQ(4U, video_formats.size()) << "Wrong number of formats for video";
   ASSERT_EQ("120", video_formats[0]);
   ASSERT_EQ("121", video_formats[1]);
+  ASSERT_EQ("122", video_formats[2]);
+  ASSERT_EQ("123", video_formats[3]);
 
   ASSERT_EQ(SdpMediaSection::kAudio, mSdp->GetMediaSection(2).GetMediaType())
     << "Wrong type for third media section";
@@ -1451,30 +2212,361 @@ TEST_P(NewSdpTest, CheckRtpmap) {
               rtpmap);
 
   CheckRtpmap("101",
-              SdpRtpmapAttributeList::kOtherCodec,
+              SdpRtpmapAttributeList::kTelephoneEvent,
               "telephone-event",
               8000,
               1,
               audiosec.GetFormats()[4],
               rtpmap);
 
-  const SdpMediaSection& videosec1 = mSdp->GetMediaSection(1);
+  const SdpMediaSection& videosec = mSdp->GetMediaSection(1);
+  const SdpRtpmapAttributeList videoRtpmap =
+    videosec.GetAttributeList().GetRtpmap();
+  ASSERT_EQ(4U, videoRtpmap.mRtpmaps.size())
+    << "Wrong number of rtpmap attributes for video";
+
   CheckRtpmap("120",
               SdpRtpmapAttributeList::kVP8,
               "VP8",
               90000,
               0,
-              videosec1.GetFormats()[0],
-              videosec1.GetAttributeList().GetRtpmap());
+              videosec.GetFormats()[0],
+              videoRtpmap);
 
-  const SdpMediaSection& videosec2 = mSdp->GetMediaSection(1);
   CheckRtpmap("121",
               SdpRtpmapAttributeList::kVP9,
               "VP9",
               90000,
               0,
-              videosec2.GetFormats()[1],
-              videosec2.GetAttributeList().GetRtpmap());
+              videosec.GetFormats()[1],
+              videoRtpmap);
+
+  CheckRtpmap("122",
+              SdpRtpmapAttributeList::kRed,
+              "red",
+              90000,
+              0,
+              videosec.GetFormats()[2],
+              videoRtpmap);
+
+  CheckRtpmap("123",
+              SdpRtpmapAttributeList::kUlpfec,
+              "ulpfec",
+              90000,
+              0,
+              videosec.GetFormats()[3],
+              videoRtpmap);
+}
+
+static const std::string kAudioWithTelephoneEvent =
+  "v=0" CRLF
+  "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+  "s=SIP Call" CRLF
+  "c=IN IP4 198.51.100.7" CRLF
+  "t=0 0" CRLF
+  "m=audio 9 RTP/SAVPF 109 9 0 8 101" CRLF
+  "c=IN IP4 0.0.0.0" CRLF
+  "a=mid:first" CRLF
+  "a=rtpmap:109 opus/48000/2" CRLF
+  "a=fmtp:109 maxplaybackrate=32000;stereo=1" CRLF
+  "a=ptime:20" CRLF
+  "a=maxptime:20" CRLF
+  "a=rtpmap:9 G722/8000" CRLF
+  "a=rtpmap:0 PCMU/8000" CRLF
+  "a=rtpmap:8 PCMA/8000" CRLF
+  "a=rtpmap:101 telephone-event/8000" CRLF;
+
+TEST_P(NewSdpTest, CheckTelephoneEventNoFmtp) {
+  ParseSdp(kAudioWithTelephoneEvent);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto audio_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(1U, audio_format_params.size());
+
+  // make sure we don't get a fmtp for codec 101
+  for (size_t i = 0; i < audio_format_params.size(); ++i) {
+    ASSERT_NE("101", audio_format_params[i].format);
+  }
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventWithDefaultEvents) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-15" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventWithBadCharacter) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-5." CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventIncludingCommas) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-15,66,67" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15,66,67");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventComplexEvents) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0,1,2-4,5-15,66,67" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0,1,2-4,5-15,66,67");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventNoHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 5,6,7" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("5,6,7");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventOnlyZero) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventOnlyOne) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("1");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadThreeDigit) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadThreeDigitWithHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadLeadingHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 -12" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 12-" CRLF, false);
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingHyphenInMiddle) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,12-,4" CRLF, false);
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadLeadingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 ,2,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadMultipleLeadingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 ,,,2,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadConsecutiveCommas) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,,,,,,,,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,2,3," CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTwoHyphens) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1-2-3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadSixDigit) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 112233" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadRangeReversed) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 33-2" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+static const std::string kVideoWithRedAndUlpfecSdp =
+  "v=0" CRLF
+  "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+  "s=SIP Call" CRLF
+  "c=IN IP4 198.51.100.7" CRLF
+  "t=0 0" CRLF
+  "m=video 9 RTP/SAVPF 97 120 121 122 123" CRLF
+  "c=IN IP6 ::1" CRLF
+  "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
+  "a=rtpmap:97 H264/90000" CRLF
+  "a=fmtp:97 profile-level-id=42a01e" CRLF
+  "a=rtpmap:120 VP8/90000" CRLF
+  "a=fmtp:120 max-fs=3600;max-fr=30" CRLF
+  "a=rtpmap:121 VP9/90000" CRLF
+  "a=fmtp:121 max-fs=3600;max-fr=30" CRLF
+  "a=rtpmap:122 red/90000" CRLF
+  "a=rtpmap:123 ulpfec/90000" CRLF;
+
+TEST_P(NewSdpTest, CheckRedNoFmtp) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(3U, video_format_params.size());
+
+  // make sure we don't get a fmtp for codec 122
+  for (size_t i = 0; i < video_format_params.size(); ++i) {
+    ASSERT_NE("122", video_format_params[i].format);
+  }
+}
+
+TEST_P(NewSdpTest, CheckRedFmtpWith2Codecs) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp + "a=fmtp:122 120/121" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(4U, video_format_params.size());
+
+  ASSERT_EQ("122", video_format_params[3].format);
+  ASSERT_TRUE(!!video_format_params[3].parameters);
+  ASSERT_EQ(SdpRtpmapAttributeList::kRed,
+            video_format_params[3].parameters->codec_type);
+  const SdpFmtpAttributeList::RedParameters* red_parameters(
+      static_cast<SdpFmtpAttributeList::RedParameters*>(
+        video_format_params[3].parameters.get()));
+  ASSERT_EQ(2U, red_parameters->encodings.size());
+  ASSERT_EQ(120U, red_parameters->encodings[0]);
+  ASSERT_EQ(121U, red_parameters->encodings[1]);
+}
+
+TEST_P(NewSdpTest, CheckRedFmtpWith3Codecs) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp + "a=fmtp:122 120/121/123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(4U, video_format_params.size());
+
+  ASSERT_EQ("122", video_format_params[3].format);
+  ASSERT_TRUE(!!video_format_params[3].parameters);
+  ASSERT_EQ(SdpRtpmapAttributeList::kRed,
+            video_format_params[3].parameters->codec_type);
+  const SdpFmtpAttributeList::RedParameters* red_parameters(
+      static_cast<SdpFmtpAttributeList::RedParameters*>(
+        video_format_params[3].parameters.get()));
+  ASSERT_EQ(3U, red_parameters->encodings.size());
+  ASSERT_EQ(120U, red_parameters->encodings[0]);
+  ASSERT_EQ(121U, red_parameters->encodings[1]);
+  ASSERT_EQ(123U, red_parameters->encodings[2]);
 }
 
 const std::string kH264AudioVideoOffer =
@@ -1501,7 +2593,8 @@ const std::string kH264AudioVideoOffer =
 "a=rtpmap:0 PCMU/8000" CRLF
 "a=rtpmap:8 PCMA/8000" CRLF
 "a=rtpmap:101 telephone-event/8000" CRLF
-"a=fmtp:101 0-15" CRLF
+"a=fmtp:109 maxplaybackrate=32000;stereo=1;useinbandfec=1" CRLF
+"a=fmtp:101 0-15,66,32-34,67" CRLF
 "a=ice-ufrag:00000000" CRLF
 "a=ice-pwd:0000000000000000000000000000000" CRLF
 "a=sendonly" CRLF
@@ -1555,9 +2648,22 @@ TEST_P(NewSdpTest, CheckFormatParameters) {
       SdpAttribute::kFmtpAttribute));
   auto audio_format_params =
       mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
-  ASSERT_EQ(1U, audio_format_params.size());
-  ASSERT_EQ("101", audio_format_params[0].format);
-  ASSERT_EQ("0-15", audio_format_params[0].parameters_string);
+  ASSERT_EQ(2U, audio_format_params.size());
+  ASSERT_EQ("109", audio_format_params[0].format);
+  ASSERT_TRUE(!!audio_format_params[0].parameters);
+  const SdpFmtpAttributeList::OpusParameters* opus_parameters =
+    static_cast<SdpFmtpAttributeList::OpusParameters*>(
+        audio_format_params[0].parameters.get());
+  ASSERT_EQ(32000U, opus_parameters->maxplaybackrate);
+  ASSERT_EQ(1U, opus_parameters->stereo);
+  ASSERT_EQ(1U, opus_parameters->useInBandFec);
+  ASSERT_EQ("101", audio_format_params[1].format);
+  ASSERT_TRUE(!!audio_format_params[1].parameters);
+  const SdpFmtpAttributeList::TelephoneEventParameters* te_parameters =
+    static_cast<SdpFmtpAttributeList::TelephoneEventParameters*>(
+        audio_format_params[1].parameters.get());
+  ASSERT_NE(0U, te_parameters->dtmfTones.size());
+  ASSERT_EQ("0-15,66,32-34,67", te_parameters->dtmfTones);
 
   ASSERT_TRUE(mSdp->GetMediaSection(1).GetAttributeList().HasAttribute(
       SdpAttribute::kFmtpAttribute));
@@ -1895,6 +3001,7 @@ const std::string kBasicAudioVideoDataOffer =
 "a=rtcp-fb:120 ccm vbcm" CRLF
 "a=rtcp-fb:120 ccm foo" CRLF // Should be ignored
 "a=rtcp-fb:120 trr-int 10" CRLF
+"a=rtcp-fb:120 goog-remb" CRLF
 "a=rtcp-fb:120 foo" CRLF // Should be ignored
 "a=rtcp-fb:126 nack" CRLF
 "a=rtcp-fb:126 nack pli" CRLF
@@ -1989,7 +3096,7 @@ TEST_P(NewSdpTest, CheckRtcpFb) {
   auto& video_attrs = mSdp->GetMediaSection(1).GetAttributeList();
   ASSERT_TRUE(video_attrs.HasAttribute(SdpAttribute::kRtcpFbAttribute));
   auto& rtcpfbs = video_attrs.GetRtcpFb().mFeedbacks;
-  ASSERT_EQ(19U, rtcpfbs.size());
+  ASSERT_EQ(20U, rtcpfbs.size());
   CheckRtcpFb(rtcpfbs[0], "120", SdpRtcpFbAttributeList::kAck, "rpsi");
   CheckRtcpFb(rtcpfbs[1], "120", SdpRtcpFbAttributeList::kAck, "app", "foo");
   CheckRtcpFb(rtcpfbs[2], "120", SdpRtcpFbAttributeList::kNack, "");
@@ -2002,13 +3109,14 @@ TEST_P(NewSdpTest, CheckRtcpFb) {
   CheckRtcpFb(rtcpfbs[9], "120", SdpRtcpFbAttributeList::kCcm, "tstr");
   CheckRtcpFb(rtcpfbs[10], "120", SdpRtcpFbAttributeList::kCcm, "vbcm");
   CheckRtcpFb(rtcpfbs[11], "120", SdpRtcpFbAttributeList::kTrrInt, "10");
-  CheckRtcpFb(rtcpfbs[12], "126", SdpRtcpFbAttributeList::kNack, "");
-  CheckRtcpFb(rtcpfbs[13], "126", SdpRtcpFbAttributeList::kNack, "pli");
-  CheckRtcpFb(rtcpfbs[14], "126", SdpRtcpFbAttributeList::kCcm, "fir");
-  CheckRtcpFb(rtcpfbs[15], "97",  SdpRtcpFbAttributeList::kNack, "");
-  CheckRtcpFb(rtcpfbs[16], "97",  SdpRtcpFbAttributeList::kNack, "pli");
-  CheckRtcpFb(rtcpfbs[17], "97", SdpRtcpFbAttributeList::kCcm, "fir");
-  CheckRtcpFb(rtcpfbs[18], "*", SdpRtcpFbAttributeList::kCcm, "tmmbr");
+  CheckRtcpFb(rtcpfbs[12], "120", SdpRtcpFbAttributeList::kRemb, "");
+  CheckRtcpFb(rtcpfbs[13], "126", SdpRtcpFbAttributeList::kNack, "");
+  CheckRtcpFb(rtcpfbs[14], "126", SdpRtcpFbAttributeList::kNack, "pli");
+  CheckRtcpFb(rtcpfbs[15], "126", SdpRtcpFbAttributeList::kCcm, "fir");
+  CheckRtcpFb(rtcpfbs[16], "97",  SdpRtcpFbAttributeList::kNack, "");
+  CheckRtcpFb(rtcpfbs[17], "97",  SdpRtcpFbAttributeList::kNack, "pli");
+  CheckRtcpFb(rtcpfbs[18], "97", SdpRtcpFbAttributeList::kCcm, "fir");
+  CheckRtcpFb(rtcpfbs[19], "*", SdpRtcpFbAttributeList::kCcm, "tmmbr");
 }
 
 TEST_P(NewSdpTest, CheckRtcp) {
@@ -2733,6 +3841,29 @@ TEST_P(NewSdpTest, CheckNoAttributes) {
       mSdp->GetAttributeList().GetDirection());
 }
 
+
+const std::string kMediaLevelDtlsMessage =
+"v=0" CRLF
+"o=Mozilla-SIPUA-35.0a1 5184 0 IN IP4 0.0.0.0" CRLF
+"s=SIP Call" CRLF
+"c=IN IP4 224.0.0.1/100/12" CRLF
+"t=0 0" CRLF
+"m=video 9 RTP/SAVPF 120" CRLF
+"c=IN IP4 0.0.0.0" CRLF
+"a=dtls-message:client " BASE64_DTLS_HELLO CRLF
+"a=rtpmap:120 VP8/90000" CRLF;
+
+TEST_P(NewSdpTest, CheckMediaLevelDtlsMessage) {
+  ParseSdp(kMediaLevelDtlsMessage);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+
+  // dtls-message is not defined for use at the media level; we don't
+  // parse it
+  ASSERT_FALSE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+        SdpAttribute::kDtlsMessageAttribute));
+}
+
+
 TEST(NewSdpTestNoFixture, CheckAttributeTypeSerialize) {
   for (auto a = static_cast<size_t>(SdpAttribute::kFirstAttribute);
        a <= static_cast<size_t>(SdpAttribute::kLastAttribute);
@@ -2824,16 +3955,16 @@ TEST(NewSdpTestNoFixture, CheckImageattrXYRangeParseInvalid)
 {
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[-1", 1);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[-", 1);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[-x", 1);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[-v", 1);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:-1", 5);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:-1", 8);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,-1", 5);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,-]", 5);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("-x", 0);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("-v", 0);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("-1", 0);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("", 0);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[", 1);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[x", 1);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[v", 1);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[", 1);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[ 640", 1);
   // It looks like the overflow detection only happens once the whole number
@@ -2841,23 +3972,23 @@ TEST(NewSdpTestNoFixture, CheckImageattrXYRangeParseInvalid)
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[99999999999999999:", 18);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640", 4);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:", 5);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:x", 5);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:v", 5);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16", 7);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:", 8);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:x", 8);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:v", 8);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:320]", 11);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:320", 11);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:320x", 11);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:16:320v", 11);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:1024", 9);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:320]", 8);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:1024x", 9);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640:1024v", 9);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,", 5);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,x", 5);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,v", 5);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640]", 4);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640x", 4);
   ParseInvalid<SdpImageattrAttributeList::XYRange>("[640,]", 5);
   ParseInvalid<SdpImageattrAttributeList::XYRange>(" ", 0);
-  ParseInvalid<SdpImageattrAttributeList::XYRange>("x", 0);
+  ParseInvalid<SdpImageattrAttributeList::XYRange>("v", 0);
 }
 
 static SdpImageattrAttributeList::SRange
@@ -2907,31 +4038,31 @@ TEST(NewSdpTestNoFixture, CheckImageattrSRangeParseInvalid)
 {
   ParseInvalid<SdpImageattrAttributeList::SRange>("", 0);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[", 1);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[x", 1);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[v", 1);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[-1", 1);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[", 1);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[-", 1);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[x", 1);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[v", 1);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[ 0.2", 1);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[10.1-", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.08-", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2", 4);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-", 5);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-x", 5);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-v", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2--1", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-0.3", 8);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-0.1]", 8);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-0.3x", 8);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2-0.3v", 8);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,", 5);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,x", 5);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,v", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,-1", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2]", 4);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2x", 4);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2v", 4);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,]", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>("[0.2,-]", 5);
   ParseInvalid<SdpImageattrAttributeList::SRange>(" ", 0);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("x", 0);
-  ParseInvalid<SdpImageattrAttributeList::SRange>("-x", 0);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("v", 0);
+  ParseInvalid<SdpImageattrAttributeList::SRange>("-v", 0);
   ParseInvalid<SdpImageattrAttributeList::SRange>("-1", 0);
 }
 
@@ -2958,27 +4089,27 @@ TEST(NewSdpTestNoFixture, CheckImageattrPRangeParseInvalid)
 {
   ParseInvalid<SdpImageattrAttributeList::PRange>("", 0);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[", 1);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("[x", 1);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("[v", 1);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[-1", 1);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[", 1);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[-", 1);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("[x", 1);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("[v", 1);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[ 0.2", 1);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[10.1-", 5);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.08-", 5);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2", 4);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-", 5);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-x", 5);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-v", 5);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2--1", 5);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-0.3", 8);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-0.1]", 8);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-0.3x", 8);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2-0.3v", 8);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2,", 4);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2:", 4);
   ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2]", 4);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2x", 4);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("[0.2v", 4);
   ParseInvalid<SdpImageattrAttributeList::PRange>(" ", 0);
-  ParseInvalid<SdpImageattrAttributeList::PRange>("x", 0);
+  ParseInvalid<SdpImageattrAttributeList::PRange>("v", 0);
   ParseInvalid<SdpImageattrAttributeList::PRange>("-x", 0);
   ParseInvalid<SdpImageattrAttributeList::PRange>("-1", 0);
 }
@@ -3130,7 +4261,7 @@ TEST(NewSdpTestNoFixture, CheckImageattrSetParseInvalid)
   ParseInvalid<SdpImageattrAttributeList::Set>("[y=", 3);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=[", 4);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320", 6);
-  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320x", 6);
+  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320v", 6);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,", 7);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,=", 8);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,x", 8);
@@ -3140,15 +4271,15 @@ TEST(NewSdpTestNoFixture, CheckImageattrSetParseInvalid)
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240x", 12);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,", 13);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=", 15);
-  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=x", 15);
+  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=v", 15);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5", 18);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,", 19);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,]", 20);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,=]", 20);
-  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,sar=x]", 23);
+  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,sar=v]", 23);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,q=0.5,q=0.4", 21);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,sar=", 17);
-  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,sar=x", 17);
+  ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,sar=v", 17);
   ParseInvalid<SdpImageattrAttributeList::Set>(
       "[x=320,y=240,sar=[0.5-0.6],sar=[0.7-0.8]", 31);
   ParseInvalid<SdpImageattrAttributeList::Set>("[x=320,y=240,par=", 17);
@@ -4230,6 +5361,8 @@ TEST(NewSdpTestNoFixture, CheckRidSerialize)
 } // End namespace test.
 
 int main(int argc, char **argv) {
+  ScopedXPCOM xpcom("sdp_unittests");
+
   test_utils = new MtransportTestUtils();
   NSS_NoDB_Init(nullptr);
   NSS_SetDomesticPolicy();

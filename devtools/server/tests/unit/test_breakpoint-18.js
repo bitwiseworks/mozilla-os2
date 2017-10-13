@@ -17,7 +17,7 @@ function run_test()
     run_test_with_server(WorkerDebuggerServer, do_test_finished);
   });
   do_test_pending();
-};
+}
 
 function run_test_with_server(aServer, aCallback)
 {
@@ -26,13 +26,13 @@ function run_test_with_server(aServer, aCallback)
   gDebuggee = addTestGlobal("test-breakpoints", aServer);
   gDebuggee.console = { log: x => void x };
   gClient = new DebuggerClient(aServer.connectPipe());
-  gClient.connect(function () {
+  gClient.connect().then(function () {
     attachTestTabAndResume(gClient,
                            "test-breakpoints",
                            function (aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      setUpCode();
-    });
+                             gThreadClient = aThreadClient;
+                             setUpCode();
+                           });
   });
 }
 
@@ -78,5 +78,5 @@ function testDbgStatement(event, { why }) {
   // Not break on another offset from the same line (that isn't an entry point
   // to the line)
   do_check_neq(why.type, "breakpoint");
-  gClient.close(gCallback);
+  gClient.close().then(gCallback);
 }

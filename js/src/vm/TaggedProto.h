@@ -14,17 +14,18 @@ namespace js {
 // Information about an object prototype, which can be either a particular
 // object, null, or a lazily generated object. The latter is only used by
 // certain kinds of proxies.
-class TaggedProto : public JS::Traceable
+class TaggedProto
 {
   public:
     static JSObject * const LazyProto;
 
     TaggedProto() : proto(nullptr) {}
+    TaggedProto(const TaggedProto& other) : proto(other.proto) {}
     explicit TaggedProto(JSObject* proto) : proto(proto) {}
 
     uintptr_t toWord() const { return uintptr_t(proto); }
 
-    bool isLazy() const {
+    bool isDynamic() const {
         return proto == LazyProto;
     }
     bool isObject() const {
@@ -44,24 +45,29 @@ class TaggedProto : public JS::Traceable
     bool operator ==(const TaggedProto& other) const { return proto == other.proto; }
     bool operator !=(const TaggedProto& other) const { return proto != other.proto; }
 
-    static void trace(TaggedProto* protop, JSTracer* trc) {
-        TraceManuallyBarrieredEdge(trc, protop, "TaggedProto");
+    HashNumber hashCode() const;
+
+    bool hasUniqueId() const;
+    bool ensureUniqueId() const;
+    uint64_t uniqueId() const;
+
+    void trace(JSTracer* trc) {
+        if (isObject())
+            TraceManuallyBarrieredEdge(trc, &proto, "TaggedProto");
     }
 
   private:
     JSObject* proto;
 };
 
-template <> struct GCMethods<TaggedProto>
-{
-    static TaggedProto initial() { return TaggedProto(); }
-};
-
-template <> struct InternalGCMethods<TaggedProto>
+template <>
+struct InternalBarrierMethods<TaggedProto>
 {
     static void preBarrier(TaggedProto& proto);
 
     static void postBarrier(TaggedProto* vp, TaggedProto prev, TaggedProto next);
+
+    static void readBarrier(const TaggedProto& proto);
 
     static bool isMarkableTaggedPointer(TaggedProto proto) {
         return proto.isObject();
@@ -69,11 +75,6 @@ template <> struct InternalGCMethods<TaggedProto>
 
     static bool isMarkable(TaggedProto proto) {
         return proto.isObject();
-    }
-
-    static bool isInsideNursery(TaggedProto proto) {
-        return proto.isObject() &&
-            gc::IsInsideNursery(reinterpret_cast<gc::Cell*>(proto.toObject()));
     }
 };
 
@@ -86,11 +87,13 @@ class TaggedProtoOperations
 
   public:
     uintptr_t toWord() const { return value().toWord(); }
-    inline bool isLazy() const { return value().isLazy(); }
+    inline bool isDynamic() const { return value().isDynamic(); }
     inline bool isObject() const { return value().isObject(); }
     inline JSObject* toObject() const { return value().toObject(); }
     inline JSObject* toObjectOrNull() const { return value().toObjectOrNull(); }
     JSObject* raw() const { return value().raw(); }
+    HashNumber hashCode() const { return value().hashCode(); }
+    uint64_t uniqueId() const { return value().uniqueId(); }
 };
 
 template <>
@@ -102,14 +105,14 @@ class RootedBase<TaggedProto> : public TaggedProtoOperations<Rooted<TaggedProto>
 {};
 
 template <>
-class BarrieredBaseMixins<TaggedProto> : public TaggedProtoOperations<HeapPtr<TaggedProto>>
+class BarrieredBaseMixins<TaggedProto> : public TaggedProtoOperations<GCPtr<TaggedProto>>
 {};
 
 // If the TaggedProto is a JSObject pointer, convert to that type and call |f|
 // with the pointer. If the TaggedProto is lazy, calls F::defaultValue.
 template <typename F, typename... Args>
 auto
-DispatchTyped(F f, TaggedProto& proto, Args&&... args)
+DispatchTyped(F f, const TaggedProto& proto, Args&&... args)
   -> decltype(f(static_cast<JSObject*>(nullptr), mozilla::Forward<Args>(args)...))
 {
     if (proto.isObject())

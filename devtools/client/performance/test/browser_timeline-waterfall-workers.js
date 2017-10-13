@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests if the sidebar is properly updated with worker markers.
  */
@@ -70,8 +71,8 @@ function testWorkerMarkerUI(node) {
  * Takes a string `script` and evaluates it directly in the content
  * in potentially a different process.
  */
-function evalInDebuggee (script) {
-  let { generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
+function evalInDebuggee(script) {
+  let { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
   let deferred = Promise.defer();
 
   if (!mm) {
@@ -82,7 +83,7 @@ function evalInDebuggee (script) {
   mm.sendAsyncMessage("devtools:test:eval", { script: script, id: id });
   mm.addMessageListener("devtools:test:eval:response", handler);
 
-  function handler ({ data }) {
+  function handler({ data }) {
     if (id !== data.id) {
       return;
     }
@@ -93,3 +94,4 @@ function evalInDebuggee (script) {
 
   return deferred.promise;
 }
+/* eslint-enable */

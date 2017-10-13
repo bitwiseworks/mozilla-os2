@@ -18,9 +18,6 @@
  * FOR_EACH_TRAILING_UNUSED_OPCODE and updating js::detail::LastDefinedOpcode
  * below.
  *
- * When changing the bytecode, don't forget to update XDR_BYTECODE_VERSION in
- * vm/Xdr.h!
- *
  * Includers must define a macro with the following form:
  *
  * #define MACRO(op,val,name,image,length,nuses,ndefs,format) ...
@@ -65,6 +62,7 @@
  *     This
  *     Super
  *     Arguments
+ *     Var Scope
  *   [Operators]
  *     Comparison Operators
  *     Arithmetic Operators
@@ -112,7 +110,7 @@
     macro(JSOP_GETRVAL,   2,  "getrval",    NULL,         1,  0,  1, JOF_BYTE) \
     /*
      * Pops the top of stack value, converts it to an object, and adds a
-     * 'DynamicWithObject' wrapping that object to the scope chain.
+     * 'WithEnvironmentObject' wrapping that object to the scope chain.
      *
      * There is a matching JSOP_LEAVEWITH instruction later. All name
      * lookups between the two that may need to consult the With object
@@ -122,7 +120,7 @@
      *   Operands: uint32_t staticWithIndex
      *   Stack: val =>
      */ \
-    macro(JSOP_ENTERWITH, 3,  "enterwith",  NULL,         5,  1,  0, JOF_OBJECT) \
+    macro(JSOP_ENTERWITH, 3,  "enterwith",  NULL,         5,  1,  0, JOF_SCOPE) \
     /*
      * Pops the scope chain object pushed by JSOP_ENTERWITH.
      *   Category: Statements
@@ -223,7 +221,16 @@
      */ \
     macro(JSOP_DUP2,      13, "dup2",       NULL,         1,  2,  4, JOF_BYTE) \
     \
-    macro(JSOP_UNUSED14,  14, "unused14",   NULL,         1,  0,  0, JOF_BYTE) \
+    /*
+     * Checks that the top value on the stack is an object, and throws a
+     * TypeError if not. The operand 'kind' is used only to generate an
+     * appropriate error message.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands: uint8_t kind
+     *   Stack: result => result
+     */ \
+    macro(JSOP_CHECKISOBJ,14, "checkisobj", NULL,         2,  1,  1, JOF_UINT8) \
     \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
@@ -606,7 +613,14 @@
      *   Stack: => null
      */ \
     macro(JSOP_NULL,      64, js_null_str,  js_null_str,  1,  0,  1, JOF_BYTE) \
-    macro(JSOP_UNUSED65,  65, "unused65",   NULL,         1,  0,  1, JOF_BYTE) \
+    /*
+     * Pushes 'JS_IS_CONSTRUCTING'
+     *   Category: Literals
+     *   Type: Constants
+     *   Operands:
+     *   Stack: => JS_IS_CONSTRUCTING
+     */ \
+    macro(JSOP_IS_CONSTRUCTING,  65, "is-constructing",   NULL,         1,  0,  1, JOF_BYTE) \
     /*
      * Pushes boolean value onto the stack.
      *   Category: Literals
@@ -1286,10 +1300,10 @@
      * scripts where use of dynamic scoping inhibits optimization.
      *   Category: Variables and Scopes
      *   Type: Variables
-     *   Operands: uint32_t funcIndex
-     *   Stack: =>
+     *   Operands:
+     *   Stack: fun =>
      */ \
-    macro(JSOP_DEFFUN,    127,"deffun",     NULL,         5,  0,  0,  JOF_OBJECT) \
+    macro(JSOP_DEFFUN,    127,"deffun",     NULL,         1,  1,  0,  JOF_BYTE) \
     /* Defines the new constant binding on global lexical scope.
      *
      * Throws if a binding with the same name already exists on the scope, or
@@ -1396,7 +1410,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: => aliasedVar
      */ \
-    macro(JSOP_GETALIASEDVAR, 136,"getaliasedvar",NULL,      5,  0,  1,  JOF_SCOPECOORD|JOF_NAME|JOF_TYPESET) \
+    macro(JSOP_GETALIASEDVAR, 136,"getaliasedvar",NULL,      5,  0,  1,  JOF_ENVCOORD|JOF_NAME|JOF_TYPESET) \
     /*
      * Sets aliased variable as the top of stack value.
      *   Category: Variables and Scopes
@@ -1404,7 +1418,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: v => v
      */ \
-    macro(JSOP_SETALIASEDVAR, 137,"setaliasedvar",NULL,      5,  1,  1,  JOF_SCOPECOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_SETALIASEDVAR, 137,"setaliasedvar",NULL,      5,  1,  1,  JOF_ENVCOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
     \
     /*
      * Checks if the value of the local variable is the
@@ -1432,7 +1446,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: =>
      */ \
-    macro(JSOP_CHECKALIASEDLEXICAL, 140, "checkaliasedlexical", NULL, 5,  0,  0, JOF_SCOPECOORD|JOF_NAME) \
+    macro(JSOP_CHECKALIASEDLEXICAL, 140, "checkaliasedlexical", NULL, 5,  0,  0, JOF_ENVCOORD|JOF_NAME) \
     /*
      * Initializes an uninitialized aliased lexical binding with the top of
      * stack value.
@@ -1441,7 +1455,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: v => v
      */ \
-    macro(JSOP_INITALIASEDLEXICAL,  141, "initaliasedlexical",  NULL, 5,  1,  1, JOF_SCOPECOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_INITALIASEDLEXICAL,  141, "initaliasedlexical",  NULL, 5,  1,  1, JOF_ENVCOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
     /*
      * Pushes a JS_UNINITIALIZED_LEXICAL value onto the stack, representing an
      * uninitialized lexical binding.
@@ -1515,16 +1529,15 @@
      *   Stack: => new.target
      */ \
     macro(JSOP_NEWTARGET,  148, "newtarget", NULL,      1,  0,  1,  JOF_BYTE) \
-    \
     /*
-     * Placeholder opcode used during bytecode generation. This never
-     * appears in a finished script. FIXME: bug 473671.
+     * Pops the top of stack value as 'unwrapped', converts it to async
+     * function 'wrapped', and pushes 'wrapped' back on the stack.
      *   Category: Statements
-     *   Type: Jumps
-     *   Operands: int32_t offset
-     *   Stack: =>
+     *   Type: Function
+     *   Operands:
+     *   Stack: unwrapped => wrapped
      */ \
-    macro(JSOP_BACKPATCH,     149,"backpatch", NULL,      5,  0,  0,  JOF_JUMP) \
+    macro(JSOP_TOASYNC,       149, "toasync", NULL,       1,  1,  1, JOF_BYTE) \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of 'Math.pow(lval, rval)'.
@@ -1743,7 +1756,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: =>
      */ \
-    macro(JSOP_THROWSETALIASEDCONST, 170, "throwsetaliasedconst", NULL, 5,  1,  1, JOF_SCOPECOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_THROWSETALIASEDCONST, 170, "throwsetaliasedconst", NULL, 5,  1,  1, JOF_ENVCOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
     /*
      * Initialize a non-enumerable getter in an object literal.
      *
@@ -1809,11 +1822,54 @@
      *   Stack: => val
      */ \
     macro(JSOP_GETIMPORT,     176,"getimport",  NULL,     5,  0,  1,  JOF_ATOM|JOF_NAME|JOF_TYPESET) \
-    macro(JSOP_UNUSED177,     177,"unused177",  NULL,     1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED178,     178,"unused178",  NULL,     1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED179,     179,"unused179",  NULL,     1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED180,     180,"unused180",  NULL,     1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED181,     181,"unused181",  NULL,     1,  0,  0,  JOF_BYTE) \
+    /*
+     * Examines the top stack value, asserting that it's either a self-hosted
+     * function or a self-hosted intrinsic. This opcode does nothing in a
+     * non-debug build.
+     *   Category: Other
+     *   Operands:
+     *   Stack: checkVal => checkVal
+     */ \
+    macro(JSOP_DEBUGCHECKSELFHOSTED, 177,"debug-checkselfhosted",  NULL, 1,  1,  1,  JOF_BYTE) \
+    /*
+     * Pops the top stack value, pushes the value and a boolean value that
+     * indicates whether the spread operation for the value can be optimized
+     * in spread call.
+     *   Category: Statements
+     *   Type: Function
+     *   Operands:
+     *   Stack: arr => arr optimized
+     */ \
+    macro(JSOP_OPTIMIZE_SPREADCALL,178,"optimize-spreadcall", NULL, 1,  1,  2,  JOF_BYTE) \
+    /*
+     * Throws a runtime TypeError for invalid assignment to the callee in a
+     * named lambda, which is always a 'const' binding. This is a different
+     * bytecode than JSOP_SETCONST because the named lambda callee, if not
+     * closed over, does not have a frame slot to look up the name with for
+     * the error message.
+     *
+     *   Category: Variables and Scopes
+     *   Type: Local Variables
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_THROWSETCALLEE,     179, "throwsetcallee",        NULL, 1,  1,  1, JOF_SET|JOF_BYTE) \
+    /*
+     * Pushes a var environment onto the env chain.
+     *   Category: Variables and Scopes
+     *   Type: Var Scope
+     *   Operands: uint32_t scopeIndex
+     *   Stack: =>
+     */ \
+    macro(JSOP_PUSHVARENV,         180, "pushvarenv",           NULL, 5,  0,  0,  JOF_SCOPE) \
+    /*
+     * Pops a var environment from the env chain.
+     *   Category: Variables and Scopes
+     *   Type: Var Scope
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_POPVARENV,          181, "popvarenv",            NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED182,     182,"unused182",  NULL,     1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED183,     183,"unused183",  NULL,     1,  0,  0,  JOF_BYTE) \
     \
@@ -1932,11 +1988,11 @@
      */ \
     macro(JSOP_TYPEOFEXPR,    196,"typeofexpr",  NULL,    1,  1,  1, JOF_BYTE|JOF_DETECTING) \
     \
-    /* Block-local scope support. */ \
+    /* Lexical environment support. */ \
     /*
-     * Replaces the current block on the scope chain with a fresh block
+     * Replaces the current block on the env chain with a fresh block
      * that copies all the bindings in the bock.  This operation implements the
-     * behavior of inducing a fresh block scope for every iteration of a
+     * behavior of inducing a fresh lexical environment for every iteration of a
      * for(let ...; ...; ...) loop, if any declarations induced by such a loop
      * are captured within the loop.
      *   Category: Variables and Scopes
@@ -1944,23 +2000,34 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_FRESHENBLOCKSCOPE,197,"freshenblockscope", NULL, 1, 0, 0, JOF_BYTE) \
+    macro(JSOP_FRESHENLEXICALENV,197,"freshenlexicalenv", NULL, 1, 0, 0, JOF_BYTE) \
     /*
-     * Pushes block onto the scope chain.
-     *   Category: Variables and Scopes
-     *   Type: Block-local Scope
-     *   Operands: uint32_t staticBlockObjectIndex
-     *   Stack: =>
-     */ \
-    macro(JSOP_PUSHBLOCKSCOPE,198,"pushblockscope", NULL, 5,  0,  0,  JOF_OBJECT) \
-    /*
-     * Pops block from the scope chain.
+     * Recreates the current block on the env chain with a fresh block
+     * with uninitialized bindings.  This operation implements the behavior of
+     * inducing a fresh lexical environment for every iteration of a for-in/of loop
+     * whose loop-head has a (captured) lexical declaration.
      *   Category: Variables and Scopes
      *   Type: Block-local Scope
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_POPBLOCKSCOPE, 199,"popblockscope", NULL,  1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_RECREATELEXICALENV,198,"recreatelexicalenv",NULL,1,0,0,JOF_BYTE) \
+    /*
+     * Pushes lexical environment onto the env chain.
+     *   Category: Variables and Scopes
+     *   Type: Block-local Scope
+     *   Operands: uint32_t scopeIndex
+     *   Stack: =>
+     */ \
+    macro(JSOP_PUSHLEXICALENV,199,"pushlexicalenv", NULL, 5,  0,  0,  JOF_SCOPE) \
+    /*
+     * Pops lexical environment from the env chain.
+     *   Category: Variables and Scopes
+     *   Type: Block-local Scope
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_POPLEXICALENV, 200,"poplexicalenv", NULL,  1,  0,  0,  JOF_BYTE) \
     /*
      * The opcode to assist the debugger.
      *   Category: Statements
@@ -1968,17 +2035,8 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_DEBUGLEAVEBLOCK, 200,"debugleaveblock", NULL, 1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_DEBUGLEAVELEXICALENV, 201,"debugleavelexicalenv", NULL, 1,  0,  0,  JOF_BYTE) \
     \
-    /*
-     * Initializes generator frame, creates a generator and pushes it on the
-     * stack.
-     *   Category: Statements
-     *   Type: Generator
-     *   Operands:
-     *   Stack: => generator
-     */ \
-    macro(JSOP_GENERATOR,     201,"generator",   NULL,    1,  0,  1,  JOF_BYTE) \
     /*
      * Pops the generator from the top of the stack, suspends it and stops
      * interpretation.
@@ -2051,8 +2109,24 @@
     macro(JSOP_UNUSED209,     209, "unused209",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED210,     210, "unused210",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED211,     211, "unused211",    NULL,  1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED212,     212, "unused212",    NULL,  1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED213,     213, "unused213",    NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * Initializes generator frame, creates a generator and pushes it on the
+     * stack.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands:
+     *   Stack: => generator
+     */ \
+    macro(JSOP_GENERATOR,     212,"generator",   NULL,    1,  0,  1,  JOF_BYTE) \
+    /*
+     * Pushes the nearest 'var' environment.
+     *
+     *   Category: Variables and Scopes
+     *   Type: Free Variables
+     *   Operands:
+     *   Stack: => scope
+     */ \
+    macro(JSOP_BINDVAR,       213, "bindvar",      NULL,  1,  0,  1,  JOF_BYTE) \
     /*
      * Pushes the global scope onto the stack if the script doesn't have a
      * non-syntactic global scope.  Otherwise will act like JSOP_BINDNAME.
@@ -2159,15 +2233,31 @@
      *   Operands:
      *   Stack: val => ToString(val)
      */ \
-    macro(JSOP_TOSTRING,    228, "tostring",       NULL,  1,  1,  1,  JOF_BYTE)
+    macro(JSOP_TOSTRING,    228, "tostring",       NULL,  1,  1,  1,  JOF_BYTE) \
+    /*
+     * No-op used by the decompiler to produce nicer error messages about
+     * destructuring code.
+     *   Category: Other
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_NOP_DESTRUCTURING, 229, "nop-destructuring", NULL, 1, 0, 0, JOF_BYTE) \
+    /*
+     * This opcode is a no-op and it indicates the location of a jump
+     * instruction target. Some other opcodes act as jump targets, such as
+     * LOOPENTRY, as well as all which are matched by BytecodeIsJumpTarget
+     * function.
+     *   Category: Other
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_JUMPTARGET,  230, "jumptarget",     NULL,  1,  0,  0,  JOF_BYTE)
 
 /*
  * In certain circumstances it may be useful to "pad out" the opcode space to
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(macro) \
-    macro(229) \
-    macro(230) \
     macro(231) \
     macro(232) \
     macro(233) \
@@ -2215,7 +2305,7 @@ static_assert((0 ==
 
 // Define JSOP_*_LENGTH constants for all ops.
 #define DEFINE_LENGTH_CONSTANT(op, val, name, image, len, ...) \
-    MOZ_CONSTEXPR_VAR size_t op##_LENGTH = len;
+    constexpr size_t op##_LENGTH = len;
 FOR_EACH_OPCODE(DEFINE_LENGTH_CONSTANT)
 #undef DEFINE_LENGTH_CONSTANT
 

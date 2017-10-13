@@ -522,7 +522,7 @@ CacheFileContextEvictor::StartEvicting()
   }
 
   nsCOMPtr<nsIRunnable> ev;
-  ev = NS_NewRunnableMethod(this, &CacheFileContextEvictor::EvictEntries);
+  ev = NewRunnableMethod(this, &CacheFileContextEvictor::EvictEntries);
 
   RefPtr<CacheIOThread> ioThread = CacheFileIOManager::IOThread();
 
@@ -553,6 +553,14 @@ CacheFileContextEvictor::EvictEntries()
   }
 
   while (true) {
+    if (CacheObserver::ShuttingDown()) {
+      LOG(("CacheFileContextEvictor::EvictEntries() - Stopping evicting due to "
+           "shutdown."));
+      mEvicting = true; // We don't want to start eviction again during shutdown
+                        // process. Setting this flag to true ensures it.
+      return NS_OK;
+    }
+
     if (CacheIOThread::YieldAndRerun()) {
       LOG(("CacheFileContextEvictor::EvictEntries() - Breaking loop for higher "
            "level events."));
@@ -563,6 +571,10 @@ CacheFileContextEvictor::EvictEntries()
     if (mEntries.Length() == 0) {
       LOG(("CacheFileContextEvictor::EvictEntries() - Stopping evicting, there "
            "is no context to evict."));
+
+      // Allow index to notify AsyncGetDiskConsumption callbacks.  The size is
+      // actual again.
+      CacheIndex::OnAsyncEviction(false);
       return NS_OK;
     }
 

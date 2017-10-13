@@ -322,9 +322,10 @@ status_t GonkBufferQueueProducer::dequeueBuffer(int *outSlot,
             if (mSlots[found].mTextureClient) {
                 mSlots[found].mTextureClient->ClearRecycleCallback();
                 // release TextureClient in ImageBridge thread
-                TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[found].mTextureClient);
+                RefPtr<TextureClientReleaseTask> task =
+                  MakeAndAddRef<TextureClientReleaseTask>(mSlots[found].mTextureClient);
                 mSlots[found].mTextureClient = NULL;
-                ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
+                ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(task.forget());
             }
 
             returnFlags |= BUFFER_NEEDS_REALLOCATION;
@@ -341,7 +342,7 @@ status_t GonkBufferQueueProducer::dequeueBuffer(int *outSlot,
     } // Autolock scope
 
     if (returnFlags & BUFFER_NEEDS_REALLOCATION) {
-        ISurfaceAllocator* allocator = ImageBridgeChild::GetSingleton();
+        RefPtr<LayersIPCChannel> allocator = ImageBridgeChild::GetSingleton();
         usage |= GraphicBuffer::USAGE_HW_TEXTURE;
         GrallocTextureData* texData = GrallocTextureData::Create(IntSize(width,height), format,
                                                                  gfx::BackendType::NONE,
@@ -351,7 +352,7 @@ status_t GonkBufferQueueProducer::dequeueBuffer(int *outSlot,
             return -ENOMEM;
         }
         RefPtr<TextureClient> textureClient = TextureClient::CreateWithData(
-            texData, TextureFlags::DEALLOCATE_CLIENT, allocator);
+            texData, TextureFlags::RECYCLE | TextureFlags::DEALLOCATE_CLIENT, allocator);
 
         sp<GraphicBuffer> graphicBuffer = texData->GetGraphicBuffer();
 

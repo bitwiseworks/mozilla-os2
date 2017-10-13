@@ -16,6 +16,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
+  "resource://gre/modules/BrowserUtils.jsm");
+
 this.PageThumbUtils = {
   // The default background color for page thumbnails.
   THUMBNAIL_BG_COLOR: "#fff",
@@ -36,7 +39,7 @@ this.PageThumbUtils = {
     let doc = (aWindow || Services.appShell.hiddenDOMWindow).document;
     let canvas = doc.createElementNS(this.HTML_NAMESPACE, "canvas");
     canvas.mozOpaque = true;
-    canvas.mozImageSmoothingEnabled = true;
+    canvas.imageSmoothingEnabled = true;
     let [thumbnailWidth, thumbnailHeight] = this.getThumbnailSize(aWindow);
     canvas.width = aWidth ? aWidth : thumbnailWidth;
     canvas.height = aHeight ? aHeight : thumbnailHeight;
@@ -58,7 +61,7 @@ this.PageThumbUtils = {
       let left = {}, top = {}, screenWidth = {}, screenHeight = {};
       screenManager.primaryScreen.GetRectDisplayPix(left, top, screenWidth, screenHeight);
 
-      /***
+      /** *
        * The system default scale might be different than
        * what is reported by the window. For example,
        * retina displays have 1:1 system scales, but 2:1 window
@@ -69,7 +72,7 @@ this.PageThumbUtils = {
       let windowScale = aWindow ? aWindow.devicePixelRatio : systemScale;
       let scale = Math.max(systemScale, windowScale);
 
-      /***
+      /** *
        * On retina displays, we can sometimes go down this path
        * without a window object. In those cases, force 2x scaling
        * as the system scale doesn't represent the 2x scaling
@@ -79,7 +82,7 @@ this.PageThumbUtils = {
         scale = 2;
       }
 
-      /***
+      /** *
        * THESE VALUES ARE DEFINED IN newtab.css and hard coded.
        * If you change these values from the prefs,
        * ALSO CHANGE THEM IN newtab.css
@@ -91,14 +94,14 @@ this.PageThumbUtils = {
       prefWidth *= scale;
       prefHeight *= scale;
 
-      this._thumbnailWidth = Math.max(Math.round(screenWidth.value / divisor), prefWidth);;
+      this._thumbnailWidth = Math.max(Math.round(screenWidth.value / divisor), prefWidth);
       this._thumbnailHeight = Math.max(Math.round(screenHeight.value / divisor), prefHeight);
     }
 
     return [this._thumbnailWidth, this._thumbnailHeight];
   },
 
-  /***
+  /** *
    * Given a browser window, return the size of the content
    * minus the scroll bars.
    */
@@ -124,7 +127,7 @@ this.PageThumbUtils = {
     return [width, height];
   },
 
-  /***
+  /** *
    * Given a browser window, this creates a snapshot of the content
    * and returns a canvas with the resulting snapshot of the content
    * at the thumbnail size. It has to do this through a two step process:
@@ -139,50 +142,55 @@ this.PageThumbUtils = {
    * jagged pixels to represent text.
    *
    * @params aWindow - the window to create a snapshot of.
-   * @params aDestCanvas (optional) a destination canvas to draw the final snapshot to.
+   * @params aDestCanvas destination canvas to draw the final
+   *   snapshot to. Can be null.
+   * @param aArgs (optional) Additional named parameters:
+   *   fullScale - request that a non-downscaled image be returned.
    * @return Canvas with a scaled thumbnail of the window.
    */
-  createSnapshotThumbnail: function(aWindow, aDestCanvas = null) {
+  createSnapshotThumbnail: function(aWindow, aDestCanvas, aArgs) {
     if (Cu.isCrossProcessWrapper(aWindow)) {
       throw new Error('Do not pass cpows here.');
     }
-
+    let fullScale = aArgs ? aArgs.fullScale : false;
     let [contentWidth, contentHeight] = this.getContentSize(aWindow);
     let [thumbnailWidth, thumbnailHeight] = aDestCanvas ?
                                             [aDestCanvas.width, aDestCanvas.height] :
                                             this.getThumbnailSize(aWindow);
+
+    // If the caller wants a fullscale image, set the desired thumbnail dims
+    // to the dims of content and (if provided) size the incoming canvas to
+    // support our results.
+    if (fullScale) {
+      thumbnailWidth = contentWidth;
+      thumbnailHeight = contentHeight;
+      if (aDestCanvas) {
+        aDestCanvas.width = contentWidth;
+        aDestCanvas.height = contentHeight;
+      }
+    }
+
     let intermediateWidth = thumbnailWidth * 2;
     let intermediateHeight = thumbnailHeight * 2;
     let skipDownscale = false;
-    let snapshotCanvas = undefined;
 
-    // Our intermediate thumbnail is bigger than content,
-    // which can happen on hiDPI devices like a retina macbook pro.
-    // In those cases, just render at the final size.
-    if ((intermediateWidth >= contentWidth) ||
-        (intermediateHeight >= contentHeight)) {
+    // If the intermediate thumbnail is larger than content dims (hiDPI
+    // devices can experience this) or a full preview is requested render
+    // at the final thumbnail size.
+    if ((intermediateWidth >= contentWidth ||
+         intermediateHeight >= contentHeight) || fullScale) {
       intermediateWidth = thumbnailWidth;
       intermediateHeight = thumbnailHeight;
       skipDownscale = true;
-      snapshotCanvas = aDestCanvas;
     }
 
-    // If we've been given a large preallocated canvas, so
-    // just render once into the destination canvas.
-    if (aDestCanvas &&
-        ((aDestCanvas.width >= intermediateWidth) ||
-        (aDestCanvas.height >= intermediateHeight))) {
-      intermediateWidth = aDestCanvas.width;
-      intermediateHeight = aDestCanvas.height;
-      skipDownscale = true;
-      snapshotCanvas = aDestCanvas;
-    }
+    // Create an intermediate surface
+    let snapshotCanvas = this.createCanvas(aWindow, intermediateWidth,
+                                           intermediateHeight);
 
-    if (!snapshotCanvas) {
-      snapshotCanvas = this.createCanvas(aWindow, intermediateWidth, intermediateHeight);
-    }
-
-    // This is step 1.
+    // Step 1: capture the image at the intermediate dims. For thumbnails
+    // this is twice the thumbnail size, for fullScale images this is at
+    // content dims.
     // Also by default, canvas does not draw the scrollbars, so no need to
     // remove the scrollbar sizes.
     let scale = Math.min(Math.max(intermediateWidth / contentWidth,
@@ -195,18 +203,21 @@ this.PageThumbUtils = {
                            PageThumbUtils.THUMBNAIL_BG_COLOR,
                            snapshotCtx.DRAWWINDOW_DO_NOT_FLUSH);
     snapshotCtx.restore();
-    if (skipDownscale) {
-      return snapshotCanvas;
-    }
 
-    // Part 2: Assumes that the snapshot is 2x the thumbnail size
-    let finalCanvas = aDestCanvas || this.createCanvas(aWindow, thumbnailWidth, thumbnailHeight);
+    // Part 2: Downscale from our intermediate dims to the final thumbnail
+    // dims and copy the result to aDestCanvas. If the caller didn't
+    // provide a target canvas, create a new canvas and return it.
+    let finalCanvas = aDestCanvas ||
+      this.createCanvas(aWindow, thumbnailWidth, thumbnailHeight);
 
     let finalCtx = finalCanvas.getContext("2d");
     finalCtx.save();
-    finalCtx.scale(0.5, 0.5);
+    if (!skipDownscale) {
+      finalCtx.scale(0.5, 0.5);
+    }
     finalCtx.drawImage(snapshotCanvas, 0, 0);
     finalCtx.restore();
+
     return finalCanvas;
   },
 
@@ -255,6 +266,10 @@ this.PageThumbUtils = {
   },
 
   shouldStoreContentThumbnail: function (aDocument, aDocShell) {
+    if (BrowserUtils.isToolbarVisible(aDocShell, "findbar")) {
+      return false;
+    }
+
     // FIXME Bug 720575 - Don't capture thumbnails for SVG or XML documents as
     //       that currently regresses Talos SVG tests.
     if (aDocument instanceof Ci.nsIDOMXMLDocument) {
@@ -316,5 +331,24 @@ this.PageThumbUtils = {
       }
     } // httpChannel
     return true;
-  }
+  },
+
+  /**
+   * Given a channel, returns true if it should be considered an "error
+   * response", false otherwise.
+   */
+  isChannelErrorResponse: function(channel) {
+    // No valid document channel sounds like an error to me!
+    if (!channel)
+      return true;
+    if (!(channel instanceof Ci.nsIHttpChannel))
+      // it might be FTP etc, so assume it's ok.
+      return false;
+    try {
+      return !channel.requestSucceeded;
+    } catch (_) {
+      // not being able to determine success is surely failure!
+      return true;
+    }
+  },
 };

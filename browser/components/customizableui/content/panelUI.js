@@ -6,10 +6,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
                                   "resource:///modules/CustomizableUI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ScrollbarSampler",
                                   "resource:///modules/ScrollbarSampler.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
                                   "resource://gre/modules/ShortcutUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
 
 /**
  * Maintains the state and dispatches events for the main menu panel.
@@ -38,7 +38,7 @@ const PanelUI = {
 
   _initialized: false,
   init: function() {
-    for (let [k, v] of Iterator(this.kElements)) {
+    for (let [k, v] of Object.entries(this.kElements)) {
       // Need to do fresh let-bindings per iteration
       let getKey = k;
       let id = v;
@@ -125,52 +125,46 @@ const PanelUI = {
    * @param aEvent the event (if any) that triggers showing the menu.
    */
   show: function(aEvent) {
-    let deferred = Promise.defer();
+    return new Promise(resolve => {
+      this.ensureReady().then(() => {
+        if (this.panel.state == "open" ||
+            document.documentElement.hasAttribute("customizing")) {
+          resolve();
+          return;
+        }
 
-    this.ensureReady().then(() => {
-      if (this.panel.state == "open" ||
-          document.documentElement.hasAttribute("customizing")) {
-        deferred.resolve();
-        return;
-      }
+        let editControlPlacement = CustomizableUI.getPlacementOfWidget("edit-controls");
+        if (editControlPlacement && editControlPlacement.area == CustomizableUI.AREA_PANEL) {
+          updateEditUIVisibility();
+        }
 
-      let editControlPlacement = CustomizableUI.getPlacementOfWidget("edit-controls");
-      if (editControlPlacement && editControlPlacement.area == CustomizableUI.AREA_PANEL) {
-        updateEditUIVisibility();
-      }
+        let personalBookmarksPlacement = CustomizableUI.getPlacementOfWidget("personal-bookmarks");
+        if (personalBookmarksPlacement &&
+            personalBookmarksPlacement.area == CustomizableUI.AREA_PANEL) {
+          PlacesToolbarHelper.customizeChange();
+        }
 
-      let personalBookmarksPlacement = CustomizableUI.getPlacementOfWidget("personal-bookmarks");
-      if (personalBookmarksPlacement &&
-          personalBookmarksPlacement.area == CustomizableUI.AREA_PANEL) {
-        PlacesToolbarHelper.customizeChange();
-      }
+        let anchor;
+        if (!aEvent ||
+            aEvent.type == "command") {
+          anchor = this.menuButton;
+        } else {
+          anchor = aEvent.target;
+        }
 
-      let anchor;
-      if (!aEvent ||
-          aEvent.type == "command") {
-        anchor = this.menuButton;
-      } else {
-        anchor = aEvent.target;
-      }
+        this.panel.addEventListener("popupshown", function onPopupShown() {
+          this.removeEventListener("popupshown", onPopupShown);
+          resolve();
+        });
 
-      this.panel.addEventListener("popupshown", function onPopupShown() {
-        this.removeEventListener("popupshown", onPopupShown);
-        // As an optimization for the customize mode transition, we preload
-        // about:customizing in the background once the menu panel is first
-        // shown.
-        gCustomizationTabPreloader.ensurePreloading();
-        deferred.resolve();
+        let iconAnchor =
+          document.getAnonymousElementByAttribute(anchor, "class",
+                                                  "toolbarbutton-icon");
+        this.panel.openPopup(iconAnchor || anchor);
+      }, (reason) => {
+        console.error("Error showing the PanelUI menu", reason);
       });
-
-      let iconAnchor =
-        document.getAnonymousElementByAttribute(anchor, "class",
-                                                "toolbarbutton-icon");
-      this.panel.openPopup(iconAnchor || anchor);
-    }, (reason) => {
-      console.error("Error showing the PanelUI menu", reason);
     });
-
-    return deferred.promise;
   },
 
   /**
@@ -185,6 +179,11 @@ const PanelUI = {
   },
 
   handleEvent: function(aEvent) {
+    // Ignore context menus and menu button menus showing and hiding:
+    if (aEvent.type.startsWith("popup") &&
+        aEvent.target != this.panel) {
+      return;
+    }
     switch (aEvent.type) {
       case "popupshowing":
         this._adjustLabelsForAutoHyphens();
@@ -226,17 +225,17 @@ const PanelUI = {
     if (this._readyPromise) {
       return this._readyPromise;
     }
-    this._readyPromise = Task.spawn(function() {
+    this._readyPromise = Task.spawn(function*() {
       if (!this._initialized) {
-        let delayedStartupDeferred = Promise.defer();
-        let delayedStartupObserver = (aSubject, aTopic, aData) => {
-          if (aSubject == window) {
-            Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
-            delayedStartupDeferred.resolve();
-          }
-        };
-        Services.obs.addObserver(delayedStartupObserver, "browser-delayed-startup-finished", false);
-        yield delayedStartupDeferred.promise;
+        yield new Promise(resolve => {
+          let delayedStartupObserver = (aSubject, aTopic, aData) => {
+            if (aSubject == window) {
+              Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
+              resolve();
+            }
+          };
+          Services.obs.addObserver(delayedStartupObserver, "browser-delayed-startup-finished", false);
+        });
       }
 
       this.contents.setAttributeNS("http://www.w3.org/XML/1998/namespace", "lang",
@@ -304,7 +303,7 @@ const PanelUI = {
    * @param aAnchor the element that spawned the subview.
    * @param aPlacementArea the CustomizableUI area that aAnchor is in.
    */
-  showSubView: function(aViewId, aAnchor, aPlacementArea) {
+  showSubView: Task.async(function*(aViewId, aAnchor, aPlacementArea) {
     this._ensureEventListenersAdded();
     let viewNode = document.getElementById(aViewId);
     if (!viewNode) {
@@ -321,20 +320,15 @@ const PanelUI = {
       this.multiView.showSubView(aViewId, aAnchor);
     } else if (!aAnchor.open) {
       aAnchor.open = true;
-      // Emit the ViewShowing event so that the widget definition has a chance
-      // to lazily populate the subview with things.
-      let evt = document.createEvent("CustomEvent");
-      evt.initCustomEvent("ViewShowing", true, true, viewNode);
-      viewNode.dispatchEvent(evt);
-      if (evt.defaultPrevented) {
-        return;
-      }
 
       let tempPanel = document.createElement("panel");
       tempPanel.setAttribute("type", "arrow");
       tempPanel.setAttribute("id", "customizationui-widget-panel");
       tempPanel.setAttribute("class", "cui-widget-panel");
       tempPanel.setAttribute("viewId", aViewId);
+      if (aAnchor.getAttribute("tabspecific")) {
+        tempPanel.setAttribute("tabspecific", true);
+      }
       if (this._disableAnimations) {
         tempPanel.setAttribute("animate", "false");
       }
@@ -351,19 +345,53 @@ const PanelUI = {
       multiView.setAttribute("mainViewIsSubView", "true");
       multiView.setMainView(viewNode);
       viewNode.classList.add("cui-widget-panelview");
-      CustomizableUI.addPanelCloseListeners(tempPanel);
 
-      let panelRemover = function() {
-        tempPanel.removeEventListener("popuphidden", panelRemover);
+      let viewShown = false;
+      let panelRemover = () => {
         viewNode.classList.remove("cui-widget-panelview");
-        CustomizableUI.removePanelCloseListeners(tempPanel);
-        let evt = new CustomEvent("ViewHiding", {detail: viewNode});
-        viewNode.dispatchEvent(evt);
+        if (viewShown) {
+          CustomizableUI.removePanelCloseListeners(tempPanel);
+          tempPanel.removeEventListener("popuphidden", panelRemover);
+
+          let evt = new CustomEvent("ViewHiding", {detail: viewNode});
+          viewNode.dispatchEvent(evt);
+        }
         aAnchor.open = false;
 
         this.multiView.appendChild(viewNode);
-        tempPanel.parentElement.removeChild(tempPanel);
-      }.bind(this);
+        tempPanel.remove();
+      };
+
+      // Emit the ViewShowing event so that the widget definition has a chance
+      // to lazily populate the subview with things.
+      let detail = {
+        blockers: new Set(),
+        addBlocker(aPromise) {
+          this.blockers.add(aPromise);
+        },
+      };
+
+      let evt = new CustomEvent("ViewShowing", { bubbles: true, cancelable: true, detail });
+      viewNode.dispatchEvent(evt);
+
+      let cancel = evt.defaultPrevented;
+      if (detail.blockers.size) {
+        try {
+          let results = yield Promise.all(detail.blockers);
+          cancel = cancel || results.some(val => val === false);
+        } catch (e) {
+          Components.utils.reportError(e);
+          cancel = true;
+        }
+      }
+
+      if (cancel) {
+        panelRemover();
+        return;
+      }
+
+      viewShown = true;
+      CustomizableUI.addPanelCloseListeners(tempPanel);
       tempPanel.addEventListener("popuphidden", panelRemover);
 
       let iconAnchor =
@@ -375,7 +403,7 @@ const PanelUI = {
       }
       tempPanel.openPopup(iconAnchor || aAnchor, "bottomcenter topright");
     }
-  },
+  }),
 
   /**
    * NB: The enable- and disableSingleSubviewPanelAnimations methods only
@@ -488,12 +516,14 @@ const PanelUI = {
   },
 
   _updateQuitTooltip: function() {
-#ifndef XP_WIN
-#ifdef XP_MACOSX
-    let tooltipId = "quit-button.tooltiptext.mac";
-#else
-    let tooltipId = "quit-button.tooltiptext.linux2";
-#endif
+    if (AppConstants.platform == "win") {
+      return;
+    }
+
+    let tooltipId = AppConstants.platform == "macosx" ?
+                    "quit-button.tooltiptext.mac" :
+                    "quit-button.tooltiptext.linux2";
+
     let brands = Services.strings.createBundle("chrome://branding/locale/brand.properties");
     let stringArgs = [brands.GetStringFromName("brandShortName")];
 
@@ -502,7 +532,6 @@ const PanelUI = {
     let tooltipString = CustomizableUI.getLocalizedProperty({x: tooltipId}, "x", stringArgs);
     let quitButton = document.getElementById("PanelUI-quit");
     quitButton.setAttribute("tooltiptext", tooltipString);
-#endif
   },
 
   _overlayScrollListenerBoundFn: null,

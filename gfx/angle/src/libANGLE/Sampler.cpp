@@ -9,20 +9,30 @@
 
 #include "libANGLE/Sampler.h"
 #include "libANGLE/angletypes.h"
-#include "libANGLE/renderer/ImplFactory.h"
+#include "libANGLE/renderer/GLImplFactory.h"
 #include "libANGLE/renderer/SamplerImpl.h"
 
 namespace gl
 {
 
-Sampler::Sampler(rx::ImplFactory *factory, GLuint id)
-    : RefCountObject(id), mImpl(factory->createSampler()), mSamplerState()
+Sampler::Sampler(rx::GLImplFactory *factory, GLuint id)
+    : RefCountObject(id), mImpl(factory->createSampler()), mLabel(), mSamplerState()
 {
 }
 
 Sampler::~Sampler()
 {
     SafeDelete(mImpl);
+}
+
+void Sampler::setLabel(const std::string &label)
+{
+    mLabel = label;
+}
+
+const std::string &Sampler::getLabel() const
+{
+    return mLabel;
 }
 
 void Sampler::setMinFilter(GLenum minFilter)
@@ -125,18 +135,24 @@ GLenum Sampler::getCompareFunc() const
     return mSamplerState.compareFunc;
 }
 
+void Sampler::setSRGBDecode(GLenum sRGBDecode)
+{
+    mSamplerState.sRGBDecode = sRGBDecode;
+}
+
+GLenum Sampler::getSRGBDecode() const
+{
+    return mSamplerState.sRGBDecode;
+}
+
 const SamplerState &Sampler::getSamplerState() const
 {
     return mSamplerState;
 }
 
-const rx::SamplerImpl *Sampler::getImplementation() const
+rx::SamplerImpl *Sampler::getImplementation() const
 {
     return mImpl;
 }
 
-rx::SamplerImpl *Sampler::getImplementation()
-{
-    return mImpl;
-}
 }

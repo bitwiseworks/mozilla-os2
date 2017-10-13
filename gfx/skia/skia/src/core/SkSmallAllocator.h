@@ -11,22 +11,22 @@
 #include "SkTDArray.h"
 #include "SkTypes.h"
 
-// Used by SkSmallAllocator to call the destructor for objects it has
-// allocated.
-template<typename T> void destroyT(void* ptr) {
-   static_cast<T*>(ptr)->~T();
-}
+#include <new>
 
 /*
  *  Template class for allocating small objects without additional heap memory
  *  allocations. kMaxObjects is a hard limit on the number of objects that can
  *  be allocated using this class. After that, attempts to create more objects
- *  with this class will assert and return NULL.
+ *  with this class will assert and return nullptr.
+ *
  *  kTotalBytes is the total number of bytes provided for storage for all
  *  objects created by this allocator. If an object to be created is larger
  *  than the storage (minus storage already used), it will be allocated on the
  *  heap. This class's destructor will handle calling the destructor for each
  *  object it allocated and freeing its memory.
+ *
+ *  Current the class always aligns each allocation to 16-bytes to be safe, but future
+ *  may reduce this to only the alignment that is required per alloc.
  */
 template<uint32_t kMaxObjects, size_t kTotalBytes>
 class SkSmallAllocator : SkNoncopyable {
@@ -44,7 +44,7 @@ public:
             Rec* rec = &fRecs[fNumObjects];
             rec->fKillProc(rec->fObj);
             // Safe to do if fObj is in fStorage, since fHeapStorage will
-            // point to NULL.
+            // point to nullptr.
             sk_free(rec->fHeapStorage);
         }
     }
@@ -52,58 +52,16 @@ public:
     /*
      *  Create a new object of type T. Its lifetime will be handled by this
      *  SkSmallAllocator.
-     *  Each version behaves the same but takes a different number of
-     *  arguments.
-     *  Note: If kMaxObjects have been created by this SkSmallAllocator, NULL
+     *  Note: If kMaxObjects have been created by this SkSmallAllocator, nullptr
      *  will be returned.
      */
-    template<typename T>
-    T* createT() {
+    template<typename T, typename... Args>
+    T* createT(const Args&... args) {
         void* buf = this->reserveT<T>();
-        if (NULL == buf) {
-            return NULL;
+        if (nullptr == buf) {
+            return nullptr;
         }
-        SkNEW_PLACEMENT(buf, T);
-        return static_cast<T*>(buf);
-    }
-
-    template<typename T, typename A1> T* createT(const A1& a1) {
-        void* buf = this->reserveT<T>();
-        if (NULL == buf) {
-            return NULL;
-        }
-        SkNEW_PLACEMENT_ARGS(buf, T, (a1));
-        return static_cast<T*>(buf);
-    }
-
-    template<typename T, typename A1, typename A2>
-    T* createT(const A1& a1, const A2& a2) {
-        void* buf = this->reserveT<T>();
-        if (NULL == buf) {
-            return NULL;
-        }
-        SkNEW_PLACEMENT_ARGS(buf, T, (a1, a2));
-        return static_cast<T*>(buf);
-    }
-
-    template<typename T, typename A1, typename A2, typename A3>
-    T* createT(const A1& a1, const A2& a2, const A3& a3) {
-        void* buf = this->reserveT<T>();
-        if (NULL == buf) {
-            return NULL;
-        }
-        SkNEW_PLACEMENT_ARGS(buf, T, (a1, a2, a3));
-        return static_cast<T*>(buf);
-    }
-
-    template<typename T, typename A1, typename A2, typename A3, typename A4>
-    T* createT(const A1& a1, const A2& a2, const A3& a3, const A4& a4) {
-        void* buf = this->reserveT<T>();
-        if (NULL == buf) {
-            return NULL;
-        }
-        SkNEW_PLACEMENT_ARGS(buf, T, (a1, a2, a3, a4));
-        return static_cast<T*>(buf);
+        return new (buf) T(args...);
     }
 
     /*
@@ -117,28 +75,28 @@ public:
         SkASSERT(fNumObjects < kMaxObjects);
         SkASSERT(storageRequired >= sizeof(T));
         if (kMaxObjects == fNumObjects) {
-            return NULL;
+            return nullptr;
         }
-        const size_t storageRemaining = SkAlign4(kTotalBytes) - fStorageUsed;
-        storageRequired = SkAlign4(storageRequired);
+        const size_t storageRemaining = sizeof(fStorage) - fStorageUsed;
         Rec* rec = &fRecs[fNumObjects];
         if (storageRequired > storageRemaining) {
-            // Allocate on the heap. Ideally we want to avoid this situation,
-            // but we're not sure we can catch all callers, so handle it but
-            // assert false in debug mode.
-            SkASSERT(false);
+            // Allocate on the heap. Ideally we want to avoid this situation.
+
+            // With the gm composeshader_bitmap2, storage required is 4476
+            // and storage remaining is 3392. Increasing the base storage
+            // causes google 3 tests to fail.
+
             rec->fStorageSize = 0;
             rec->fHeapStorage = sk_malloc_throw(storageRequired);
             rec->fObj = static_cast<void*>(rec->fHeapStorage);
         } else {
             // There is space in fStorage.
             rec->fStorageSize = storageRequired;
-            rec->fHeapStorage = NULL;
-            SkASSERT(SkIsAlign4(fStorageUsed));
-            rec->fObj = static_cast<void*>(fStorage + (fStorageUsed / 4));
+            rec->fHeapStorage = nullptr;
+            rec->fObj = static_cast<void*>(fStorage.fBytes + fStorageUsed);
             fStorageUsed += storageRequired;
         }
-        rec->fKillProc = destroyT<T>;
+        rec->fKillProc = DestroyT<T>;
         fNumObjects++;
         return rec->fObj;
     }
@@ -165,12 +123,23 @@ private:
         void   (*fKillProc)(void*);
     };
 
+    // Used to call the destructor for allocated objects.
+    template<typename T>
+    static void DestroyT(void* ptr) {
+        static_cast<T*>(ptr)->~T();
+    }
+
+    struct SK_STRUCT_ALIGN(16) Storage {
+        // we add kMaxObjects * 15 to account for the worst-case slop, where each allocation wasted
+        // 15 bytes (due to forcing each to be 16-byte aligned)
+        char    fBytes[kTotalBytes + kMaxObjects * 15];
+    };
+
+    Storage     fStorage;
     // Number of bytes used so far.
-    size_t              fStorageUsed;
-    // Pad the storage size to be 4-byte aligned.
-    uint32_t            fStorage[SkAlign4(kTotalBytes) >> 2];
-    uint32_t            fNumObjects;
-    Rec                 fRecs[kMaxObjects];
+    size_t      fStorageUsed;
+    uint32_t    fNumObjects;
+    Rec         fRecs[kMaxObjects];
 };
 
 #endif // SkSmallAllocator_DEFINED

@@ -50,25 +50,6 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
         }
     };
 
-    // Additional bounds checking for heap accesses with constant offsets.
-    class OffsetBoundsCheck : public OutOfLineCodeBase<CodeGeneratorX86Shared>
-    {
-        Label* outOfBounds_;
-        Register ptrReg_;
-        int32_t offset_;
-      public:
-        OffsetBoundsCheck(Label* outOfBounds, Register ptrReg, int32_t offset)
-          : outOfBounds_(outOfBounds), ptrReg_(ptrReg), offset_(offset)
-        {}
-
-        Label* outOfBounds() const { return outOfBounds_; }
-        Register ptrReg() const { return ptrReg_; }
-        int32_t offset() const { return offset_; }
-        void accept(CodeGeneratorX86Shared* codegen) {
-            codegen->visitOffsetBoundsCheck(this);
-        }
-    };
-
     // Additional bounds check for vector Float to Int conversion, when the
     // undefined pattern is seen. Might imply a bailout.
     class OutOfLineSimdFloatToIntCheck : public OutOfLineCodeBase<CodeGeneratorX86Shared>
@@ -76,28 +57,36 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
         Register temp_;
         FloatRegister input_;
         LInstruction* ins_;
+        wasm::TrapOffset trapOffset_;
 
       public:
-        OutOfLineSimdFloatToIntCheck(Register temp, FloatRegister input, LInstruction *ins)
-          : temp_(temp), input_(input), ins_(ins)
+        OutOfLineSimdFloatToIntCheck(Register temp, FloatRegister input, LInstruction *ins,
+                                     wasm::TrapOffset trapOffset)
+          : temp_(temp), input_(input), ins_(ins), trapOffset_(trapOffset)
         {}
 
         Register temp() const { return temp_; }
         FloatRegister input() const { return input_; }
         LInstruction* ins() const { return ins_; }
+        wasm::TrapOffset trapOffset() const { return trapOffset_; }
 
         void accept(CodeGeneratorX86Shared* codegen) {
             codegen->visitOutOfLineSimdFloatToIntCheck(this);
         }
     };
 
-    // Functions for emitting bounds-checking code with branches.
-    MOZ_WARN_UNUSED_RESULT
-    uint32_t emitAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* mir, const MInstruction* ins,
-                                        Register ptr, Label* fail);
-    void cleanupAfterAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* mir, Register ptr);
-
+  public:
     NonAssertingLabel deoptLabel_;
+
+    Operand ToOperand(const LAllocation& a);
+    Operand ToOperand(const LAllocation* a);
+    Operand ToOperand(const LDefinition* def);
+
+#ifdef JS_PUNBOX64
+    Operand ToOperandOrRegister64(const LInt64Allocation input);
+#else
+    Register64 ToOperandOrRegister64(const LInt64Allocation input);
+#endif
 
     MoveOperand toMoveOperand(LAllocation a) const;
 
@@ -185,6 +174,12 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
 
     void emitTableSwitchDispatch(MTableSwitch* mir, Register index, Register base);
 
+    void emitSimdExtractLane8x16(FloatRegister input, Register output, unsigned lane,
+                                 SimdSign signedness);
+    void emitSimdExtractLane16x8(FloatRegister input, Register output, unsigned lane,
+                                 SimdSign signedness);
+    void emitSimdExtractLane32x4(FloatRegister input, Register output, unsigned lane);
+
   public:
     CodeGeneratorX86Shared(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm);
 
@@ -197,12 +192,18 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitAbsD(LAbsD* ins);
     virtual void visitAbsF(LAbsF* ins);
     virtual void visitClzI(LClzI* ins);
+    virtual void visitCtzI(LCtzI* ins);
+    virtual void visitPopcntI(LPopcntI* ins);
+    virtual void visitPopcntI64(LPopcntI64* lir);
     virtual void visitSqrtD(LSqrtD* ins);
     virtual void visitSqrtF(LSqrtF* ins);
     virtual void visitPowHalfD(LPowHalfD* ins);
     virtual void visitAddI(LAddI* ins);
+    virtual void visitAddI64(LAddI64* ins);
     virtual void visitSubI(LSubI* ins);
+    virtual void visitSubI64(LSubI64* ins);
     virtual void visitMulI(LMulI* ins);
+    virtual void visitMulI64(LMulI64* ins);
     virtual void visitDivI(LDivI* ins);
     virtual void visitDivPowTwoI(LDivPowTwoI* ins);
     virtual void visitDivOrModConstantI(LDivOrModConstantI* ins);
@@ -210,7 +211,9 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitModPowTwoI(LModPowTwoI* ins);
     virtual void visitBitNotI(LBitNotI* ins);
     virtual void visitBitOpI(LBitOpI* ins);
+    virtual void visitBitOpI64(LBitOpI64* ins);
     virtual void visitShiftI(LShiftI* ins);
+    virtual void visitShiftI64(LShiftI64* ins);
     virtual void visitUrshD(LUrshD* ins);
     virtual void visitTestIAndBranch(LTestIAndBranch* test);
     virtual void visitTestDAndBranch(LTestDAndBranch* test);
@@ -239,46 +242,69 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitEffectiveAddress(LEffectiveAddress* ins);
     virtual void visitUDivOrMod(LUDivOrMod* ins);
     virtual void visitUDivOrModConstant(LUDivOrModConstant *ins);
-    virtual void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    virtual void visitWasmStackArg(LWasmStackArg* ins);
+    virtual void visitWasmStackArgI64(LWasmStackArgI64* ins);
+    virtual void visitWasmSelect(LWasmSelect* ins);
+    virtual void visitWasmReinterpret(LWasmReinterpret* lir);
     virtual void visitMemoryBarrier(LMemoryBarrier* ins);
+    virtual void visitWasmAddOffset(LWasmAddOffset* lir);
+    virtual void visitWasmTruncateToInt32(LWasmTruncateToInt32* lir);
     virtual void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
     virtual void visitAtomicTypedArrayElementBinopForEffect(LAtomicTypedArrayElementBinopForEffect* lir);
     virtual void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
     virtual void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
+    virtual void visitCopySignD(LCopySignD* lir);
+    virtual void visitCopySignF(LCopySignF* lir);
+    virtual void visitRotateI64(LRotateI64* lir);
 
     void visitOutOfLineLoadTypedArrayOutOfBounds(OutOfLineLoadTypedArrayOutOfBounds* ool);
-    void visitOffsetBoundsCheck(OffsetBoundsCheck* oolCheck);
 
     void visitNegI(LNegI* lir);
     void visitNegD(LNegD* lir);
     void visitNegF(LNegF* lir);
 
+    void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
+
     // SIMD operators
     void visitSimdValueInt32x4(LSimdValueInt32x4* lir);
     void visitSimdValueFloat32x4(LSimdValueFloat32x4* lir);
+    void visitSimdSplatX16(LSimdSplatX16* lir);
+    void visitSimdSplatX8(LSimdSplatX8* lir);
     void visitSimdSplatX4(LSimdSplatX4* lir);
-    void visitInt32x4(LInt32x4* ins);
-    void visitFloat32x4(LFloat32x4* ins);
+    void visitSimd128Int(LSimd128Int* ins);
+    void visitSimd128Float(LSimd128Float* ins);
     void visitInt32x4ToFloat32x4(LInt32x4ToFloat32x4* ins);
     void visitFloat32x4ToInt32x4(LFloat32x4ToInt32x4* ins);
+    void visitFloat32x4ToUint32x4(LFloat32x4ToUint32x4* ins);
     void visitSimdReinterpretCast(LSimdReinterpretCast* lir);
+    void visitSimdExtractElementB(LSimdExtractElementB* lir);
     void visitSimdExtractElementI(LSimdExtractElementI* lir);
+    void visitSimdExtractElementU2D(LSimdExtractElementU2D* lir);
     void visitSimdExtractElementF(LSimdExtractElementF* lir);
     void visitSimdInsertElementI(LSimdInsertElementI* lir);
     void visitSimdInsertElementF(LSimdInsertElementF* lir);
-    void visitSimdSignMaskX4(LSimdSignMaskX4* ins);
     void visitSimdSwizzleI(LSimdSwizzleI* lir);
     void visitSimdSwizzleF(LSimdSwizzleF* lir);
+    void visitSimdShuffleX4(LSimdShuffleX4* lir);
     void visitSimdShuffle(LSimdShuffle* lir);
+    void visitSimdUnaryArithIx16(LSimdUnaryArithIx16* lir);
+    void visitSimdUnaryArithIx8(LSimdUnaryArithIx8* lir);
     void visitSimdUnaryArithIx4(LSimdUnaryArithIx4* lir);
     void visitSimdUnaryArithFx4(LSimdUnaryArithFx4* lir);
+    void visitSimdBinaryCompIx16(LSimdBinaryCompIx16* lir);
+    void visitSimdBinaryCompIx8(LSimdBinaryCompIx8* lir);
     void visitSimdBinaryCompIx4(LSimdBinaryCompIx4* lir);
     void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir);
+    void visitSimdBinaryArithIx16(LSimdBinaryArithIx16* lir);
+    void visitSimdBinaryArithIx8(LSimdBinaryArithIx8* lir);
     void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir);
     void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir);
-    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir);
+    void visitSimdBinarySaturating(LSimdBinarySaturating* lir);
+    void visitSimdBinaryBitwise(LSimdBinaryBitwise* lir);
     void visitSimdShift(LSimdShift* lir);
     void visitSimdSelect(LSimdSelect* ins);
+    void visitSimdAllTrue(LSimdAllTrue* ins);
+    void visitSimdAnyTrue(LSimdAnyTrue* ins);
 
     template <class T, class Reg> void visitSimdGeneralShuffle(LSimdGeneralShuffleBase* lir, Reg temp);
     void visitSimdGeneralShuffleI(LSimdGeneralShuffleI* lir);
@@ -304,6 +330,8 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     void atomicBinopToTypedIntArray(AtomicOp op, Scalar::Type arrayType, const S& value, const T& mem);
 
     void setReturnDoubleRegs(LiveRegisterSet* regs);
+
+    void canonicalizeIfDeterministic(Scalar::Type type, const LAllocation* value);
 };
 
 // An out-of-line bailout thunk.

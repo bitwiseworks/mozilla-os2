@@ -47,27 +47,16 @@ function commonDialogOnLoad() {
 
     // limit the dialog to the screen width
     document.getElementById("filler").maxWidth = screen.availWidth;
-    Services.obs.addObserver(softkbObserver, "softkb-change", false);
 
     Dialog = new CommonDialog(args, ui);
     Dialog.onLoad(dialog);
+    // resize the window to the content
+    window.sizeToContent();
     window.getAttention();
 }
 
 function commonDialogOnUnload() {
-    Services.obs.removeObserver(softkbObserver, "softkb-change");
     // Convert args back into property bag
     for (let propName in args)
         propBag.setProperty(propName, args[propName]);
-}
-
-function softkbObserver(subject, topic, data) {
-    let rect = JSON.parse(data);
-    if (rect) {
-        let height = rect.bottom - rect.top;
-        let width  = rect.right - rect.left;
-        let top    = (rect.top + (height - window.innerHeight) / 2);
-        let left   = (rect.left + (width - window.innerWidth) / 2);
-        window.moveTo(left, top);
-    }
 }

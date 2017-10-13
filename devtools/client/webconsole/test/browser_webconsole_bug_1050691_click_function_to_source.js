@@ -1,7 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests that clicking on a function displays its source in the debugger.
 
@@ -10,11 +10,15 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "test/test-bug_1050691_click_function_to_source.html";
 
-var test = asyncTest(function*() {
+// Force the old debugger UI since it's directly used (see Bug 1301705)
+Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
+registerCleanupFunction(function* () {
+  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
+});
+
+add_task(function* () {
   yield loadTab(TEST_URI);
   let hud = yield openConsole();
-
-  yield testWithoutDebuggerOpen(hud);
 
   // Open the Debugger panel.
   let debuggerPanel = yield openDebugger();
@@ -22,13 +26,6 @@ var test = asyncTest(function*() {
   yield openConsole();
   yield testWithDebuggerOpen(hud, debuggerPanel);
 });
-
-function* testWithoutDebuggerOpen(hud) {
-  let clickable = yield printFunction(hud);
-  let onVariablesViewOpen = hud.jsterm.once("variablesview-fetched");
-  synthesizeClick(clickable, hud);
-  return onVariablesViewOpen;
-}
 
 function* testWithDebuggerOpen(hud, debuggerPanel) {
   let clickable = yield printFunction(hud);
@@ -46,7 +43,9 @@ function synthesizeClick(clickable, hud) {
 
 var printFunction = Task.async(function* (hud) {
   hud.jsterm.clearOutput();
-  content.wrappedJSObject.foo();
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    content.wrappedJSObject.foo();
+  });
   let [result] = yield waitForMessages({
     webconsole: hud,
     messages: [{

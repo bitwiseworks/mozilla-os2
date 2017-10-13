@@ -1,19 +1,21 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that graph widgets can handle clients getting/setting the
 // selection or cursor.
 
-var LineGraphWidget = require("devtools/client/shared/widgets/LineGraphWidget");
+const LineGraphWidget = require("devtools/client/shared/widgets/LineGraphWidget");
 
-add_task(function*() {
+add_task(function* () {
   yield addTab("about:blank");
   yield performTest();
   gBrowser.removeCurrentTab();
 });
 
 function* performTest() {
-  let [host, win, doc] = yield createHost();
+  let [host,, doc] = yield createHost();
   let graph = new LineGraphWidget(doc.body, "fps");
   yield graph.once("ready");
 
@@ -48,7 +50,7 @@ function* testSelection(graph) {
   let thrown;
   try {
     graph.setSelection({ start: null, end: null });
-  } catch(e) {
+  } catch (e) {
     thrown = true;
   }
   ok(thrown, "Setting a null selection shouldn't work.");
@@ -90,7 +92,7 @@ function* testCursor(graph) {
   let thrown;
   try {
     graph.setCursor({ x: null, y: null });
-  } catch(e) {
+  } catch (e) {
     thrown = true;
   }
   ok(thrown, "Setting a null cursor shouldn't work.");

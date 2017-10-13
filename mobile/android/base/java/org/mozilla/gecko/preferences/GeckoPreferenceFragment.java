@@ -9,6 +9,7 @@ import java.util.Locale;
 
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.BrowserLocaleManager;
+import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.LocaleManager;
 import org.mozilla.gecko.PrefsHelper;
@@ -16,10 +17,15 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
+import org.mozilla.gecko.fxa.AccountLoader;
+import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 
+import android.accounts.Account;
 import android.app.ActionBar;
 import android.app.Activity;
+import android.app.LoaderManager;
 import android.content.Context;
+import android.content.Loader;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
@@ -30,11 +36,17 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 
+import com.squareup.leakcanary.RefWatcher;
+
 /* A simple implementation of PreferenceFragment for large screen devices
  * This will strip category headers (so that they aren't shown to the user twice)
  * as well as initializing Gecko prefs when a fragment is shown.
 */
 public class GeckoPreferenceFragment extends PreferenceFragment {
+
+    public static final int ACCOUNT_LOADER_ID = 1;
+    private AccountLoaderCallbacks accountLoaderCallbacks;
+    private SyncPreference syncPreference;
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
@@ -51,7 +63,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
     }
 
     private static final String LOGTAG = "GeckoPreferenceFragment";
-    private int mPrefsRequestId;
+    private PrefsHelper.PrefHandler mPrefsRequest;
     private Locale lastLocale = Locale.getDefault();
 
     @Override
@@ -78,7 +90,8 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
 
         PreferenceScreen screen = getPreferenceScreen();
         setPreferenceScreen(screen);
-        mPrefsRequestId = ((GeckoPreferences)getActivity()).setupPreferences(screen);
+        mPrefsRequest = ((GeckoPreferences)getActivity()).setupPreferences(screen);
+        syncPreference = (SyncPreference) findPreference(GeckoPreferences.PREFS_SYNC);
     }
 
     /**
@@ -103,6 +116,11 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
         // We can launch this category from the the magnifying glass in the quick search bar.
         if (res == R.xml.preferences_search) {
             return getString(R.string.pref_category_search);
+        }
+
+        // Launched as action from content notifications.
+        if (res == R.xml.preferences_notifications) {
+            return getString(R.string.pref_category_notifications);
         }
 
         return null;
@@ -132,6 +150,11 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
             return R.id.pref_header_search;
         }
 
+        // Launched as action from content notifications.
+        if (res == R.xml.preferences_notifications) {
+            return R.id.pref_header_notifications;
+        }
+
         return -1;
     }
 
@@ -142,24 +165,24 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
             return;
         }
 
-        final PreferenceActivity activity = (PreferenceActivity) getActivity();
-        if (Versions.feature11Plus && activity.isMultiPane()) {
+        final GeckoPreferences activity = (GeckoPreferences) getActivity();
+        if (activity.isMultiPane()) {
             // In a multi-pane activity, the title is "Settings", and the action
             // bar is along the top of the screen. We don't want to change those.
             activity.showBreadCrumbs(newTitle, newTitle);
-            ((GeckoPreferences) activity).switchToHeader(getHeader());
+            activity.switchToHeader(getHeader());
             return;
         }
 
         Log.v(LOGTAG, "Setting activity title to " + newTitle);
         activity.setTitle(newTitle);
+    }
 
-        if (Versions.feature14Plus) {
-            final ActionBar actionBar = activity.getActionBar();
-            if (actionBar != null) {
-                actionBar.setTitle(newTitle);
-            }
-        }
+    @Override
+    public void onActivityCreated(Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        accountLoaderCallbacks = new AccountLoaderCallbacks();
+        getLoaderManager().initLoader(ACCOUNT_LOADER_ID, null, accountLoaderCallbacks);
     }
 
     @Override
@@ -168,6 +191,9 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
         // super.onResume that you wouldn't do in onCreate.
         applyLocale(Locale.getDefault());
         super.onResume();
+
+        // Force reload as the account may have been deleted while the app was in background.
+        getLoaderManager().restartLoader(ACCOUNT_LOADER_ID, null, accountLoaderCallbacks);
     }
 
     private void applyLocale(final Locale currentLocale) {
@@ -211,8 +237,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
             // The resource was invalid. Use the default resource.
             Log.e(LOGTAG, "Failed to find resource: " + resourceName + ". Displaying default settings.");
 
-            boolean isMultiPane = Versions.feature11Plus &&
-                                  ((PreferenceActivity) activity).isMultiPane();
+            boolean isMultiPane = ((GeckoPreferences) activity).isMultiPane();
             resid = isMultiPane ? R.xml.preferences_general_tablet : R.xml.preferences;
         }
 
@@ -228,13 +253,44 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (mPrefsRequestId > 0) {
-            PrefsHelper.removeObserver(mPrefsRequestId);
+        if (mPrefsRequest != null) {
+            PrefsHelper.removeObserver(mPrefsRequest);
+            mPrefsRequest = null;
         }
 
         final int res = getResource();
         if (res == R.xml.preferences) {
             Telemetry.stopUISession(TelemetryContract.Session.SETTINGS);
+        }
+
+        GeckoApplication.watchReference(getActivity(), this);
+    }
+
+    private class AccountLoaderCallbacks implements LoaderManager.LoaderCallbacks<Account> {
+        @Override
+        public Loader<Account> onCreateLoader(int id, Bundle args) {
+            return new AccountLoader(getActivity());
+        }
+
+        @Override
+        public void onLoadFinished(Loader<Account> loader, Account account) {
+            if (syncPreference == null) {
+                return;
+            }
+
+            if (account == null) {
+                syncPreference.update(null);
+                return;
+            }
+
+            syncPreference.update(new AndroidFxAccount(getActivity(), account));
+        }
+
+        @Override
+        public void onLoaderReset(Loader<Account> loader) {
+            if (syncPreference != null) {
+                syncPreference.update(null);
+            }
         }
     }
 }

@@ -22,6 +22,7 @@
 #include "nsXULAppAPI.h"
 #include "nsContentSecurityManager.h"
 #include "LoadInfo.h"
+#include "nsServiceManagerUtils.h"
 
 // This class is used to suspend a request across a function scope.
 class ScopedRequestSuspender {
@@ -65,7 +66,7 @@ nsBaseChannel::nsBaseChannel()
 
 nsBaseChannel::~nsBaseChannel()
 {
-  NS_ReleaseOnMainThread(mLoadInfo);
+  NS_ReleaseOnMainThread(mLoadInfo.forget());
 }
 
 nsresult
@@ -648,6 +649,13 @@ nsBaseChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctxt)
   NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
   NS_ENSURE_ARG(listener);
 
+  // Skip checking for chrome:// sub-resources.
+  nsAutoCString scheme;
+  mURI->GetScheme(scheme);
+  if (!scheme.EqualsLiteral("file")) {
+    NS_CompareLoadInfoAndLoadContext(this);
+  }
+
   // Ensure that this is an allowed port before proceeding.
   nsresult rv = NS_CheckPortSafety(mURI);
   if (NS_FAILED(rv)) {
@@ -848,7 +856,7 @@ nsBaseChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
     if (NS_IsMainThread()) {
       OnTransportStatus(nullptr, NS_NET_STATUS_READING, prog, mContentLength);
     } else {
-      class OnTransportStatusAsyncEvent : public nsRunnable
+      class OnTransportStatusAsyncEvent : public mozilla::Runnable
       {
         RefPtr<nsBaseChannel> mChannel;
         int64_t mProgress;

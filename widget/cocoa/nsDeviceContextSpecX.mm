@@ -5,19 +5,20 @@
 
 #include "nsDeviceContextSpecX.h"
 
+#include "mozilla/gfx/PrintTargetCG.h"
+#include "mozilla/RefPtr.h"
 #include "nsCRT.h"
 #include <unistd.h>
 
-#include "nsAutoPtr.h"
 #include "nsQueryObject.h"
 #include "nsIServiceManager.h"
-#include "nsIPrintOptions.h"
 #include "nsPrintSettingsX.h"
-
-#include "gfxQuartzSurface.h"
 
 // This must be the last include:
 #include "nsObjCExceptions.h"
+
+using namespace mozilla;
+using namespace mozilla::gfx;
 
 nsDeviceContextSpecX::nsDeviceContextSpecX()
 : mPrintSession(NULL)
@@ -59,7 +60,7 @@ NS_IMETHODIMP nsDeviceContextSpecX::Init(nsIWidget *aWidget,
 }
 
 NS_IMETHODIMP nsDeviceContextSpecX::BeginDocument(const nsAString& aTitle, 
-                                                  char16_t*       aPrintToFileName,
+                                                  const nsAString& aPrintToFileName,
                                                   int32_t          aStartPage, 
                                                   int32_t          aEndPage)
 {
@@ -136,7 +137,7 @@ void nsDeviceContextSpecX::GetPaperRect(double* aTop, double* aLeft, double* aBo
     NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMETHODIMP nsDeviceContextSpecX::GetSurfaceForPrinter(gfxASurface **surface)
+already_AddRefed<PrintTarget> nsDeviceContextSpecX::MakePrintTarget()
 {
     NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -144,29 +145,21 @@ NS_IMETHODIMP nsDeviceContextSpecX::GetSurfaceForPrinter(gfxASurface **surface)
     GetPaperRect(&top, &left, &bottom, &right);
     const double width = right - left;
     const double height = bottom - top;
+    IntSize size = IntSize::Floor(width, height);
 
     CGContextRef context;
     ::PMSessionGetCGGraphicsContext(mPrintSession, &context);
-
-    RefPtr<gfxASurface> newSurface;
 
     if (context) {
         // Initially, origin is at bottom-left corner of the paper.
         // Here, we translate it to top-left corner of the paper.
         CGContextTranslateCTM(context, 0, height);
         CGContextScaleCTM(context, 1.0, -1.0);
-        newSurface = new gfxQuartzSurface(context, gfxSize(width, height));
-    } else {
-        newSurface = new gfxQuartzSurface(gfxSize((int32_t)width, (int32_t)height), gfxImageFormat::ARGB32);
+        return PrintTargetCG::CreateOrNull(context, size);
     }
 
-    if (!newSurface)
-        return NS_ERROR_FAILURE;
+    // Apparently we do need this branch - bug 368933.
+    return PrintTargetCG::CreateOrNull(size, SurfaceFormat::A8R8G8B8_UINT32);
 
-    *surface = newSurface;
-    NS_ADDREF(*surface);
-
-    return NS_OK;
-
-    NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+    NS_OBJC_END_TRY_ABORT_BLOCK_NSNULL;
 }

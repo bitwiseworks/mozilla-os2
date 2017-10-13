@@ -50,13 +50,13 @@ public:
                                              nsStyleContext* aContext);
   
   virtual nsresult
-  Place(nsRenderingContext& aRenderingContext,
+  Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize) override;
+        ReflowOutput& aDesiredSize) override;
   
   virtual nsresult
-  MeasureForWidth(nsRenderingContext& aRenderingContext,
-                  nsHTMLReflowMetrics& aDesiredSize) override;
+  MeasureForWidth(DrawTarget* aDrawTarget,
+                  ReflowOutput& aDesiredSize) override;
   
   virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
@@ -80,7 +80,7 @@ public:
   TransmitAutomaticData() override;
 
   virtual nscoord
-  FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize) override;
+  FixInterFrameSpacing(ReflowOutput& aDesiredSize) override;
 
   bool
   IsMrowLike() override {
@@ -92,11 +92,11 @@ protected:
   explicit nsMathMLmencloseFrame(nsStyleContext* aContext);
   virtual ~nsMathMLmencloseFrame();
 
-  nsresult PlaceInternal(nsRenderingContext& aRenderingContext,
+  nsresult PlaceInternal(DrawTarget*          aDrawTarget,
                          bool                 aPlaceOrigin,
-                         nsHTMLReflowMetrics& aDesiredSize,
+                         ReflowOutput& aDesiredSize,
                          bool                 aWidthOnly);
-  
+
   // functions to parse the "notation" attribute.
   nsresult AddNotation(const nsAString& aNotation);
   void InitNotations();

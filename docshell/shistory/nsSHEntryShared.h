@@ -24,7 +24,7 @@ class nsIContentViewer;
 class nsIDocShellTreeItem;
 class nsILayoutHistoryState;
 class nsDocShellEditorData;
-class nsISupportsArray;
+class nsIMutableArray;
 
 // A document may have multiple SHEntries, either due to hash navigations or
 // calls to history.pushState.  SHEntries corresponding to the same document
@@ -46,14 +46,14 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER
   NS_DECL_NSIBFCACHEENTRY
 
+  nsExpirationState *GetExpirationState() { return &mExpirationState; }
+
 private:
   ~nsSHEntryShared();
 
   friend class nsSHEntry;
 
   friend class HistoryTracker;
-  friend class nsExpirationTracker<nsSHEntryShared, 3>;
-  nsExpirationState *GetExpirationState() { return &mExpirationState; }
 
   static already_AddRefed<nsSHEntryShared> Duplicate(nsSHEntryShared* aEntry);
 
@@ -70,7 +70,8 @@ private:
   // member here, be sure to update the Duplicate() implementation.
   uint64_t mDocShellID;
   nsCOMArray<nsIDocShellTreeItem> mChildShells;
-  nsCOMPtr<nsISupports> mOwner;
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
+  nsCOMPtr<nsIPrincipal> mPrincipalToInherit;
   nsCString mContentType;
   bool mIsFrameNavigation;
   bool mSaveLayoutState;
@@ -88,7 +89,7 @@ private:
   bool mExpired;
   nsCOMPtr<nsISupports> mWindowState;
   nsIntRect mViewerBounds;
-  nsCOMPtr<nsISupportsArray> mRefreshURIList;
+  nsCOMPtr<nsIMutableArray> mRefreshURIList;
   nsExpirationState mExpirationState;
   nsAutoPtr<nsDocShellEditorData> mEditorData;
 };

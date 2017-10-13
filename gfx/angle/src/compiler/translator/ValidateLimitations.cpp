@@ -10,6 +10,9 @@
 #include "compiler/translator/ParseContext.h"
 #include "angle_gl.h"
 
+namespace sh
+{
+
 namespace
 {
 
@@ -53,13 +56,35 @@ class ValidateConstIndexExpr : public TIntermTraverser
 
 }  // namespace anonymous
 
-ValidateLimitations::ValidateLimitations(sh::GLenum shaderType,
-                                         TInfoSinkBase &sink)
+ValidateLimitations::ValidateLimitations(sh::GLenum shaderType, TInfoSinkBase *sink)
     : TIntermTraverser(true, false, false),
       mShaderType(shaderType),
       mSink(sink),
-      mNumErrors(0)
+      mNumErrors(0),
+      mValidateIndexing(true),
+      mValidateInnerLoops(true)
 {
+}
+
+// static
+bool ValidateLimitations::IsLimitedForLoop(TIntermLoop *loop)
+{
+    // The shader type doesn't matter in this case.
+    ValidateLimitations validate(GL_FRAGMENT_SHADER, nullptr);
+    validate.mValidateIndexing   = false;
+    validate.mValidateInnerLoops = false;
+    if (!validate.validateLoopType(loop))
+        return false;
+    if (!validate.validateForLoopHeader(loop))
+        return false;
+    TIntermNode *body = loop->getBody();
+    if (body != nullptr)
+    {
+        validate.mLoopStack.push(loop);
+        body->traverse(&validate);
+        validate.mLoopStack.pop();
+    }
+    return (validate.mNumErrors == 0);
 }
 
 bool ValidateLimitations::visitBinary(Visit, TIntermBinary *node)
@@ -72,10 +97,11 @@ bool ValidateLimitations::visitBinary(Visit, TIntermBinary *node)
     {
       case EOpIndexDirect:
       case EOpIndexIndirect:
-        validateIndexing(node);
-        break;
+          if (mValidateIndexing)
+              validateIndexing(node);
+          break;
       default:
-        break;
+          break;
     }
     return true;
 }
@@ -102,6 +128,9 @@ bool ValidateLimitations::visitAggregate(Visit, TIntermAggregate *node)
 
 bool ValidateLimitations::visitLoop(Visit, TIntermLoop *node)
 {
+    if (!mValidateInnerLoops)
+        return true;
+
     if (!validateLoopType(node))
         return false;
 
@@ -123,9 +152,12 @@ bool ValidateLimitations::visitLoop(Visit, TIntermLoop *node)
 void ValidateLimitations::error(TSourceLoc loc,
                                 const char *reason, const char *token)
 {
-    mSink.prefix(EPrefixError);
-    mSink.location(loc);
-    mSink << "'" << token << "' : " << reason << "\n";
+    if (mSink)
+    {
+        mSink->prefix(EPrefixError);
+        mSink->location(loc);
+        (*mSink) << "'" << token << "' : " << reason << "\n";
+    }
     ++mNumErrors;
 }
 
@@ -184,8 +216,8 @@ int ValidateLimitations::validateForLoopInit(TIntermLoop *node)
     // init-declaration has the form:
     //     type-specifier identifier = constant-expression
     //
-    TIntermAggregate *decl = init->getAsAggregate();
-    if ((decl == NULL) || (decl->getOp() != EOpDeclaration))
+    TIntermDeclaration *decl = init->getAsDeclarationNode();
+    if (decl == nullptr)
     {
         error(init->getLine(), "Invalid init declaration", "for");
         return -1;
@@ -394,7 +426,8 @@ bool ValidateLimitations::validateFunctionCall(TIntermAggregate *node)
 
     bool valid = true;
     TSymbolTable& symbolTable = GetGlobalParseContext()->symbolTable;
-    TSymbol* symbol = symbolTable.find(node->getName(), GetGlobalParseContext()->getShaderVersion());
+    TSymbol *symbol           = symbolTable.find(node->getFunctionSymbolInfo()->getName(),
+                                       GetGlobalParseContext()->getShaderVersion());
     ASSERT(symbol && symbol->isFunction());
     TFunction *function = static_cast<TFunction *>(symbol);
     for (ParamIndex::const_iterator i = pIndex.begin();
@@ -433,8 +466,8 @@ bool ValidateLimitations::validateOperation(TIntermOperator *node,
 
 bool ValidateLimitations::isConstExpr(TIntermNode *node)
 {
-    ASSERT(node != NULL);
-    return node->getAsConstantUnion() != NULL;
+    ASSERT(node != nullptr);
+    return node->getAsConstantUnion() != nullptr && node->getAsTyped()->getQualifier() == EvqConst;
 }
 
 bool ValidateLimitations::isConstIndexExpr(TIntermNode *node)
@@ -453,13 +486,6 @@ bool ValidateLimitations::validateIndexing(TIntermBinary *node)
 
     bool valid = true;
     TIntermTyped *index = node->getRight();
-    // The index expression must have integral type.
-    if (!index->isScalarInt()) {
-        error(index->getLine(),
-              "Index expression must have integral type",
-              index->getCompleteString().c_str());
-        valid = false;
-    }
     // The index expession must be a constant-index-expression unless
     // the operand is a uniform in a vertex shader.
     TIntermTyped *operand = node->getLeft();
@@ -473,3 +499,4 @@ bool ValidateLimitations::validateIndexing(TIntermBinary *node)
     return valid;
 }
 
+}  // namespace sh

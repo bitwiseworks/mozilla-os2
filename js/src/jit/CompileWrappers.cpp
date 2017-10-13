@@ -6,6 +6,8 @@
 
 #include "jit/Ion.h"
 
+#include "jscompartmentinlines.h"
+
 using namespace js;
 using namespace js::jit;
 
@@ -58,11 +60,13 @@ CompileRuntime::addressOfJitStackLimit()
     return runtime()->addressOfJitStackLimit();
 }
 
+#ifdef DEBUG
 const void*
-CompileRuntime::addressOfJSContext()
+CompileRuntime::addressOfIonBailAfter()
 {
-    return &runtime()->jitJSContext;
+    return runtime()->addressOfIonBailAfter();
 }
+#endif
 
 const void*
 CompileRuntime::addressOfActivation()
@@ -70,17 +74,11 @@ CompileRuntime::addressOfActivation()
     return runtime()->addressOfActivation();
 }
 
-const void*
-CompileRuntime::addressOfLastCachedNativeIterator()
-{
-    return &runtime()->nativeIterCache.last;
-}
-
 #ifdef JS_GC_ZEAL
 const void*
-CompileRuntime::addressOfGCZeal()
+CompileRuntime::addressOfGCZealModeBits()
 {
-    return runtime()->gc.addressOfZealMode();
+    return runtime()->gc.addressOfZealModeBits();
 }
 #endif
 
@@ -88,6 +86,12 @@ const void*
 CompileRuntime::addressOfInterruptUint32()
 {
     return runtime()->addressOfInterruptUint32();
+}
+
+const void*
+CompileRuntime::getJSContext()
+{
+    return runtime()->unsafeContextFromAnyThread();
 }
 
 const JitRuntime*
@@ -100,12 +104,6 @@ SPSProfiler&
 CompileRuntime::spsProfiler()
 {
     return runtime()->spsProfiler;
-}
-
-bool
-CompileRuntime::canUseSignalHandlers()
-{
-    return runtime()->canUseSignalHandlers();
 }
 
 bool
@@ -174,13 +172,7 @@ CompileRuntime::isInsideNursery(gc::Cell* cell)
 const DOMCallbacks*
 CompileRuntime::DOMcallbacks()
 {
-    return GetDOMCallbacks(runtime());
-}
-
-const MathCache*
-CompileRuntime::maybeGetMathCache()
-{
-    return runtime()->maybeGetMathCache();
+    return runtime()->DOMcallbacks;
 }
 
 const Nursery&
@@ -221,15 +213,9 @@ CompileZone::addressOfNeedsIncrementalBarrier()
 }
 
 const void*
-CompileZone::addressOfFreeListFirst(gc::AllocKind allocKind)
+CompileZone::addressOfFreeList(gc::AllocKind allocKind)
 {
-    return zone()->arenas.getFreeList(allocKind)->addressOfFirst();
-}
-
-const void*
-CompileZone::addressOfFreeListLast(gc::AllocKind allocKind)
-{
-    return zone()->arenas.getFreeList(allocKind)->addressOfLast();
+    return zone()->arenas.addressOfFreeList(allocKind);
 }
 
 JSCompartment*
@@ -263,6 +249,12 @@ CompileCompartment::addressOfEnumerators()
 }
 
 const void*
+CompileCompartment::addressOfLastCachedNativeIterator()
+{
+    return &compartment()->lastCachedNativeIterator;
+}
+
+const void*
 CompileCompartment::addressOfRandomNumberGenerator()
 {
     return compartment()->randomNumberGenerator.ptr();
@@ -274,10 +266,19 @@ CompileCompartment::jitCompartment()
     return compartment()->jitCompartment();
 }
 
-bool
-CompileCompartment::hasObjectMetadataCallback()
+const GlobalObject*
+CompileCompartment::maybeGlobal()
 {
-    return compartment()->hasObjectMetadataCallback();
+    // This uses unsafeUnbarrieredMaybeGlobal() so as not to trigger the read
+    // barrier on the global from off the main thread.  This is safe because we
+    // abort Ion compilation when we GC.
+    return compartment()->unsafeUnbarrieredMaybeGlobal();
+}
+
+bool
+CompileCompartment::hasAllocationMetadataBuilder()
+{
+    return compartment()->hasAllocationMetadataBuilder();
 }
 
 // Note: This function is thread-safe because setSingletonAsValue sets a boolean
@@ -290,7 +291,7 @@ CompileCompartment::hasObjectMetadataCallback()
 void
 CompileCompartment::setSingletonsAsValues()
 {
-    return JS::CompartmentOptionsRef(compartment()).setSingletonsAsValues();
+    compartment()->behaviors().setSingletonsAsValues();
 }
 
 JitCompileOptions::JitCompileOptions()
@@ -302,8 +303,7 @@ JitCompileOptions::JitCompileOptions()
 
 JitCompileOptions::JitCompileOptions(JSContext* cx)
 {
-    JS::CompartmentOptions& options = cx->compartment()->options();
-    cloneSingletons_ = options.cloneSingletons();
+    cloneSingletons_ = cx->compartment()->creationOptions().cloneSingletons();
     spsSlowAssertionsEnabled_ = cx->runtime()->spsProfiler.enabled() &&
                                 cx->runtime()->spsProfiler.slowAssertionsEnabled();
     offThreadCompilationAvailable_ = OffThreadCompilationAvailable(cx);

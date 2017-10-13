@@ -27,12 +27,28 @@ ArrayBufferObjectMaybeShared::dataPointerEither()
     return buf->as<SharedArrayBufferObject>().dataPointerShared();
 }
 
+inline bool
+ArrayBufferObjectMaybeShared::isDetached() const
+{
+    if (this->is<ArrayBufferObject>())
+        return this->as<ArrayBufferObject>().isDetached();
+    return false;
+}
+
 inline uint32_t
 AnyArrayBufferByteLength(const ArrayBufferObjectMaybeShared* buf)
 {
     if (buf->is<ArrayBufferObject>())
         return buf->as<ArrayBufferObject>().byteLength();
     return buf->as<SharedArrayBufferObject>().byteLength();
+}
+
+inline bool
+AnyArrayBufferIsPreparedForAsmJS(const ArrayBufferObjectMaybeShared* buf)
+{
+    if (buf->is<ArrayBufferObject>())
+        return buf->as<ArrayBufferObject>().isPreparedForAsmJS();
+    return buf->as<SharedArrayBufferObject>().isPreparedForAsmJS();
 }
 
 inline ArrayBufferObjectMaybeShared&

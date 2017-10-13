@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,6 +6,7 @@
 
 DIRS += [
     'bindings',
+    'fennec',
     'jni',
 ]
 
@@ -23,11 +24,15 @@ EXPORTS += [
     'GeneratedJNIWrappers.h',
 ]
 
+EXPORTS.mozilla.widget += [
+    'AndroidCompositorWidget.h',
+]
+
 UNIFIED_SOURCES += [
+    'AndroidAlerts.cpp',
     'AndroidBridge.cpp',
+    'AndroidCompositorWidget.cpp',
     'AndroidContentController.cpp',
-    'AndroidDirectTexture.cpp',
-    'AndroidGraphicBuffer.cpp',
     'AndroidJavaWrappers.cpp',
     'AndroidJNI.cpp',
     'AndroidJNIWrapper.cpp',
@@ -40,7 +45,6 @@ UNIFIED_SOURCES += [
     'nsClipboard.cpp',
     'nsDeviceContextAndroid.cpp',
     'nsIdleServiceAndroid.cpp',
-    'nsIMEPicker.cpp',
     'nsLookAndFeel.cpp',
     'nsPrintOptionsAndroid.cpp',
     'nsScreenManagerAndroid.cpp',
@@ -59,7 +63,11 @@ LOCAL_INCLUDES += [
     '/netwerk/base',
     '/netwerk/cache',
     '/widget',
-    '/widget/android/android',
 ]
 
+CXXFLAGS += ['-Wno-error=shadow']
+
+OS_LIBS += ['android']
+
 #DEFINES['DEBUG_WIDGETS'] = True
+

@@ -18,7 +18,6 @@
 #include "nsCOMPtr.h"
 
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 
 #if defined(__OBJC__)
 @class mozAccessible;
@@ -46,26 +45,11 @@ public: // construction, destruction
   virtual Class GetNativeType ();
 
   virtual void Shutdown () override;
-  virtual void InvalidateChildren() override;
 
   virtual bool InsertChildAt(uint32_t aIdx, Accessible* aChild) override;
   virtual bool RemoveChild(Accessible* aAccessible) override;
 
   virtual nsresult HandleAccEvent(AccEvent* aEvent) override;
-
-  /**
-   * Ignored means that the accessible might still have children, but is not
-   * displayed to the user. it also has no native accessible object represented
-   * for it.
-   */
-  bool IsIgnored();
-
-  /**
-   * Returns this accessible's all children, adhering to "flat" accessibles by 
-   * not returning their children.
-   */
-  void GetUnignoredChildren(nsTArray<Accessible*>* aChildrenArray);
-  Accessible* GetUnignoredParent() const;
 
 protected:
 

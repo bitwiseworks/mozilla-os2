@@ -4,10 +4,11 @@
 
 package org.mozilla.gecko.tests;
 
+import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertFalse;
 import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertTrue;
 
-import org.mozilla.gecko.Restrictions;
 import org.mozilla.gecko.restrictions.Restrictable;
+import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.tests.helpers.GeckoHelper;
 
 public class testRestrictions extends UITest {
@@ -16,9 +17,23 @@ public class testRestrictions extends UITest {
 
         // No restrictions should be enforced when using a normal profile
         for (Restrictable restrictable : Restrictable.values()) {
-            fAssertTrue(String.format("Restriction %s is not enforced", restrictable.name),
-                Restrictions.isAllowed(getActivity(), restrictable)
-            );
+            if (restrictable == Restrictable.BLOCK_LIST) {
+                assertFeatureDisabled(restrictable);
+            } else {
+                assertFeatureEnabled(restrictable);
+            }
         }
+    }
+
+    private void assertFeatureEnabled(Restrictable restrictable) {
+        fAssertTrue(String.format("Restrictable feature %s is enabled", restrictable.name),
+                Restrictions.isAllowed(getActivity(), restrictable)
+        );
+    }
+
+    private void assertFeatureDisabled(Restrictable restrictable) {
+        fAssertFalse(String.format("Restrictable feature %s is disabled", restrictable.name),
+                Restrictions.isAllowed(getActivity(), restrictable)
+        );
     }
 }

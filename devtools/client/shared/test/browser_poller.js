@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests the Poller class.
 
 const { Poller } = require("devtools/client/shared/poller");
@@ -31,8 +33,9 @@ add_task(function* () {
   yield poller2.off();
   let currentCount2 = count2;
 
-  poller1.on(); // Really high poll time!
-  poller3.on(); // Really high poll time!
+  // Really high poll time!
+  poller1.on();
+  poller3.on();
 
   yield waitUntil(() => count1 === 1);
   ok(true, "Poller calls fn immediately when `immediate` is true");
@@ -51,14 +54,14 @@ add_task(function* () {
   ok(!poller2.isPolling(), "isPolling() returns false for an off poller");
 });
 
-add_task(function *() {
+add_task(function* () {
   let count = -1;
   // Create a poller that returns a promise.
   // The promise is resolved asynchronously after adding 9 to the count, ensuring
   // that on every poll, we have a multiple of 10.
   let asyncPoller = new Poller(function () {
     count++;
-    ok(!(count%10), `Async poller called with a multiple of 10: ${count}`);
+    ok(!(count % 10), `Async poller called with a multiple of 10: ${count}`);
     return new Promise(function (resolve, reject) {
       let add9 = 9;
       let interval = setInterval(() => {
@@ -77,7 +80,7 @@ add_task(function *() {
   yield asyncPoller.off();
 });
 
-add_task(function *() {
+add_task(function* () {
   // Create a poller that returns a promise. This poll call
   // is called immediately, and then subsequently turned off.
   // The call to `off` should not resolve until the inflight call
@@ -96,11 +99,12 @@ add_task(function *() {
   asyncPoller.on();
 
   yield asyncPoller.off();
-  ok(inflightFinished, "off() method does not resolve until remaining inflight poll calls finish");
+  ok(inflightFinished,
+     "off() method does not resolve until remaining inflight poll calls finish");
   is(pollCalls, 1, "should only be one poll call to occur before turning off polling");
 });
 
-add_task(function *() {
+add_task(function* () {
   // Create a poller that returns a promise. This poll call
   // is called immediately, and then subsequently turned off.
   // The call to `off` should not resolve until the inflight call
@@ -119,9 +123,10 @@ add_task(function *() {
   asyncPoller.on();
 
   yield asyncPoller.destroy();
-  ok(inflightFinished, "destroy() method does not resolve until remaining inflight poll calls finish");
+  ok(inflightFinished,
+     "destroy() method does not resolve until remaining inflight poll calls finish");
   is(pollCalls, 1, "should only be one poll call to occur before destroying polling");
-  
+
   try {
     asyncPoller.on();
     ok(false, "Calling on() after destruction should throw");

@@ -17,6 +17,7 @@
 #define nsWindow_h
 
 #include "InputData.h"
+#include "mozilla/UniquePtr.h"
 #include "nsBaseWidget.h"
 #include "nsRegion.h"
 #include "nsIIdleServiceInternal.h"
@@ -46,17 +47,15 @@ public:
     static nsEventStatus DispatchKeyInput(mozilla::WidgetKeyboardEvent& aEvent);
     static void DispatchTouchInput(mozilla::MultiTouchInput& aInput);
 
-    NS_IMETHOD Create(nsIWidget* aParent,
-                      void* aNativeParent,
-                      const LayoutDeviceIntRect& aRect,
-                      nsWidgetInitData* aInitData);
-    NS_IMETHOD Destroy(void);
+    using nsBaseWidget::Create; // for Create signature not overridden here
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         void* aNativeParent,
+                                         const LayoutDeviceIntRect& aRect,
+                                         nsWidgetInitData* aInitData) override;
+    virtual void Destroy();
 
     NS_IMETHOD Show(bool aState);
     virtual bool IsVisible() const;
-    NS_IMETHOD ConstrainPosition(bool aAllowSlop,
-                                 int32_t *aX,
-                                 int32_t *aY);
     NS_IMETHOD Move(double aX,
                     double aY);
     NS_IMETHOD Resize(double aWidth,
@@ -88,19 +87,13 @@ public:
                              nsEventStatus& aStatus);
     virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                                 TouchPointerState aPointerState,
-                                                ScreenIntPoint aPointerScreenPoint,
+                                                LayoutDeviceIntPoint aPoint,
                                                 double aPointerPressure,
                                                 uint32_t aPointerOrientation,
                                                 nsIObserver* aObserver) override;
 
-    NS_IMETHOD CaptureRollupEvents(nsIRollupListener *aListener,
-                                   bool aDoCapture)
-    {
-        return NS_ERROR_NOT_IMPLEMENTED;
-    }
-    NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent);
-
-    NS_IMETHOD MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen = nullptr) /*override*/;
+    virtual nsresult MakeFullScreen(
+        bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override;
 
     virtual already_AddRefed<mozilla::gfx::DrawTarget>
         StartRemoteDrawing() override;
@@ -111,11 +104,8 @@ public:
     virtual mozilla::layers::LayerManager*
         GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                         LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                        LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                        bool* aAllowRetaining = nullptr);
+                        LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT);
     virtual void DestroyCompositor();
-
-    virtual CompositorParent* NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight);
 
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
@@ -137,25 +127,6 @@ protected:
     bool mVisible;
     InputContext mInputContext;
     nsCOMPtr<nsIIdleServiceInternal> mIdleService;
-    // If we're using a BasicCompositor, these fields are temporarily
-    // set during frame composition.  They wrap the hardware
-    // framebuffer.
-    RefPtr<mozilla::gfx::DrawTarget> mFramebufferTarget;
-    ANativeWindowBuffer* mFramebuffer;
-    /**
-     * Points to a mapped gralloc buffer between calls to lock and unlock.
-     * Should be null outside of the lock-unlock pair.
-     */
-    uint8_t* mMappedBuffer;
-    // If we're using a BasicCompositor, this is our window back
-    // buffer.  The gralloc framebuffer driver expects us to draw the
-    // entire framebuffer on every frame, but gecko expects the
-    // windowing system to be tracking buffer updates for invalidated
-    // regions.  We get stuck holding that bag.
-    //
-    // Only accessed on the compositor thread, except during
-    // destruction.
-    RefPtr<mozilla::gfx::DrawTarget> mBackBuffer;
 
     virtual ~nsWindow();
 
@@ -165,10 +136,15 @@ protected:
     // event (like a keypress or mouse click).
     void UserActivity();
 
+    bool UseExternalCompositingSurface() const override {
+      return true;
+    }
+    CompositorBridgeParent* GetCompositorBridgeParent() const;
+
 private:
     // This is used by SynthesizeNativeTouchPoint to maintain state between
     // multiple synthesized points
-    nsAutoPtr<mozilla::MultiTouchInput> mSynthesizedTouchInput;
+    mozilla::UniquePtr<mozilla::MultiTouchInput> mSynthesizedTouchInput;
 
     RefPtr<nsScreenGonk> mScreen;
 

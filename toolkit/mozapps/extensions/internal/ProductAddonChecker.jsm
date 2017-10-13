@@ -6,14 +6,49 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
+const LOCAL_EME_SOURCES = [{
+  "id": "gmp-eme-adobe",
+  "src": "chrome://global/content/gmp-sources/eme-adobe.json"
+}, {
+  "id": "gmp-gmpopenh264",
+  "src": "chrome://global/content/gmp-sources/openh264.json"
+}, {
+  "id": "gmp-widevinecdm",
+  "src": "chrome://global/content/gmp-sources/widevinecdm.json"
+}];
+
 this.EXPORTED_SYMBOLS = [ "ProductAddonChecker" ];
 
+Cu.importGlobalProperties(["XMLHttpRequest"]);
+
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/CertUtils.jsm");
+/* globals checkCert, BadCertHandler*/
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
+
+/* globals GMPPrefs */
+XPCOMUtils.defineLazyModuleGetter(this, "GMPPrefs",
+                                  "resource://gre/modules/GMPUtils.jsm");
+
+/* globals OS */
+
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
+                                  "resource://gre/modules/UpdateUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
+
+// This exists so that tests can override the XHR behaviour for downloading
+// the addon update XML file.
+var CreateXHR = function() {
+  return Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
+  createInstance(Ci.nsISupports);
+}
 
 var logger = Log.repository.getLogger("addons.productaddons");
 
@@ -72,8 +107,7 @@ function getRequestStatus(request) {
  */
 function downloadXML(url, allowNonBuiltIn = false, allowedCerts = null) {
   return new Promise((resolve, reject) => {
-    let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                  createInstance(Ci.nsISupports);
+    let request = CreateXHR();
     // This is here to let unit test code override XHR
     if (request.wrappedJSObject) {
       request = request.wrappedJSObject;
@@ -84,6 +118,11 @@ function downloadXML(url, allowNonBuiltIn = false, allowedCerts = null) {
     request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
     // Prevent the request from writing to the cache.
     request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+    // Use conservative TLS settings. See bug 1325501.
+    // TODO move to ServiceRequest.
+    if (request.channel instanceof Ci.nsIHttpChannelInternal) {
+      request.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative = true;
+    }
     request.timeout = TIMEOUT_DELAY_MS;
 
     request.overrideMimeType("text/xml");
@@ -131,13 +170,34 @@ function downloadXML(url, allowNonBuiltIn = false, allowedCerts = null) {
   });
 }
 
+function downloadJSON(uri) {
+  logger.info("fetching config from: " + uri);
+  return new Promise((resolve, reject) => {
+    let xmlHttp = new ServiceRequest({mozAnon: true});
+
+    xmlHttp.onload = function(aResponse) {
+      resolve(JSON.parse(this.responseText));
+    };
+
+    xmlHttp.onerror = function(e) {
+      reject("Fetching " + uri + " results in error code: " + e.target.status);
+    };
+
+    xmlHttp.open("GET", uri);
+    xmlHttp.overrideMimeType("application/json");
+    xmlHttp.send();
+  });
+}
+
+
 /**
  * Parses a list of add-ons from a DOM document.
  *
  * @param  document
  *         The DOM document to parse.
- * @return null if there is no <addons> element otherwise an array of the addons
- *         listed.
+ * @return null if there is no <addons> element otherwise an object containing
+ *         an array of the addons listed and a field notifying whether the
+ *         fallback was used.
  */
 function parseXML(document) {
   // Check that the root element is correct
@@ -167,11 +227,71 @@ function parseXML(document) {
     results.push(addon);
   }
 
-  return results;
+  return {
+    usedFallback: false,
+    gmpAddons: results
+  };
 }
 
 /**
- * Downloads file from a URL using the incremental file downloader.
+ * If downloading from the network fails (AUS server is down),
+ * load the sources from local build configuration.
+ */
+function downloadLocalConfig() {
+
+  if (!GMPPrefs.get(GMPPrefs.KEY_UPDATE_ENABLED, true)) {
+    logger.info("Updates are disabled via media.gmp-manager.updateEnabled");
+    return Promise.resolve({usedFallback: true, gmpAddons: []});
+  }
+
+  return Promise.all(LOCAL_EME_SOURCES.map(conf => {
+    return downloadJSON(conf.src).then(addons => {
+
+      let platforms = addons.vendors[conf.id].platforms;
+      let target = Services.appinfo.OS + "_" + UpdateUtils.ABI;
+      let details = null;
+
+      while (!details) {
+        if (!(target in platforms)) {
+          // There was no matching platform so return false, this addon
+          // will be filtered from the results below
+          logger.info("no details found for: " + target);
+          return false;
+        }
+        // Field either has the details of the binary or is an alias
+        // to another build target key that does
+        if (platforms[target].alias) {
+          target = platforms[target].alias;
+        } else {
+          details = platforms[target];
+        }
+      }
+
+      logger.info("found plugin: " + conf.id);
+      return {
+        "id": conf.id,
+        "URL": details.fileUrl,
+        "hashFunction": addons.hashFunction,
+        "hashValue": details.hashValue,
+        "version": addons.vendors[conf.id].version,
+        "size": details.filesize
+      };
+    });
+  })).then(addons => {
+
+    // Some filters may not match this platform so
+    // filter those out
+    addons = addons.filter(x => x !== false);
+
+    return {
+      usedFallback: true,
+      gmpAddons: addons
+    };
+  });
+}
+
+/**
+ * Downloads file from a URL using XHR.
  *
  * @param  url
  *         The url to download from.
@@ -180,30 +300,47 @@ function parseXML(document) {
  */
 function downloadFile(url) {
   return new Promise((resolve, reject) => {
-    let observer = {
-      onStartRequest: function() {},
-
-      onStopRequest: function(request, context, status) {
-        if (!Components.isSuccessCode(status)) {
-          logger.warn("File download failed: 0x" + status.toString(16));
-          tmpFile.remove(true);
-          reject(Components.Exception("File download failed", status));
-          return;
-        }
-
-        resolve(tmpFile.path);
+    let xhr = new XMLHttpRequest();
+    xhr.onload = function(response) {
+      logger.info("downloadXHR File download. status=" + xhr.status);
+      if (xhr.status != 200 && xhr.status != 206) {
+        reject(Components.Exception("File download failed", xhr.status));
+        return;
       }
+      Task.spawn(function* () {
+        let f = yield OS.File.openUnique(OS.Path.join(OS.Constants.Path.tmpDir, "tmpaddon"));
+        let path = f.path;
+        logger.info(`Downloaded file will be saved to ${path}`);
+        yield f.file.close();
+        yield OS.File.writeAtomic(path, new Uint8Array(xhr.response));
+        return path;
+      }).then(resolve, reject);
     };
 
-    let uri = NetUtil.newURI(url);
-    let request = Cc["@mozilla.org/network/incremental-download;1"].
-                  createInstance(Ci.nsIIncrementalDownload);
-    let tmpFile = FileUtils.getFile("TmpD", ["tmpaddon"]);
-    tmpFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
+    let fail = (event) => {
+      let request = event.target;
+      let status = getRequestStatus(request);
+      let message = "Failed downloading via XHR, status: " + status +  ", reason: " + event.type;
+      logger.warn(message);
+      let ex = new Error(message);
+      ex.status = status;
+      reject(ex);
+    };
+    xhr.addEventListener("error", fail);
+    xhr.addEventListener("abort", fail);
 
-    logger.info("Downloading from " + uri.spec + " to " + tmpFile.path);
-    request.init(uri, tmpFile, DOWNLOAD_CHUNK_BYTES_SIZE, DOWNLOAD_INTERVAL);
-    request.start(observer, null);
+    xhr.responseType = "arraybuffer";
+    try {
+      xhr.open("GET", url);
+      // Use conservative TLS settings. See bug 1325501.
+      // TODO move to ServiceRequest.
+      if (xhr.channel instanceof Ci.nsIHttpChannelInternal) {
+        xhr.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative = true;
+      }
+      xhr.send(null);
+    } catch (ex) {
+      reject(ex);
+    }
   });
 }
 
@@ -292,11 +429,19 @@ const ProductAddonChecker = {
    * @param  allowedCerts
    *         The list of certificate attributes to match the SSL certificate
    *         against or null to skip checks.
-   * @return a promise that resolves to the list of add-ons or rejects with a JS
+   * @return a promise that resolves to an object containing the list of add-ons
+   *         and whether the local fallback was used, or rejects with a JS
    *         exception in case of error.
    */
   getProductAddonList: function(url, allowNonBuiltIn = false, allowedCerts = null) {
-    return downloadXML(url, allowNonBuiltIn, allowedCerts).then(parseXML);
+    if (!GMPPrefs.get(GMPPrefs.KEY_UPDATE_ENABLED, true)) {
+      logger.info("Updates are disabled via media.gmp-manager.updateEnabled");
+      return Promise.resolve({usedFallback: true, gmpAddons: []});
+    }
+
+    return downloadXML(url, allowNonBuiltIn, allowedCerts)
+      .then(parseXML)
+      .catch(downloadLocalConfig);
   },
 
   /**

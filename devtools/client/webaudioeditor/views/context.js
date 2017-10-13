@@ -3,7 +3,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+/* import-globals-from ../includes.js */
+
 const { debounce } = require("sdk/lang/functional");
+const flags = require("devtools/shared/flags");
 
 // Globals for d3 stuff
 // Default properties of the graph on rerender
@@ -40,7 +43,7 @@ var ContextView = {
   /**
    * Initialization function, called when the tool is started.
    */
-  initialize: function() {
+  initialize: function () {
     this._onGraphClick = this._onGraphClick.bind(this);
     this._onThemeChange = this._onThemeChange.bind(this);
     this._onStartContext = this._onStartContext.bind(this);
@@ -57,7 +60,7 @@ var ContextView = {
   /**
    * Destruction function, called when the tool is closed.
    */
-  destroy: function() {
+  destroy: function () {
     // If the graph was rendered at all, then the handler
     // for zooming in will be set. We must remove it to prevent leaks.
     if (this._zoomBinding) {
@@ -156,7 +159,7 @@ var ContextView = {
 
     // Post-render manipulation of the nodes
     let oldDrawNodes = renderer.drawNodes();
-    renderer.drawNodes(function(graph, root) {
+    renderer.drawNodes(function (graph, root) {
       let svgNodes = oldDrawNodes(graph, root);
       svgNodes.each(function (n) {
         let node = graph.node(n);
@@ -172,7 +175,7 @@ var ContextView = {
     let oldDrawEdgePaths = renderer.drawEdgePaths();
     let defaultClasses = "edgePath enter";
 
-    renderer.drawEdgePaths(function(graph, root) {
+    renderer.drawEdgePaths(function (graph, root) {
       let svgEdges = oldDrawEdgePaths(graph, root);
       svgEdges.each(function (e) {
         let edge = graph.edge(e);
@@ -227,7 +230,7 @@ var ContextView = {
       // Fire an event upon completed rendering, with extra information
       // if in testing mode only.
       let info = {};
-      if (DevToolsUtils.testing) {
+      if (flags.testing) {
         info = gAudioNodes.getInfo();
       }
       window.emit(EVENTS.UI_GRAPH_RENDERED, info.nodes, info.edges, info.paramEdges);

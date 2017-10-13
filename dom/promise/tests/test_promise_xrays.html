@@ -14,7 +14,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1170760
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1170760">Mozilla Bug 1170760</a>
 <p id="display"></p>
 <div id="content" style="display: none">
-<iframe id="t" src="http://example.org/tests/dom/promise/tests/file_promise_xrays.html"></iframe>
+<iframe id="t" src="http://example.org/chrome/dom/promise/tests/file_promise_xrays.html"></iframe>
 </div>
 
 <pre id="test">
@@ -41,6 +41,30 @@ function testHaveXray() {
   is(exception, "Getting race", "Should have thrown the right exception");
   is(win.wrappedJSObject.setupThrew, false, "Setup should not have thrown");
   nextTest();
+}
+
+function testConstructor1() {
+  var p = new win.Promise(function(resolve, reject) { resolve(win.Promise.resolve(5)); });
+  p.then(
+    function(arg) {
+      is(arg, 5, "Content Promise constructor resolved with content promise should work");
+    },
+    function(e) {
+      ok(false, "Content Promise constructor resolved with content promise should not fail");
+    }
+  ).then(nextTest);
+}
+
+function testConstructor2() {
+  var p = new win.Promise(function(resolve, reject) { resolve(Promise.resolve(5)); });
+  p.then(
+    function(arg) {
+      is(arg, 5, "Content Promise constructor resolved with chrome promise should work");
+    },
+    function(e) {
+      ok(false, "Content Promise constructor resolved with chrome promise should not fail");
+    }
+  ).then(nextTest);
 }
 
 function testRace1() {
@@ -205,6 +229,19 @@ function testResolve3() {
   ).then(nextTest);
 }
 
+function testResolve4() {
+  var p = new win.Promise((res, rej) => {});
+  Components.utils.getJSTestingFunctions().resolvePromise(p, 42);
+  p.then(
+    function(arg) {
+      is(arg, 42, "Resolving an Xray to a promise with TestingFunctions resolvePromise should work");
+    },
+    function(e) {
+      ok(false, "Resolving an Xray to a promise with TestingFunctions resolvePromise should not fail");
+    }
+  ).then(nextTest);
+}
+
 function testReject1() {
   var p = win.Promise.reject(5);
   ok(p instanceof win.Promise, "Promise.reject should return a promise");
@@ -214,6 +251,19 @@ function testReject1() {
     },
     function(e) {
       is(e, 5, "Should get correct Promise.reject value");
+    }
+  ).then(nextTest);
+}
+
+function testReject2() {
+  var p = new win.Promise((res, rej) => {});
+  Components.utils.getJSTestingFunctions().rejectPromise(p, 42);
+  p.then(
+    function(arg) {
+      ok(false, "Rejecting an Xray to a promise with TestingFunctions rejectPromise should trigger catch handler");
+    },
+    function(e) {
+      is(e, 42, "Rejecting an Xray to a promise with TestingFunctions rejectPromise should work");
     }
   ).then(nextTest);
 }
@@ -250,7 +300,7 @@ function testThen2() {
 
 function testCatch1() {
   var p = win.Promise.reject(5);
-  ok(p instanceof win.Promise, "Promise.resolve should return a promise");
+  ok(p instanceof win.Promise, "Promise.reject should return a promise");
   var q = p.catch((x) => x*x);
   ok(q instanceof win.Promise,
      "Promise.catch should return a promise from the right global");
@@ -264,9 +314,20 @@ function testCatch1() {
   ).then(nextTest);
 }
 
+function testToStringTag1() {
+  is(win.Promise.prototype[Symbol.toStringTag], "Promise", "@@toStringTag was incorrect");
+  var p = win.Promise.resolve();
+  is(String(p), "[object Promise]", "String() result was incorrect");
+  is(p.toString(), "[object Promise]", "toString result was incorrect");
+  is(Object.prototype.toString.call(p), "[object Promise]", "second toString result was incorrect");
+  nextTest();
+}
+
 var tests = [
   testLoadComplete,
   testHaveXray,
+  testConstructor1,
+  testConstructor2,
   testRace1,
   testRace2,
   testRace3,
@@ -279,10 +340,13 @@ var tests = [
   testResolve1,
   testResolve2,
   testResolve3,
+  testResolve4,
   testReject1,
+  testReject2,
   testThen1,
   testThen2,
   testCatch1,
+  testToStringTag1,
 ];
 
 function nextTest() {

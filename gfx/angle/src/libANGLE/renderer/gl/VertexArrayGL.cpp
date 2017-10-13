@@ -17,6 +17,7 @@
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/gl/BufferGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
+#include "libANGLE/renderer/gl/renderergl_utils.h"
 #include "libANGLE/renderer/gl/StateManagerGL.h"
 
 using namespace gl;
@@ -32,10 +33,10 @@ bool AttributeNeedsStreaming(const VertexAttribute &attribute)
 
 }  // anonymous namespace
 
-VertexArrayGL::VertexArrayGL(const VertexArray::Data &data,
+VertexArrayGL::VertexArrayGL(const VertexArrayState &state,
                              const FunctionsGL *functions,
                              StateManagerGL *stateManager)
-    : VertexArrayImpl(data),
+    : VertexArrayImpl(state),
       mFunctions(functions),
       mStateManager(stateManager),
       mVertexArrayID(0),
@@ -232,7 +233,7 @@ void VertexArrayGL::computeStreamingAttributeSizes(const gl::AttributesMask &act
     ASSERT(mAttributesNeedStreaming.any());
 
     const auto &attribs = mData.getVertexAttributes();
-    for (unsigned int idx : angle::IterateBitSet(mAttributesNeedStreaming & activeAttributesMask))
+    for (auto idx : angle::IterateBitSet(mAttributesNeedStreaming & activeAttributesMask))
     {
         const auto &attrib = attribs[idx];
         ASSERT(AttributeNeedsStreaming(attrib));
@@ -288,12 +289,12 @@ gl::Error VertexArrayGL::streamAttributes(const gl::AttributesMask &activeAttrib
     size_t unmapRetryAttempts = 5;
     while (unmapResult != GL_TRUE && --unmapRetryAttempts > 0)
     {
-        uint8_t *bufferPointer = reinterpret_cast<uint8_t*>(mFunctions->mapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+        uint8_t *bufferPointer = MapBufferRangeWithFallback(mFunctions, GL_ARRAY_BUFFER, 0,
+                                                            requiredBufferSize, GL_MAP_WRITE_BIT);
         size_t curBufferOffset = bufferEmptySpace;
 
         const auto &attribs = mData.getVertexAttributes();
-        for (unsigned int idx :
-             angle::IterateBitSet(mAttributesNeedStreaming & activeAttributesMask))
+        for (auto idx : angle::IterateBitSet(mAttributesNeedStreaming & activeAttributesMask))
         {
             const auto &attrib = attribs[idx];
             ASSERT(AttributeNeedsStreaming(attrib));
@@ -334,13 +335,14 @@ gl::Error VertexArrayGL::streamAttributes(const gl::AttributesMask &activeAttrib
             {
                 ASSERT(!attrib.normalized);
                 mFunctions->vertexAttribIPointer(
-                    idx, attrib.size, attrib.type, static_cast<GLsizei>(destStride),
+                    static_cast<GLuint>(idx), attrib.size, attrib.type,
+                    static_cast<GLsizei>(destStride),
                     reinterpret_cast<const GLvoid *>(vertexStartOffset));
             }
             else
             {
                 mFunctions->vertexAttribPointer(
-                    idx, attrib.size, attrib.type, attrib.normalized,
+                    static_cast<GLuint>(idx), attrib.size, attrib.type, attrib.normalized,
                     static_cast<GLsizei>(destStride),
                     reinterpret_cast<const GLvoid *>(vertexStartOffset));
             }

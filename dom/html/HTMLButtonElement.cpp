@@ -6,7 +6,9 @@
 
 #include "mozilla/dom/HTMLButtonElement.h"
 
+#include "HTMLFormSubmissionConstants.h"
 #include "mozilla/dom/HTMLButtonElementBinding.h"
+#include "mozilla/dom/HTMLFormSubmission.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsGkAtoms.h"
@@ -14,9 +16,6 @@
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsIFormControl.h"
-#include "nsIForm.h"
-#include "nsFormSubmission.h"
-#include "nsFormSubmissionConstants.h"
 #include "nsIURL.h"
 #include "nsIFrame.h"
 #include "nsIFormControlFrame.h"
@@ -48,7 +47,7 @@ static const nsAttrValue::EnumTable kButtonTypeTable[] = {
   { "button", NS_FORM_BUTTON_BUTTON },
   { "reset", NS_FORM_BUTTON_RESET },
   { "submit", NS_FORM_BUTTON_SUBMIT },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Default type is 'submit'.
@@ -253,7 +252,7 @@ HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
       // DOMActive event should be trusted since the activation is actually
       // occurred even if the cause is an untrusted click event.
       InternalUIEvent actEvent(true, eLegacyDOMActivate, mouseEvent);
-      actEvent.detail = 1;
+      actEvent.mDetail = 1;
 
       nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
       if (shell) {
@@ -288,84 +287,14 @@ HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
           // For backwards compat, trigger buttons with space or enter
           // (bug 25300)
           WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
-          if ((keyEvent->keyCode == NS_VK_RETURN &&
+          if ((keyEvent->mKeyCode == NS_VK_RETURN &&
                eKeyPress == aVisitor.mEvent->mMessage) ||
-              (keyEvent->keyCode == NS_VK_SPACE &&
+              (keyEvent->mKeyCode == NS_VK_SPACE &&
                eKeyUp == aVisitor.mEvent->mMessage)) {
-            nsEventStatus status = nsEventStatus_eIgnore;
-
-            WidgetMouseEvent event(aVisitor.mEvent->mFlags.mIsTrusted,
-                                   eMouseClick, nullptr,
-                                   WidgetMouseEvent::eReal);
-            event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD;
-            EventDispatcher::Dispatch(static_cast<nsIContent*>(this),
-                                      aVisitor.mPresContext, &event, nullptr,
-                                      &status);
+            DispatchSimulatedClick(this, aVisitor.mEvent->IsTrusted(),
+                                   aVisitor.mPresContext);
             aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
           }
-        }
-        break;
-
-      case eMouseDown:
-        {
-          WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
-          if (mouseEvent->button == WidgetMouseEvent::eLeftButton) {
-            if (mouseEvent->mFlags.mIsTrusted) {
-              EventStateManager* esm =
-                aVisitor.mPresContext->EventStateManager();
-              EventStateManager::SetActiveManager(
-                static_cast<EventStateManager*>(esm), this);
-            }
-            nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-            if (fm) {
-              uint32_t flags = nsIFocusManager::FLAG_BYMOUSE |
-                               nsIFocusManager::FLAG_NOSCROLL;
-              // If this was a touch-generated event, pass that information:
-              if (mouseEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
-                flags |= nsIFocusManager::FLAG_BYTOUCH;
-              }
-              fm->SetFocus(this, flags);
-            }
-            mouseEvent->mFlags.mMultipleActionsPrevented = true;
-          } else if (mouseEvent->button == WidgetMouseEvent::eMiddleButton ||
-                     mouseEvent->button == WidgetMouseEvent::eRightButton) {
-            // cancel all of these events for buttons
-            //XXXsmaug What to do with these events? Why these should be cancelled?
-            if (aVisitor.mDOMEvent) {
-              aVisitor.mDOMEvent->StopPropagation();
-            }
-          }
-        }
-        break;
-
-      // cancel all of these events for buttons
-      //XXXsmaug What to do with these events? Why these should be cancelled?
-      case eMouseUp:
-      case eMouseDoubleClick:
-        {
-          WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
-          if (aVisitor.mDOMEvent &&
-              (mouseEvent->button == WidgetMouseEvent::eMiddleButton ||
-               mouseEvent->button == WidgetMouseEvent::eRightButton)) {
-            aVisitor.mDOMEvent->StopPropagation();
-          }
-        }
-        break;
-
-      case eMouseOver:
-        {
-          aVisitor.mPresContext->EventStateManager()->
-            SetContentState(this, NS_EVENT_STATE_HOVER);
-          aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
-        }
-        break;
-
-        // XXX this doesn't seem to do anything yet
-      case eMouseOut:
-        {
-          aVisitor.mPresContext->EventStateManager()->
-            SetContentState(nullptr, NS_EVENT_STATE_HOVER);
-          aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
         }
         break;
 
@@ -377,7 +306,7 @@ HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
                     mType == NS_FORM_BUTTON_RESET)) {
         InternalFormEvent event(true,
           (mType == NS_FORM_BUTTON_RESET) ? eFormReset : eFormSubmit);
-        event.originator     = this;
+        event.mOriginator = this;
         nsEventStatus status = nsEventStatus_eIgnore;
 
         nsCOMPtr<nsIPresShell> presShell =
@@ -389,11 +318,7 @@ HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
         // Using presShell to dispatch the event. It makes sure that
         // event is not handled if the window is being destroyed.
         if (presShell && (event.mMessage != eFormSubmit ||
-                          mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate) ||
-                          // We know the element is a submit control, if this check is moved,
-                          // make sure formnovalidate is used only if it's a submit control.
-                          HasAttr(kNameSpaceID_None, nsGkAtoms::formnovalidate) ||
-                          mForm->CheckValidFormSubmission())) {
+                          mForm->SubmissionCanProceed(this))) {
           // TODO: removing this code and have the submit event sent by the form
           // see bug 592124.
           // Hold a strong ref while dispatching
@@ -447,7 +372,7 @@ HTMLButtonElement::Reset()
 }
 
 NS_IMETHODIMP
-HTMLButtonElement::SubmitNamesValues(nsFormSubmission* aFormSubmission)
+HTMLButtonElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
 {
   //
   // We only submit if we were the button pressed

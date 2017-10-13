@@ -7,28 +7,97 @@
 #if !defined(PlatformDecoderModule_h_)
 #define PlatformDecoderModule_h_
 
-#include "FlushableTaskQueue.h"
 #include "MediaDecoderReader.h"
+#include "MediaInfo.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/layers/LayersTypes.h"
+#include "mozilla/layers/KnowsCompositor.h"
 #include "nsTArray.h"
 #include "mozilla/RefPtr.h"
+#include "GMPService.h"
 #include <queue>
+#include "MediaResult.h"
 
 namespace mozilla {
 class TrackInfo;
 class AudioInfo;
 class VideoInfo;
 class MediaRawData;
+class DecoderDoctorDiagnostics;
 
 namespace layers {
 class ImageContainer;
 } // namespace layers
 
+namespace dom {
+class RemoteDecoderModule;
+}
+
 class MediaDataDecoder;
 class MediaDataDecoderCallback;
-class FlushableTaskQueue;
+class TaskQueue;
 class CDMProxy;
+
+static LazyLogModule sPDMLog("PlatformDecoderModule");
+
+struct MOZ_STACK_CLASS CreateDecoderParams final {
+  explicit CreateDecoderParams(const TrackInfo& aConfig)
+    : mConfig(aConfig)
+  {}
+
+  template <typename T1, typename... Ts>
+  CreateDecoderParams(const TrackInfo& aConfig, T1&& a1, Ts&&... args)
+    : mConfig(aConfig)
+  {
+    Set(mozilla::Forward<T1>(a1), mozilla::Forward<Ts>(args)...);
+  }
+
+  const VideoInfo& VideoConfig() const
+  {
+    MOZ_ASSERT(mConfig.IsVideo());
+    return *mConfig.GetAsVideoInfo();
+  }
+
+  const AudioInfo& AudioConfig() const
+  {
+    MOZ_ASSERT(mConfig.IsAudio());
+    return *mConfig.GetAsAudioInfo();
+  }
+
+  layers::LayersBackend GetLayersBackend() const
+  {
+    if (mKnowsCompositor) {
+      return mKnowsCompositor->GetCompositorBackendType();
+    }
+    return layers::LayersBackend::LAYERS_NONE;
+  }
+
+  const TrackInfo& mConfig;
+  TaskQueue* mTaskQueue = nullptr;
+  MediaDataDecoderCallback* mCallback = nullptr;
+  DecoderDoctorDiagnostics* mDiagnostics = nullptr;
+  layers::ImageContainer* mImageContainer = nullptr;
+  MediaResult* mError = nullptr;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
+  RefPtr<GMPCrashHelper> mCrashHelper;
+  bool mUseBlankDecoder = false;
+
+private:
+  void Set(TaskQueue* aTaskQueue) { mTaskQueue = aTaskQueue; }
+  void Set(MediaDataDecoderCallback* aCallback) { mCallback = aCallback; }
+  void Set(DecoderDoctorDiagnostics* aDiagnostics) { mDiagnostics = aDiagnostics; }
+  void Set(layers::ImageContainer* aImageContainer) { mImageContainer = aImageContainer; }
+  void Set(MediaResult* aError) { mError = aError; }
+  void Set(GMPCrashHelper* aCrashHelper) { mCrashHelper = aCrashHelper; }
+  void Set(bool aUseBlankDecoder) { mUseBlankDecoder = aUseBlankDecoder; }
+  void Set(layers::KnowsCompositor* aKnowsCompositor) { mKnowsCompositor = aKnowsCompositor; }
+  template <typename T1, typename T2, typename... Ts>
+  void Set(T1&& a1, T2&& a2, Ts&&... args)
+  {
+    Set(mozilla::Forward<T1>(a1));
+    Set(mozilla::Forward<T2>(a2), mozilla::Forward<Ts>(args)...);
+  }
+};
 
 // The PlatformDecoderModule interface is used by the MediaFormatReader to
 // abstract access to decoders provided by various
@@ -53,9 +122,17 @@ public:
   virtual nsresult Startup() { return NS_OK; };
 
   // Indicates if the PlatformDecoderModule supports decoding of aMimeType.
-  virtual bool SupportsMimeType(const nsACString& aMimeType) const = 0;
+  virtual bool SupportsMimeType(const nsACString& aMimeType,
+                                DecoderDoctorDiagnostics* aDiagnostics) const = 0;
+  virtual bool Supports(const TrackInfo& aTrackInfo,
+                        DecoderDoctorDiagnostics* aDiagnostics) const
+  {
+    // By default, fall back to SupportsMimeType with just the MIME string.
+    // (So PDMs do not need to override this method -- yet.)
+    return SupportsMimeType(aTrackInfo.mMimeType, aDiagnostics);
+  }
 
-  enum ConversionRequired {
+  enum class ConversionRequired : uint8_t {
     kNeedNone,
     kNeedAVCC,
     kNeedAnnexB,
@@ -72,6 +149,7 @@ protected:
 
   friend class H264Converter;
   friend class PDMFactory;
+  friend class dom::RemoteDecoderModule;
 
   // Creates a Video decoder. The layers backend is passed in so that
   // decoders can determine whether hardware accelerated decoding can be used.
@@ -85,11 +163,7 @@ protected:
   // It is safe to store a reference to aConfig.
   // This is called on the decode task queue.
   virtual already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) = 0;
+  CreateVideoDecoder(const CreateDecoderParams& aParams) = 0;
 
   // Creates an Audio decoder with the specified properties.
   // Asynchronous decoding of audio should be done in runnables dispatched to
@@ -102,9 +176,7 @@ protected:
   // It is safe to store a reference to aConfig.
   // This is called on the decode task queue.
   virtual already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) = 0;
+  CreateAudioDecoder(const CreateDecoderParams& aParams) = 0;
 };
 
 // A callback used by MediaDataDecoder to return output/errors to the
@@ -119,17 +191,26 @@ public:
 
   // Denotes an error in the decoding process. The reader will stop calling
   // the decoder.
-  virtual void Error() = 0;
+  virtual void Error(const MediaResult& aError) = 0;
 
   // Denotes that the last input sample has been inserted into the decoder,
   // and no more output can be produced unless more input is sent.
+  // A frame decoding session is completed once InputExhausted has been called.
+  // MediaDataDecoder::Input will not be called again until InputExhausted has
+  // been called.
   virtual void InputExhausted() = 0;
 
   virtual void DrainComplete() = 0;
 
-  virtual void ReleaseMediaResources() {};
+  virtual void ReleaseMediaResources() {}
 
   virtual bool OnReaderTaskQueue() = 0;
+
+  // Denotes that a pending encryption key is preventing more input being fed
+  // into the decoder. This only needs to be overridden for callbacks that
+  // handle encryption. E.g. benchmarking does not use eme, so this need
+  // not be overridden in that case.
+  virtual void WaitingForKey() {}
 };
 
 // MediaDataDecoder is the interface exposed by decoders created by the
@@ -149,18 +230,17 @@ public:
 // TaskQueue passed into the PlatformDecoderModules's Create*Decoder()
 // function. This may not be necessary for platforms with async APIs
 // for decoding.
+//
+// If an error occurs at any point after the Init promise has been
+// completed, then Error() must be called on the associated
+// MediaDataDecoderCallback.
 class MediaDataDecoder {
 protected:
   virtual ~MediaDataDecoder() {};
 
 public:
-  enum DecoderFailureReason {
-    INIT_ERROR,
-    CANCELED
-  };
-
   typedef TrackInfo::TrackType TrackType;
-  typedef MozPromise<TrackType, DecoderFailureReason, /* IsExclusive = */ true> InitPromise;
+  typedef MozPromise<TrackType, MediaResult, /* IsExclusive = */ true> InitPromise;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDataDecoder)
 
@@ -174,7 +254,7 @@ public:
   virtual RefPtr<InitPromise> Init() = 0;
 
   // Inserts a sample into the decoder's decode pipeline.
-  virtual nsresult Input(MediaRawData* aSample) = 0;
+  virtual void Input(MediaRawData* aSample) = 0;
 
   // Causes all samples in the decoding pipeline to be discarded. When
   // this function returns, the decoder must be ready to accept new input
@@ -183,7 +263,7 @@ public:
   // While the reader calls Flush(), it ignores all output sent to it;
   // it is safe (but pointless) to send output while Flush is called.
   // The MediaFormatReader will not call Input() while it's calling Flush().
-  virtual nsresult Flush() = 0;
+  virtual void Flush() = 0;
 
   // Causes all complete samples in the pipeline that can be decoded to be
   // output. If the decoder can't produce samples from the current output,
@@ -194,7 +274,7 @@ public:
   // This function is asynchronous. The MediaDataDecoder must call
   // MediaDataDecoderCallback::DrainComplete() once all remaining
   // samples have been output.
-  virtual nsresult Drain() = 0;
+  virtual void Drain() = 0;
 
   // Cancels all init/input/drain operations, and shuts down the
   // decoder. The platform decoder should clean up any resources it's using
@@ -203,23 +283,25 @@ public:
   // The reader will delete the decoder once Shutdown() returns.
   // The MediaDataDecoderCallback *must* not be called after Shutdown() has
   // returned.
-  virtual nsresult Shutdown() = 0;
+  virtual void Shutdown() = 0;
 
   // Called from the state machine task queue or main thread.
   // Decoder needs to decide whether or not hardware accelearation is supported
   // after creating. It doesn't need to call Init() before calling this function.
   virtual bool IsHardwareAccelerated(nsACString& aFailureReason) const { return false; }
 
-  // ConfigurationChanged will be called to inform the video or audio decoder
-  // that the format of the next input sample is about to change.
-  // If video decoder, aConfig will be a VideoInfo object.
-  // If audio decoder, aConfig will be a AudioInfo object.
-  // It is not safe to store a reference to this object and the decoder must
-  // make a copy.
-  virtual nsresult ConfigurationChanged(const TrackInfo& aConfig)
-  {
-    return NS_OK;
-  }
+  // Return the name of the MediaDataDecoder, only used for decoding.
+  // Only return a static const string, as the information may be accessed
+  // in a non thread-safe fashion.
+  virtual const char* GetDescriptionName() const = 0;
+
+  // Set a hint of seek target time to decoder. Decoder will drop any decoded
+  // data which pts is smaller than this value. This threshold needs to be clear
+  // after reset decoder.
+  // Decoder may not honor this value. However, it'd be better that
+  // video decoder implements this API to improve seek performance.
+  // Note: it should be called before Input() or after Flush().
+  virtual void SetSeekThreshold(const media::TimeUnit& aTime) {}
 };
 
 } // namespace mozilla

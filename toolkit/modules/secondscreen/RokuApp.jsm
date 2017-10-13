@@ -13,7 +13,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
 function log(msg) {
-  //Services.console.logStringMessage(msg);
+  // Services.console.logStringMessage(msg);
 }
 
 const PROTOCOL_VERSION = 1;
@@ -25,7 +25,7 @@ const PROTOCOL_VERSION = 1;
 function RokuApp(service) {
   this.service = service;
   this.resourceURL = this.service.location;
-  this.app = AppConstants.RELEASE_BUILD ? "Firefox" : "Firefox Nightly";
+  this.app = AppConstants.RELEASE_OR_BETA ? "Firefox" : "Firefox Nightly";
   this.mediaAppID = -1;
 }
 
@@ -130,10 +130,8 @@ RokuApp.prototype = {
       if (callback) {
         callback(new RemoteMedia(this.resourceURL, listener));
       }
-    } else {
-      if (callback) {
-        callback();
-      }
+    } else if (callback) {
+      callback();
     }
   }
 }
@@ -146,7 +144,7 @@ function RemoteMedia(url, listener) {
   this._listener = listener;
   this._status = "uninitialized";
 
-  let serverURI = Services.io.newURI(this._url , null, null);
+  let serverURI = Services.io.newURI(this._url, null, null);
   this._socket = Cc["@mozilla.org/network/socket-transport-service;1"].getService(Ci.nsISocketTransportService).createTransport(null, 0, serverURI.host, 9191, null);
   this._outputStream = this._socket.openOutputStream(0, 0, 0);
 

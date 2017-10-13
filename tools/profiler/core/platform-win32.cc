@@ -12,7 +12,7 @@
 //  * Neither the name of Google, Inc. nor the names of its contributors
 //    may be used to endorse or promote products derived from this
 //    software without specific prior written permission.
-// 
+//
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 // "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 // LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
@@ -36,6 +36,9 @@
 
 // Memory profile
 #include "nsMemoryReporterManager.h"
+
+#include "mozilla/StackWalk_windows.h"
+
 
 class PlatformData {
  public:
@@ -85,8 +88,8 @@ class SamplerThread : public Thread {
  public:
   SamplerThread(double interval, Sampler* sampler)
       : Thread("SamplerThread")
-      , interval_(interval)
       , sampler_(sampler)
+      , interval_(interval)
   {
     interval_ = floor(interval + 0.5);
     if (interval_ <= 0) {
@@ -101,7 +104,7 @@ class SamplerThread : public Thread {
     } else {
       ASSERT(instance_->interval_ == sampler->interval());
     }
-  } 
+  }
 
   static void StopSampler() {
     instance_->Join();
@@ -188,26 +191,58 @@ class SamplerThread : public Thread {
     if (SuspendThread(profiled_thread) == kSuspendFailed)
       return;
 
-    // CONTEXT_CONTROL is faster but we can't use it on 64-bit because it
-    // causes crashes in RtlVirtualUnwind (see bug 1120126).
+    // SuspendThread is asynchronous, so the thread may still be running.
+    // Call GetThreadContext first to ensure the thread is really suspended.
+    // See https://blogs.msdn.microsoft.com/oldnewthing/20150205-00/?p=44743.
+
+    // Using only CONTEXT_CONTROL is faster but on 64-bit it causes crashes in
+    // RtlVirtualUnwind (see bug 1120126) so we set all the flags.
 #if V8_HOST_ARCH_X64
     context.ContextFlags = CONTEXT_FULL;
 #else
     context.ContextFlags = CONTEXT_CONTROL;
 #endif
-    if (GetThreadContext(profiled_thread, &context) != 0) {
-#if V8_HOST_ARCH_X64
-      sample->pc = reinterpret_cast<Address>(context.Rip);
-      sample->sp = reinterpret_cast<Address>(context.Rsp);
-      sample->fp = reinterpret_cast<Address>(context.Rbp);
-#else
-      sample->pc = reinterpret_cast<Address>(context.Eip);
-      sample->sp = reinterpret_cast<Address>(context.Esp);
-      sample->fp = reinterpret_cast<Address>(context.Ebp);
-#endif
-      sample->context = &context;
-      sampler->Tick(sample);
+    if (!GetThreadContext(profiled_thread, &context)) {
+      ResumeThread(profiled_thread);
+      return;
     }
+
+    // Threads that may invoke JS require extra attention. Since, on windows,
+    // the jits also need to modify the same dynamic function table that we need
+    // to get a stack trace, we have to be wary of that to avoid deadlock.
+    //
+    // When embedded in Gecko, for threads that aren't the main thread,
+    // CanInvokeJS consults an unlocked value in the nsIThread, so we must
+    // consult this after suspending the profiled thread to avoid racing
+    // against a value change.
+    if (thread_profile->CanInvokeJS()) {
+      if (!TryAcquireStackWalkWorkaroundLock()) {
+        ResumeThread(profiled_thread);
+        return;
+      }
+
+      // It is safe to immediately drop the lock. We only need to contend with
+      // the case in which the profiled thread held needed system resources.
+      // If the profiled thread had held those resources, the trylock would have
+      // failed. Anyone else who grabs those resources will continue to make
+      // progress, since those threads are not suspended. Because of this,
+      // we cannot deadlock with them, and should let them run as they please.
+      ReleaseStackWalkWorkaroundLock();
+    }
+
+#if V8_HOST_ARCH_X64
+    sample->pc = reinterpret_cast<Address>(context.Rip);
+    sample->sp = reinterpret_cast<Address>(context.Rsp);
+    sample->fp = reinterpret_cast<Address>(context.Rbp);
+#else
+    sample->pc = reinterpret_cast<Address>(context.Eip);
+    sample->sp = reinterpret_cast<Address>(context.Esp);
+    sample->fp = reinterpret_cast<Address>(context.Ebp);
+#endif
+
+    sample->context = &context;
+    sampler->Tick(sample);
+
     ResumeThread(profiled_thread);
   }
 

@@ -349,9 +349,7 @@ imgRequestProxy::CancelAndForgetObserver(nsresult aStatus)
   mIsInLoadGroup = oldIsInLoadGroup;
 
   if (mIsInLoadGroup) {
-    nsCOMPtr<nsIRunnable> ev =
-      NS_NewRunnableMethod(this, &imgRequestProxy::DoRemoveFromLoadGroup);
-    NS_DispatchToCurrentThread(ev);
+    NS_DispatchToCurrentThread(NewRunnableMethod(this, &imgRequestProxy::DoRemoveFromLoadGroup));
   }
 
   NullOutListener();
@@ -670,7 +668,8 @@ imgRequestProxy::GetImagePrincipal(nsIPrincipal** aPrincipal)
     return NS_ERROR_FAILURE;
   }
 
-  NS_ADDREF(*aPrincipal = GetOwner()->GetPrincipal());
+  nsCOMPtr<nsIPrincipal> principal = GetOwner()->GetPrincipal();
+  principal.forget(aPrincipal);
   return NS_OK;
 }
 
@@ -808,8 +807,8 @@ imgRequestProxy::OnLoadComplete(bool aLastPart)
 
   if (mListener && !mCanceled) {
     // Hold a ref to the listener while we call it, just in case.
-    nsCOMPtr<imgINotificationObserver> kungFuDeathGrip(mListener);
-    kungFuDeathGrip->Notify(this, imgINotificationObserver::LOAD_COMPLETE, nullptr);
+    nsCOMPtr<imgINotificationObserver> listener(mListener);
+    listener->Notify(this, imgINotificationObserver::LOAD_COMPLETE, nullptr);
   }
 
   // If we're expecting more data from a multipart channel, re-add ourself

@@ -12,6 +12,8 @@
 #include "SkReadBuffer.h"
 #include "SkWriteBuffer.h"
 
+class GrFragmentProcessor;
+
 class SkLocalMatrixShader : public SkShader {
 public:
     SkLocalMatrixShader(SkShader* proxy, const SkMatrix& localMatrix)
@@ -19,41 +21,15 @@ public:
     , fProxyShader(SkRef(proxy))
     {}
 
-    virtual size_t contextSize() const SK_OVERRIDE {
-        return fProxyShader->contextSize();
-    }
-
-    virtual BitmapType asABitmap(SkBitmap* bitmap, SkMatrix* matrix,
-                                 TileMode* mode) const SK_OVERRIDE {
-        return fProxyShader->asABitmap(bitmap, matrix, mode);
-    }
-
-    virtual GradientType asAGradient(GradientInfo* info) const SK_OVERRIDE {
+    GradientType asAGradient(GradientInfo* info) const override {
         return fProxyShader->asAGradient(info);
     }
 
 #if SK_SUPPORT_GPU
-    
-    virtual bool asNewEffect(GrContext* context, const SkPaint& paint, const SkMatrix* localMatrix,
-                             GrColor* grColor, GrEffect** grEffect) const SK_OVERRIDE {
-        SkMatrix tmp = this->getLocalMatrix();
-        if (localMatrix) {
-            tmp.preConcat(*localMatrix);
-        }
-        return fProxyShader->asNewEffect(context, paint, &tmp, grColor, grEffect);
-    }
-    
-#else 
-    
-    virtual bool asNewEffect(GrContext* context, const SkPaint& paint, const SkMatrix* localMatrix,
-                             GrColor* grColor, GrEffect** grEffect) const SK_OVERRIDE {
-        SkDEBUGFAIL("Should not call in GPU-less build");
-        return false;
-    }
-    
+    sk_sp<GrFragmentProcessor> asFragmentProcessor(const AsFPArgs&) const override;
 #endif
-    
-    virtual SkShader* refAsALocalMatrixShader(SkMatrix* localMatrix) const SK_OVERRIDE {
+
+    SkShader* refAsALocalMatrixShader(SkMatrix* localMatrix) const override {
         if (localMatrix) {
             *localMatrix = this->getLocalMatrix();
         }
@@ -64,9 +40,22 @@ public:
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkLocalMatrixShader)
 
 protected:
-    SkLocalMatrixShader(SkReadBuffer&);
-    virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
-    virtual Context* onCreateContext(const ContextRec&, void*) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer&) const override;
+    Context* onCreateContext(const ContextRec&, void*) const override;
+
+    size_t onContextSize(const ContextRec& rec) const override {
+        return fProxyShader->contextSize(rec);
+    }
+
+    SkImage* onIsAImage(SkMatrix* matrix, TileMode* mode) const override {
+        return fProxyShader->isAImage(matrix, mode);
+    }
+
+#ifdef SK_SUPPORT_LEGACY_SHADER_ISABITMAP
+    bool onIsABitmap(SkBitmap* bitmap, SkMatrix* matrix, TileMode* mode) const override {
+        return fProxyShader->isABitmap(bitmap, matrix, mode);
+    }
+#endif
 
 private:
     SkAutoTUnref<SkShader> fProxyShader;

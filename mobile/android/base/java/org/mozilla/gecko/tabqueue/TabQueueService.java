@@ -11,18 +11,25 @@ import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
-import org.mozilla.gecko.mozglue.ContextUtils;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 
+import android.annotation.TargetApi;
+import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.PixelFormat;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.provider.Settings;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.app.NotificationManagerCompat;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
@@ -32,7 +39,9 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
+import org.mozilla.gecko.mozglue.SafeIntent;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -122,7 +131,7 @@ public class TabQueueService extends Service {
 
             final String lastUrl = sharedPreferences.getString(GeckoPreferences.PREFS_TAB_QUEUE_LAST_SITE, "");
 
-            final ContextUtils.SafeIntent safeIntent = new ContextUtils.SafeIntent(intent);
+            final SafeIntent safeIntent = new SafeIntent(intent);
             final String intentUrl = safeIntent.getDataString();
 
             final long lastRunTime = sharedPreferences.getLong(GeckoPreferences.PREFS_TAB_QUEUE_LAST_TIME, 0);
@@ -168,8 +177,9 @@ public class TabQueueService extends Service {
         } else {
             try {
                 windowManager.addView(toastLayout, toastLayoutParams);
-            } catch (final SecurityException e) {
+            } catch (final SecurityException | WindowManager.BadTokenException e) {
                 Toast.makeText(this, getText(R.string.tab_queue_toast_message), Toast.LENGTH_SHORT).show();
+                showSettingsNotification();
             }
         }
 
@@ -221,6 +231,36 @@ public class TabQueueService extends Service {
 
     }
 
+    @TargetApi(Build.VERSION_CODES.M)
+    private void showSettingsNotification() {
+        if (AppConstants.Versions.preMarshmallow) {
+            return;
+        }
+
+        final Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, intent.hashCode(), intent, 0);
+
+        final String text = getString(R.string.tab_queue_notification_settings);
+
+        final NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle()
+                .bigText(text);
+
+        final Notification notification = new NotificationCompat.Builder(this)
+                .setContentTitle(getString(R.string.pref_tab_queue_title))
+                .setContentText(text)
+                .setCategory(NotificationCompat.CATEGORY_ERROR)
+                .setStyle(style)
+                .setSmallIcon(R.drawable.ic_status_logo)
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setAutoCancel(true)
+                .addAction(R.drawable.ic_action_settings, getString(R.string.tab_queue_prompt_settings_button), pendingIntent)
+                .build();
+
+        NotificationManagerCompat.from(this).notify(R.id.tabQueueSettingsNotification, notification);
+    }
+
     private void removeView() {
         try {
             windowManager.removeView(toastLayout);
@@ -237,7 +277,7 @@ public class TabQueueService extends Service {
             Log.w(LOGTAG, "Error adding URL to tab queue - invalid intent passed in.");
             return;
         }
-        final ContextUtils.SafeIntent safeIntent = new ContextUtils.SafeIntent(intent);
+        final SafeIntent safeIntent = new SafeIntent(intent);
         final String intentData = safeIntent.getDataString();
 
         // As we're doing disk IO, let's run this stuff in a separate thread.
@@ -247,7 +287,9 @@ public class TabQueueService extends Service {
                 Context applicationContext = getApplicationContext();
                 final GeckoProfile profile = GeckoProfile.get(applicationContext);
                 int tabsQueued = TabQueueHelper.queueURL(profile, intentData, filename);
-                TabQueueHelper.showNotification(applicationContext, tabsQueued);
+                List<String> urls = TabQueueHelper.getLastURLs(applicationContext, filename);
+
+                TabQueueHelper.showNotification(applicationContext, tabsQueued, urls);
 
                 // Store the number of URLs queued so that we don't have to read and process the file to see if we have
                 // any urls to open.

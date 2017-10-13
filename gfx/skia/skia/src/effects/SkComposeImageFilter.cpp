@@ -5,54 +5,88 @@
  * found in the LICENSE file.
  */
 
-#include "SkBitmap.h"
 #include "SkComposeImageFilter.h"
+
 #include "SkReadBuffer.h"
+#include "SkSpecialImage.h"
 #include "SkWriteBuffer.h"
 
-SkComposeImageFilter::~SkComposeImageFilter() {
+sk_sp<SkImageFilter> SkComposeImageFilter::Make(sk_sp<SkImageFilter> outer,
+                                                sk_sp<SkImageFilter> inner) {
+    if (!outer) {
+        return inner;
+    }
+    if (!inner) {
+        return outer;
+    }
+    sk_sp<SkImageFilter> inputs[2] = { std::move(outer), std::move(inner) };
+    return sk_sp<SkImageFilter>(new SkComposeImageFilter(inputs));
 }
 
-bool SkComposeImageFilter::onFilterImage(Proxy* proxy,
-                                         const SkBitmap& src,
-                                         const Context& ctx,
-                                         SkBitmap* result,
-                                         SkIPoint* offset) const {
+SkRect SkComposeImageFilter::computeFastBounds(const SkRect& src) const {
+    SkImageFilter* outer = this->getInput(0);
+    SkImageFilter* inner = this->getInput(1);
+
+    return outer->computeFastBounds(inner->computeFastBounds(src));
+}
+
+sk_sp<SkSpecialImage> SkComposeImageFilter::onFilterImage(SkSpecialImage* source,
+                                                          const Context& ctx,
+                                                          SkIPoint* offset) const {
+    // The bounds passed to the inner filter must be filtered by the outer
+    // filter, so that the inner filter produces the pixels that the outer
+    // filter requires as input. This matters if the outer filter moves pixels.
+    SkIRect innerClipBounds;
+    innerClipBounds = this->getInput(0)->filterBounds(ctx.clipBounds(), ctx.ctm());
+    Context innerContext(ctx.ctm(), innerClipBounds, ctx.cache(), ctx.outputProperties());
+    SkIPoint innerOffset = SkIPoint::Make(0, 0);
+    sk_sp<SkSpecialImage> inner(this->filterInput(1, source, innerContext, &innerOffset));
+    if (!inner) {
+        return nullptr;
+    }
+
+    SkMatrix outerMatrix(ctx.ctm());
+    outerMatrix.postTranslate(SkIntToScalar(-innerOffset.x()), SkIntToScalar(-innerOffset.y()));
+    SkIRect clipBounds = ctx.clipBounds();
+    clipBounds.offset(-innerOffset.x(), -innerOffset.y());
+    Context outerContext(outerMatrix, clipBounds, ctx.cache(), ctx.outputProperties());
+
+    SkIPoint outerOffset = SkIPoint::Make(0, 0);
+    sk_sp<SkSpecialImage> outer(this->filterInput(0, inner.get(), outerContext, &outerOffset));
+    if (!outer) {
+        return nullptr;
+    }
+
+    *offset = innerOffset + outerOffset;
+    return outer;
+}
+
+SkIRect SkComposeImageFilter::onFilterBounds(const SkIRect& src, const SkMatrix& ctm,
+                                             MapDirection direction) const {
+    SkImageFilter* outer = this->getInput(0);
+    SkImageFilter* inner = this->getInput(1);
+
+    return outer->filterBounds(inner->filterBounds(src, ctm, direction), ctm, direction);
+}
+
+sk_sp<SkFlattenable> SkComposeImageFilter::CreateProc(SkReadBuffer& buffer) {
+    SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 2);
+    return SkComposeImageFilter::Make(common.getInput(0), common.getInput(1));
+}
+
+#ifndef SK_IGNORE_TO_STRING
+void SkComposeImageFilter::toString(SkString* str) const {
     SkImageFilter* outer = getInput(0);
     SkImageFilter* inner = getInput(1);
 
-    if (!outer && !inner) {
-        return false;
-    }
+    str->appendf("SkComposeImageFilter: (");
 
-    if (!outer || !inner) {
-        return (outer ? outer : inner)->filterImage(proxy, src, ctx, result, offset);
-    }
+    str->appendf("outer: ");
+    outer->toString(str);
 
-    SkBitmap tmp;
-    return inner->filterImage(proxy, src, ctx, &tmp, offset) &&
-           outer->filterImage(proxy, tmp, ctx, result, offset);
+    str->appendf("inner: ");
+    inner->toString(str);
+
+    str->appendf(")");
 }
-
-bool SkComposeImageFilter::onFilterBounds(const SkIRect& src,
-                                          const SkMatrix& ctm,
-                                          SkIRect* dst) const {
-    SkImageFilter* outer = getInput(0);
-    SkImageFilter* inner = getInput(1);
-
-    if (!outer && !inner) {
-        return false;
-    }
-
-    if (!outer || !inner) {
-        return (outer ? outer : inner)->filterBounds(src, ctm, dst);
-    }
-
-    SkIRect tmp;
-    return inner->filterBounds(src, ctm, &tmp) &&
-           outer->filterBounds(tmp, ctm, dst);
-}
-
-SkComposeImageFilter::SkComposeImageFilter(SkReadBuffer& buffer)
-  : INHERITED(2, buffer) {
-}
+#endif

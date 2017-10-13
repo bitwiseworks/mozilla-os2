@@ -115,6 +115,8 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
     /* XXX This hack belongs to the Tibetan shaper:
      * Reorder PADMA to ensure it comes after any vowel marks. */
     if (unlikely (unicode == 0x0FC6u)) return 254;
+    /* Reorder TSA -PHRU to reorder before U+0F74 */
+    if (unlikely (unicode == 0x0F39u)) return 127;
 
     return _hb_modified_combining_class[combining_class (unicode)];
   }
@@ -180,8 +182,8 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
 	case 0x17: return hb_in_range (ch, 0x17B4u, 0x17B5u);
 	case 0x18: return hb_in_range (ch, 0x180Bu, 0x180Eu);
 	case 0x20: return hb_in_ranges (ch, 0x200Bu, 0x200Fu,
-							    0x202Au, 0x202Eu,
-							    0x2060u, 0x206Fu);
+					    0x202Au, 0x202Eu,
+					    0x2060u, 0x206Fu);
 	case 0xFE: return hb_in_range (ch, 0xFE00u, 0xFE0Fu) || ch == 0xFEFFu;
 	case 0xFF: return hb_in_range (ch, 0xFFF0u, 0xFFF8u);
 	default: return false;
@@ -224,7 +226,7 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
     switch (u)
     {
       /* All GC=Zs chars that can use a fallback. */
-      default:	    return NOT_SPACE;	/* Shouldn't happen. */
+      default:	    return NOT_SPACE;	/* U+1680 OGHAM SPACE MARK */
       case 0x0020u: return SPACE;	/* U+0020 SPACE */
       case 0x00A0u: return SPACE;	/* U+00A0 NO-BREAK SPACE */
       case 0x2000u: return SPACE_EM_2;	/* U+2000 EN QUAD */
@@ -343,10 +345,12 @@ extern HB_INTERNAL const hb_unicode_funcs_t _hb_unicode_funcs_nil;
 #define HB_MODIFIED_COMBINING_CLASS_CCC118 118 /* sign u / sign uu */
 #define HB_MODIFIED_COMBINING_CLASS_CCC122 122 /* mai * */
 
-/* Tibetan */
+/* Tibetan
+ * Modify U+0F74 (ccc=132) to reorder before ccc=130 marks.
+ */
 #define HB_MODIFIED_COMBINING_CLASS_CCC129 129 /* sign aa */
 #define HB_MODIFIED_COMBINING_CLASS_CCC130 130 /* sign i */
-#define HB_MODIFIED_COMBINING_CLASS_CCC132 132 /* sign u */
+#define HB_MODIFIED_COMBINING_CLASS_CCC132 128 /* sign u */
 
 
 /* Misc */
@@ -357,9 +361,10 @@ extern HB_INTERNAL const hb_unicode_funcs_t _hb_unicode_funcs_nil;
 	  FLAG (HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK) | \
 	  FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
 
-#define HB_UNICODE_GENERAL_CATEGORY_IS_NON_ENCLOSING_MARK(gen_cat) \
+#define HB_UNICODE_GENERAL_CATEGORY_IS_NON_ENCLOSING_MARK_OR_MODIFIER_SYMBOL(gen_cat) \
 	(FLAG_SAFE (gen_cat) & \
 	 (FLAG (HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK) | \
-	  FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
+	  FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK) | \
+	  FLAG (HB_UNICODE_GENERAL_CATEGORY_MODIFIER_SYMBOL)))
 
 #endif /* HB_UNICODE_PRIVATE_HH */

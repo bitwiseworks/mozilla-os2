@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -90,6 +89,6 @@ SkMovie* SkMovie::DecodeMemory(const void* data, size_t length) {
 }
 
 SkMovie* SkMovie::DecodeFile(const char path[]) {
-    SkAutoTUnref<SkStreamRewindable> stream(SkStream::NewFromFile(path));
-    return stream.get() ? SkMovie::DecodeStream(stream) : NULL;
+    std::unique_ptr<SkStreamRewindable> stream = SkStream::MakeFromFile(path);
+    return stream ? SkMovie::DecodeStream(stream.get()) : nullptr;
 }

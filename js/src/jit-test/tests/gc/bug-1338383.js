@@ -4,7 +4,7 @@ if (helperThreadCount() === 0)
     throw InternalError();
 
 var lfOffThreadGlobal = newGlobal();
-enableShellObjectMetadataCallback()
+enableShellAllocationMetadataBuilder()
 lfOffThreadGlobal.offThreadCompileScript(`
   if ("gczeal" in this)
     gczeal(8, 1)

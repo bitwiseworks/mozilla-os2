@@ -9,6 +9,7 @@
 
 #include "NamespaceImports.h"
 
+#include "vm/Scope.h"
 #include "vm/String.h"
 
 class JSLinearString;
@@ -19,45 +20,56 @@ class LazyScript;
 class LifoAlloc;
 class ModuleObject;
 class ScriptSourceObject;
-class ScopeObject;
 struct SourceCompressionTask;
 
 namespace frontend {
 
 JSScript*
-CompileScript(ExclusiveContext* cx, LifoAlloc* alloc,
-              HandleObject scopeChain, Handle<ScopeObject*> enclosingStaticScope,
-              HandleScript evalCaller, const ReadOnlyCompileOptions& options,
-              SourceBufferHolder& srcBuf, JSString* source_ = nullptr,
-              SourceCompressionTask* extraSct = nullptr,
+CompileGlobalScript(ExclusiveContext* cx, LifoAlloc& alloc, ScopeKind scopeKind,
+                    const ReadOnlyCompileOptions& options,
+                    SourceBufferHolder& srcBuf,
+                    SourceCompressionTask* extraSct = nullptr,
+                    ScriptSourceObject** sourceObjectOut = nullptr);
+
+JSScript*
+CompileEvalScript(ExclusiveContext* cx, LifoAlloc& alloc,
+                  HandleObject scopeChain, HandleScope enclosingScope,
+                  const ReadOnlyCompileOptions& options,
+                  SourceBufferHolder& srcBuf,
+                  SourceCompressionTask* extraSct = nullptr,
+                  ScriptSourceObject** sourceObjectOut = nullptr);
+
+ModuleObject*
+CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
+              SourceBufferHolder& srcBuf);
+
+ModuleObject*
+CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
+              SourceBufferHolder& srcBuf, LifoAlloc& alloc,
               ScriptSourceObject** sourceObjectOut = nullptr);
 
-ModuleObject *
-CompileModule(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
-              SourceBufferHolder &srcBuf);
-
-bool
+MOZ_MUST_USE bool
 CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length);
 
-/*
- * enclosingStaticScope is a static enclosing scope (e.g. a StaticWithObject).
- * Must be null if the enclosing scope is a global.
- */
-bool
+MOZ_MUST_USE bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,
                     Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf,
-                    Handle<ScopeObject*> enclosingStaticScope);
+                    HandleScope enclosingScope);
 
-// As above, but defaults to the global lexical scope as the enclosing static
-// scope.
-bool
+// As above, but defaults to the global lexical scope as the enclosing scope.
+MOZ_MUST_USE bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,
                     Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf);
 
-bool
+MOZ_MUST_USE bool
 CompileStarGeneratorBody(JSContext* cx, MutableHandleFunction fun,
+                         const ReadOnlyCompileOptions& options,
+                         Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf);
+
+MOZ_MUST_USE bool
+CompileAsyncFunctionBody(JSContext* cx, MutableHandleFunction fun,
                          const ReadOnlyCompileOptions& options,
                          Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf);
 

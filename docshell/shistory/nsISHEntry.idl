@@ -12,14 +12,15 @@
 
 #include "nsISupports.idl"
 
+interface nsIMutableArray;
 interface nsILayoutHistoryState;
 interface nsIContentViewer;
 interface nsIURI;
 interface nsIInputStream;
 interface nsIDocShellTreeItem;
-interface nsISupportsArray;
 interface nsIStructuredCloneContainer;
 interface nsIBFCacheEntry;
+interface nsIPrincipal;
 
 %{C++
 #include "nsRect.h"
@@ -30,7 +31,7 @@ class nsSHEntryShared;
 [ptr] native nsDocShellEditorDataPtr(nsDocShellEditorData);
 [ptr] native nsSHEntryShared(nsSHEntryShared);
 
-[scriptable, uuid(3a5e5fa0-5364-4fbb-a87a-3f12a6b51903)]
+[scriptable, uuid(0dad26b8-a259-42c7-93f1-2fa7fc076e45)]
 interface nsISHEntry : nsISupports
 {
     /**
@@ -118,7 +119,7 @@ interface nsISHEntry : nsISupports
     void clearChildShells();
 
     /** Saved refresh URI list for the content viewer */
-    attribute nsISupportsArray refreshURIList;
+    attribute nsIMutableArray refreshURIList;
 
     /**
      * Ensure that the cached presentation members are self-consistent.
@@ -190,7 +191,8 @@ interface nsISHEntry : nsISupports
                            in nsIInputStream inputStream,
                            in nsILayoutHistoryState layoutHistoryState,
                            in nsISupports cacheKey, in ACString contentType,
-                           in nsISupports owner,
+                           in nsIPrincipal triggeringPrincipal,
+                           in nsIPrincipal principalToInherit,
                            in unsigned long long docshellID,
                            in boolean dynamicCreation);
 
@@ -205,11 +207,17 @@ interface nsISHEntry : nsISupports
     nsIContentViewer getAnyContentViewer(out nsISHEntry ownerEntry);
 
     /**
-     * Get the owner, if any, that was associated with the channel
+     * Get the principal, if any, that was associated with the channel
      * that the document that was loaded to create this history entry
      * came from.
      */
-    attribute nsISupports owner;
+    attribute nsIPrincipal triggeringPrincipal;
+
+    /**
+     * Get the principal, if any, that is used when the inherit flag
+     * is set.
+     */
+    attribute nsIPrincipal principalToInherit;
 
     /**
      * Get/set data associated with this history state via a pushState() call,
@@ -301,6 +309,12 @@ interface nsISHEntry : nsISupports
      * for example with view-source.
      */
     attribute nsIURI baseURI;
+
+    /**
+     * Sets/gets the current scroll restoration state,
+     * if true == "manual", false == "auto".
+     */
+    attribute boolean scrollRestorationIsManual;
 };
 
 [scriptable, uuid(bb66ac35-253b-471f-a317-3ece940f04c5)]

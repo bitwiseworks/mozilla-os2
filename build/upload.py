@@ -38,7 +38,13 @@ import errno
 import hashlib
 import shutil
 from optparse import OptionParser
-from subprocess import check_call, check_output, STDOUT
+from subprocess import (
+    check_call,
+    check_output,
+    STDOUT,
+    CalledProcessError,
+)
+import concurrent.futures as futures
 import redo
 
 def OptionalEnvironmentVariable(v):
@@ -84,6 +90,8 @@ def AppendOptionalArgsToSSHCommandline(cmdline, port, ssh_key):
         if not ssh_key.startswith('~'):
             ssh_key = WindowsPathToMsysPath(ssh_key)
         cmdline.extend(["-o", "IdentityFile=%s" % ssh_key])
+    # In case of an issue here we don't want to hang on a password prompt.
+    cmdline.extend(["-o", "BatchMode=yes"])
 
 def DoSSHCommand(command, user, host, port=None, ssh_key=None):
     """Execute command on user@host using ssh. Optionally use
@@ -93,14 +101,24 @@ def DoSSHCommand(command, user, host, port=None, ssh_key=None):
     cmdline.extend(["%s@%s" % (user, host), command])
 
     with redo.retrying(check_output, sleeptime=10) as f:
-        output = f(cmdline, stderr=STDOUT).strip()
+        try:
+            output = f(cmdline, stderr=STDOUT).strip()
+        except CalledProcessError as e:
+            print "failed ssh command output:"
+            print '=' * 20
+            print e.output
+            print '=' * 20
+            raise
         return output
 
     raise Exception("Command %s returned non-zero exit code" % cmdline)
 
-def DoSCPFile(file, remote_path, user, host, port=None, ssh_key=None):
+def DoSCPFile(file, remote_path, user, host, port=None, ssh_key=None,
+              log=False):
     """Upload file to user@host:remote_path using scp. Optionally use
     port and ssh_key, if provided."""
+    if log:
+        print 'Uploading %s' % file
     cmdline = ["scp"]
     AppendOptionalArgsToSSHCommandline(cmdline, port, ssh_key)
     cmdline.extend([WindowsPathToMsysPath(file),
@@ -162,8 +180,6 @@ def GetUrlProperties(output, package):
         ('symbolsUrl', lambda m: m.endswith('crashreporter-symbols.zip') or
                        m.endswith('crashreporter-symbols-full.zip')),
         ('testsUrl', lambda m: m.endswith(('tests.tar.bz2', 'tests.zip'))),
-        ('unsignedApkUrl', lambda m: m.endswith('apk') and
-                           'unsigned-unaligned' in m),
         ('robocopApkUrl', lambda m: m.endswith('apk') and 'robocop' in m),
         ('jsshellUrl', lambda m: 'jsshell-' in m and m.endswith('.zip')),
         ('completeMarUrl', lambda m: m.endswith('.complete.mar')),
@@ -217,18 +233,40 @@ def UploadFiles(user, host, path, files, verbose=False, port=None, ssh_key=None,
         base_path = os.path.abspath(base_path)
     remote_files = []
     properties = {}
+
+    def get_remote_path(p):
+        return GetBaseRelativePath(path, os.path.abspath(p), base_path)
+
     try:
+        # Do a pass to find remote directories so we don't perform excessive
+        # scp calls.
+        remote_paths = set()
         for file in files:
-            file = os.path.abspath(file)
             if not os.path.isfile(file):
                 raise IOError("File not found: %s" % file)
-            # first ensure that path exists remotely
-            remote_path = GetBaseRelativePath(path, file, base_path)
-            DoSSHCommand("mkdir -p " + remote_path, user, host, port=port, ssh_key=ssh_key)
-            if verbose:
-                print "Uploading " + file
-            DoSCPFile(file, remote_path, user, host, port=port, ssh_key=ssh_key)
-            remote_files.append(remote_path + '/' + os.path.basename(file))
+
+            remote_paths.add(get_remote_path(file))
+
+        # If we wanted to, we could reduce the remote paths if they are a parent
+        # of any entry.
+        for p in sorted(remote_paths):
+            DoSSHCommand("mkdir -p " + p, user, host, port=port, ssh_key=ssh_key)
+
+        with futures.ThreadPoolExecutor(4) as e:
+            fs = []
+            # Since we're uploading in parallel, the largest file should take
+            # the longest to upload. So start it first.
+            for file in sorted(files, key=os.path.getsize, reverse=True):
+                remote_path = get_remote_path(file)
+                fs.append(e.submit(DoSCPFile, file, remote_path, user, host,
+                                   port=port, ssh_key=ssh_key, log=verbose))
+                remote_files.append(remote_path + '/' + os.path.basename(file))
+
+            # We need to call result() on the future otherwise exceptions could
+            # get swallowed.
+            for f in futures.as_completed(fs):
+                f.result()
+
         if post_upload_command is not None:
             if verbose:
                 print "Running post-upload command: " + post_upload_command

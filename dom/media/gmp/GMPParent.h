@@ -21,7 +21,7 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsIFile.h"
-#include "ThreadSafeRefcountingWithMainThreadDestruction.h"
+#include "mozilla/MozPromise.h"
 
 class nsIThread;
 
@@ -42,8 +42,26 @@ namespace gmp {
 class GMPCapability
 {
 public:
+  explicit GMPCapability() {}
+  GMPCapability(GMPCapability&& aOther)
+    : mAPIName(Move(aOther.mAPIName))
+    , mAPITags(Move(aOther.mAPITags))
+  {
+  }
+  explicit GMPCapability(const nsCString& aAPIName)
+    : mAPIName(aAPIName)
+  {}
+  explicit GMPCapability(const GMPCapability& aOther) = default;
   nsCString mAPIName;
   nsTArray<nsCString> mAPITags;
+
+  static bool Supports(const nsTArray<GMPCapability>& aCapabilities,
+                       const nsCString& aAPI,
+                       const nsTArray<nsCString>& aTags);
+
+  static bool Supports(const nsTArray<GMPCapability>& aCapabilities,
+                       const nsCString& aAPI,
+                       const nsCString& aTag);
 };
 
 enum GMPState {
@@ -72,11 +90,11 @@ public:
 class GMPParent final : public PGMPParent
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION(GMPParent)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPParent)
 
   GMPParent();
 
-  nsresult Init(GeckoMediaPluginServiceParent* aService, nsIFile* aPluginDir);
+  RefPtr<GenericPromise> Init(GeckoMediaPluginServiceParent* aService, nsIFile* aPluginDir);
   nsresult CloneFrom(const GMPParent* aOther);
 
   void Crash();
@@ -100,8 +118,6 @@ public:
   // This must not be called while we're in the middle of abnormal ActorDestroy
   void DeleteProcess();
 
-  bool SupportsAPI(const nsCString& aAPI, const nsCString& aTag);
-
   GMPState State() const;
   nsIThread* GMPThread();
 
@@ -123,7 +139,7 @@ public:
 
   const nsCString& GetDisplayName() const;
   const nsCString& GetVersion() const;
-  const uint32_t GetPluginId() const;
+  uint32_t GetPluginId() const;
   nsString GetPluginBaseName() const;
 
   // Returns true if a plugin can be or is being used across multiple NodeIds.
@@ -150,35 +166,41 @@ public:
 
   bool Bridge(GMPServiceParent* aGMPServiceParent);
 
+  const nsTArray<GMPCapability>& GetCapabilities() const { return mCapabilities; }
+
 private:
   ~GMPParent();
+
   RefPtr<GeckoMediaPluginServiceParent> mService;
   bool EnsureProcessLoaded();
-  nsresult ReadGMPMetaData();
+  RefPtr<GenericPromise> ReadGMPMetaData();
+  RefPtr<GenericPromise> ReadGMPInfoFile(nsIFile* aFile);
+  RefPtr<GenericPromise> ParseChromiumManifest(nsString aJSON); // Main thread.
+  RefPtr<GenericPromise> ReadChromiumManifestFile(nsIFile* aFile); // GMP thread.
 #ifdef MOZ_CRASHREPORTER
   void WriteExtraDataForMinidump(CrashReporter::AnnotationTable& notes);
   void GetCrashID(nsString& aResult);
 #endif
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+  void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  virtual PCrashReporterParent* AllocPCrashReporterParent(const NativeThreadId& aThread) override;
-  virtual bool DeallocPCrashReporterParent(PCrashReporterParent* aCrashReporter) override;
+  PCrashReporterParent* AllocPCrashReporterParent(const NativeThreadId& aThread) override;
+  bool DeallocPCrashReporterParent(PCrashReporterParent* aCrashReporter) override;
 
-  virtual bool RecvPGMPStorageConstructor(PGMPStorageParent* actor) override;
-  virtual PGMPStorageParent* AllocPGMPStorageParent() override;
-  virtual bool DeallocPGMPStorageParent(PGMPStorageParent* aActor) override;
+  bool RecvPGMPStorageConstructor(PGMPStorageParent* actor) override;
+  PGMPStorageParent* AllocPGMPStorageParent() override;
+  bool DeallocPGMPStorageParent(PGMPStorageParent* aActor) override;
 
-  virtual PGMPContentParent* AllocPGMPContentParent(Transport* aTransport,
-                                                    ProcessId aOtherPid) override;
+  PGMPContentParent* AllocPGMPContentParent(Transport* aTransport,
+                                            ProcessId aOtherPid) override;
 
-  virtual bool RecvPGMPTimerConstructor(PGMPTimerParent* actor) override;
-  virtual PGMPTimerParent* AllocPGMPTimerParent() override;
-  virtual bool DeallocPGMPTimerParent(PGMPTimerParent* aActor) override;
+  bool RecvPGMPTimerConstructor(PGMPTimerParent* actor) override;
+  PGMPTimerParent* AllocPGMPTimerParent() override;
+  bool DeallocPGMPTimerParent(PGMPTimerParent* aActor) override;
 
-  virtual bool RecvAsyncShutdownComplete() override;
-  virtual bool RecvAsyncShutdownRequired() override;
+  bool RecvAsyncShutdownComplete() override;
+  bool RecvAsyncShutdownRequired() override;
 
-  virtual bool RecvPGMPContentChildDestroyed() override;
+  bool RecvPGMPContentChildDestroyed() override;
   bool IsUsed()
   {
     return mGMPContentChildCount > 0;
@@ -194,8 +216,12 @@ private:
   nsCString mDisplayName; // name of plugin displayed to users
   nsCString mDescription; // description of plugin for display to users
   nsCString mVersion;
+#ifdef XP_WIN
+  nsCString mLibs;
+#endif
+  nsString mAdapter;
   uint32_t mPluginId;
-  nsTArray<nsAutoPtr<GMPCapability>> mCapabilities;
+  nsTArray<GMPCapability> mCapabilities;
   GMPProcessParent* mProcess;
   bool mDeleteProcessOnlyOnUnload;
   bool mAbnormalShutdownInProgress;

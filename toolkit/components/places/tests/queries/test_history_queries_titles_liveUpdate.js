@@ -4,26 +4,32 @@
 // This test ensures that tags changes are correctly live-updated in a history
 // query.
 
-var gNow = Date.now();
+let timeInMicroseconds = PlacesUtils.toPRTime(Date.now() - 10000);
+
+function newTimeInMicroseconds() {
+  timeInMicroseconds = timeInMicroseconds + 1000;
+  return timeInMicroseconds;
+}
+
 var gTestData = [
   {
     isVisit: true,
     uri: "http://example.com/1/",
-    lastVisit: gNow,
+    lastVisit: newTimeInMicroseconds(),
     isInQuery: true,
     title: "title1",
   },
   {
     isVisit: true,
     uri: "http://example.com/2/",
-    lastVisit: gNow++,
+    lastVisit: newTimeInMicroseconds(),
     isInQuery: true,
     title: "title2",
   },
   {
     isVisit: true,
     uri: "http://example.com/3/",
-    lastVisit: gNow++,
+    lastVisit: newTimeInMicroseconds(),
     isInQuery: true,
     title: "title3",
   },
@@ -35,6 +41,7 @@ function searchNodeHavingUrl(aRoot, aUrl) {
       return aRoot.getChild(i);
     }
   }
+  return undefined;
 }
 
 function newQueryWithOptions()
@@ -158,16 +165,18 @@ add_task(function* pages_searchterm_is_title_query()
   let root = PlacesUtils.history.executeQuery(query, options).root;
   root.containerOpen = true;
   compareArrayToResult([], root);
-  gTestData.forEach(function (data) {
+  for (let data of gTestData) {
     let uri = NetUtil.newURI(data.uri);
     let origTitle = data.title;
     data.title = "match";
-    yield PlacesTestUtils.addVisits({uri: uri, title: data.title});
+    yield PlacesTestUtils.addVisits({ uri: uri, title: data.title,
+                                      visitDate: data.lastVisit });
     compareArrayToResult([data], root);
     data.title = origTitle;
-    yield PlacesTestUtils.addVisits({uri: uri, title: data.title});
+    yield PlacesTestUtils.addVisits({ uri: uri, title: data.title,
+                                      visitDate: data.lastVisit });
     compareArrayToResult([], root);
-  });
+  }
 
   root.containerOpen = false;
   yield PlacesTestUtils.clearHistory();
@@ -183,16 +192,18 @@ add_task(function* visits_searchterm_is_title_query()
   let root = PlacesUtils.history.executeQuery(query, options).root;
   root.containerOpen = true;
   compareArrayToResult([], root);
-  gTestData.forEach(function (data) {
+  for (let data of gTestData) {
     let uri = NetUtil.newURI(data.uri);
     let origTitle = data.title;
     data.title = "match";
-    yield PlacesTestUtils.addVisits({uri: uri, title: data.title});
+    yield PlacesTestUtils.addVisits({ uri: uri, title: data.title,
+                                      visitDate: data.lastVisit });
     compareArrayToResult([data], root);
     data.title = origTitle;
-    yield PlacesTestUtils.addVisits({uri: uri, title: data.title});
+    yield PlacesTestUtils.addVisits({ uri: uri, title: data.title,
+                                      visitDate: data.lastVisit });
     compareArrayToResult([], root);
-  });
+  }
 
   root.containerOpen = false;
   yield PlacesTestUtils.clearHistory();

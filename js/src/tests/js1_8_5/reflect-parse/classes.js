@@ -4,8 +4,19 @@ function testClasses() {
     function methodFun(id, kind, generator, args, body = []) {
         assertEq(generator && kind === "method", generator);
         assertEq(typeof id === 'string' || id === null, true);
-        let idN = typeof id === 'string' ? ident(id) : null;
-        let methodName = kind !== "method" ? null : idN;
+        let methodName;
+        switch (kind) {
+          case "method":
+            methodName = typeof id === 'string' ? ident(id) : null;
+            break;
+          case "get":
+          case "set":
+            methodName = ident(`${kind} ${typeof id === 'string' ? id : ""}`);
+            break;
+          default:
+            methodName = null;
+            break;
+        }
         return generator
                ? genFunExpr("es6", methodName, args.map(ident), blockStmt(body))
                : funExpr(methodName, args.map(ident), blockStmt(body));
@@ -180,6 +191,20 @@ function testClasses() {
                     })
                  }`, SyntaxError);
 
+    // No legacy generators for methods.
+    assertClassError(`class NAME {
+                          constructor() { yield 2; }
+                      }`, SyntaxError);
+    assertClassError(`class NAME {
+                          method() { yield 2; }
+                      }`, SyntaxError);
+    assertClassError(`class NAME {
+                          get method() { yield 2; }
+                      }`, SyntaxError);
+    assertClassError(`class NAME {
+                          set method() { yield 2; }
+                      }`, SyntaxError);
+
     // Methods may be generators, but not accessors
     assertClassError("class NAME { constructor() { } *get foo() { } }", SyntaxError);
     assertClassError("class NAME { constructor() { } *set foo() { } }", SyntaxError);
@@ -199,15 +224,15 @@ function testClasses() {
     // Class statements bind lexically, so they should collide with other
     // in-block lexical bindings, but class expressions don't.
     let FooCtor = ctorWithName("Foo");
-    assertError("{ let Foo; class Foo { constructor() { } } }", TypeError);
+    assertError("{ let Foo; class Foo { constructor() { } } }", SyntaxError);
     assertStmt("{ let Foo; (class Foo { constructor() { } }) }",
                blockStmt([letDecl([{id: ident("Foo"), init: null}]),
                           exprStmt(classExpr(ident("Foo"), null, [FooCtor]))]));
-    assertError("{ const Foo = 0; class Foo { constructor() { } } }", TypeError);
+    assertError("{ const Foo = 0; class Foo { constructor() { } } }", SyntaxError);
     assertStmt("{ const Foo = 0; (class Foo { constructor() { } }) }",
                blockStmt([constDecl([{id: ident("Foo"), init: lit(0)}]),
                           exprStmt(classExpr(ident("Foo"), null, [FooCtor]))]));
-    assertError("{ class Foo { constructor() { } } class Foo { constructor() { } } }", TypeError);
+    assertError("{ class Foo { constructor() { } } class Foo { constructor() { } } }", SyntaxError);
     assertStmt(`{
                     (class Foo {
                         constructor() { }
@@ -479,6 +504,8 @@ function testClasses() {
     assertClassError("class NAME { static *y", SyntaxError);
     assertClassError("class NAME { static get", SyntaxError);
     assertClassError("class NAME { static get y", SyntaxError);
+    assertClassError("class NAME { static }", SyntaxError);
+    assertClassError("class NAME { static ;", SyntaxError);
     assertClassError("class NAME extends", SyntaxError);
     assertClassError("class NAME { constructor() { super", SyntaxError);
     assertClassError("class NAME { constructor() { super.", SyntaxError);

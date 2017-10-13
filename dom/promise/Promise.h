@@ -26,10 +26,10 @@
 // that need to be removed once clients have been put together
 // to take advantage of the new mechanism. New code should not
 // depend on code #ifdefed to this #define.
-#define DOM_PROMISE_DEPRECATED_REPORTING 1
+#define DOM_PROMISE_DEPRECATED_REPORTING !SPIDERMONKEY_PROMISE
 
 #if defined(DOM_PROMISE_DEPRECATED_REPORTING)
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/workers/bindings/WorkerHolder.h"
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
 
 class nsIGlobalObject;
@@ -48,21 +48,22 @@ class PromiseDebugging;
 class Promise;
 
 #if defined(DOM_PROMISE_DEPRECATED_REPORTING)
-class PromiseReportRejectFeature : public workers::WorkerFeature
+class PromiseReportRejectWorkerHolder : public workers::WorkerHolder
 {
-  // PromiseReportRejectFeature is held by an nsAutoPtr on the Promise which
-  // means that this object will be destroyed before the Promise is destroyed.
+  // PromiseReportRejectWorkerHolder is held by an nsAutoPtr on the Promise
+  // which means that this object will be destroyed before the Promise is
+  // destroyed.
   Promise* MOZ_NON_OWNING_REF mPromise;
 
 public:
-  explicit PromiseReportRejectFeature(Promise* aPromise)
+  explicit PromiseReportRejectWorkerHolder(Promise* aPromise)
     : mPromise(aPromise)
   {
     MOZ_ASSERT(mPromise);
   }
 
   virtual bool
-  Notify(JSContext* aCx, workers::Status aStatus) override;
+  Notify(workers::Status aStatus) override;
 };
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
 
@@ -71,7 +72,12 @@ public:
     { 0x8a, 0xf9, 0x31, 0x5e, 0x8f, 0xce, 0x75, 0x65 } }
 
 class Promise : public nsISupports,
+#ifndef SPIDERMONKEY_PROMISE
+                // Only wrappercached when we're not using SpiderMonkey
+                // promises, because those don't have a useful object moved
+                // hook, which wrappercache needs.
                 public nsWrapperCache,
+#endif // SPIDERMONKEY_PROMISE
                 public SupportsWeakPtr<Promise>
 {
   friend class NativePromiseCallback;
@@ -79,7 +85,7 @@ class Promise : public nsISupports,
   friend class PromiseResolverTask;
   friend class PromiseTask;
 #if defined(DOM_PROMISE_DEPRECATED_REPORTING)
-  friend class PromiseReportRejectFeature;
+  friend class PromiseReportRejectWorkerHolder;
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
   friend class PromiseWorkerProxy;
   friend class PromiseWorkerProxyRunnable;
@@ -92,17 +98,30 @@ class Promise : public nsISupports,
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_PROMISE_IID)
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+#ifdef SPIDERMONKEY_PROMISE
+  // We're not skippable, since we're not owned from JS to start with.
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Promise)
+#else // SPIDERMONKEY_PROMISE
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(Promise)
+#endif // SPIDERMONKEY_PROMISE
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(Promise)
 
   // Promise creation tries to create a JS reflector for the Promise, so is
   // fallible.  Furthermore, we don't want to do JS-wrapping on a 0-refcount
   // object, so we addref before doing that and return the addrefed pointer
   // here.
+#ifdef SPIDERMONKEY_PROMISE
+  static already_AddRefed<Promise>
+  Create(nsIGlobalObject* aGlobal, ErrorResult& aRv);
+
+  // Reports a rejected Promise by sending an error report.
+  static void ReportRejectedPromise(JSContext* aCx, JS::HandleObject aPromise);
+#else
   static already_AddRefed<Promise>
   Create(nsIGlobalObject* aGlobal, ErrorResult& aRv,
          // Passing null for aDesiredProto will use Promise.prototype.
          JS::Handle<JSObject*> aDesiredProto = nullptr);
+#endif // SPIDERMONKEY_PROMISE
 
   typedef void (Promise::*MaybeFunc)(JSContext* aCx,
                                      JS::Handle<JS::Value> aValue);
@@ -121,6 +140,8 @@ public:
     MaybeSomething(aArg, &Promise::MaybeResolve);
   }
 
+  void MaybeResolveWithUndefined();
+
   inline void MaybeReject(nsresult aArg) {
     MOZ_ASSERT(NS_FAILED(aArg));
     MaybeSomething(aArg, &Promise::MaybeReject);
@@ -132,6 +153,8 @@ public:
   }
 
   void MaybeReject(const RefPtr<MediaStreamError>& aArg);
+
+  void MaybeRejectWithUndefined();
 
   // DO NOT USE MaybeRejectBrokenly with in new code.  Promises should be
   // rejected with Error instances.
@@ -149,11 +172,58 @@ public:
   // Returns true if at least one microtask was processed.
   static bool PerformMicroTaskCheckpoint();
 
+  static void PerformWorkerMicroTaskCheckpoint();
+
+  static void PerformWorkerDebuggerMicroTaskCheckpoint();
+
   // WebIDL
 
   nsIGlobalObject* GetParentObject() const
   {
     return mGlobal;
+  }
+
+#ifdef SPIDERMONKEY_PROMISE
+  bool
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
+             JS::MutableHandle<JSObject*> aWrapper);
+
+  // Do the equivalent of Promise.resolve in the current compartment of aCx.
+  // Errorrs are reported on the ErrorResult; if aRv comes back !Failed(), this
+  // function MUST return a non-null value.
+  static already_AddRefed<Promise>
+  Resolve(nsIGlobalObject* aGlobal, JSContext* aCx,
+          JS::Handle<JS::Value> aValue, ErrorResult& aRv);
+
+  // Do the equivalent of Promise.reject in the current compartment of aCx.
+  // Errorrs are reported on the ErrorResult; if aRv comes back !Failed(), this
+  // function MUST return a non-null value.
+  static already_AddRefed<Promise>
+  Reject(nsIGlobalObject* aGlobal, JSContext* aCx,
+         JS::Handle<JS::Value> aValue, ErrorResult& aRv);
+
+  static already_AddRefed<Promise>
+  All(const GlobalObject& aGlobal,
+      const nsTArray<RefPtr<Promise>>& aPromiseList, ErrorResult& aRv);
+
+  void
+  Then(JSContext* aCx,
+       // aCalleeGlobal may not be in the compartment of aCx, when called over
+       // Xrays.
+       JS::Handle<JSObject*> aCalleeGlobal,
+       AnyCallback* aResolveCallback, AnyCallback* aRejectCallback,
+       JS::MutableHandle<JS::Value> aRetval,
+       ErrorResult& aRv);
+
+  JSObject* PromiseObj() const
+  {
+    return mPromiseObj;
+  }
+
+#else // SPIDERMONKEY_PROMISE
+  JSObject* PromiseObj()
+  {
+    return GetWrapper();
   }
 
   virtual JSObject*
@@ -212,6 +282,7 @@ public:
 
   static bool
   PromiseSpecies(JSContext* aCx, unsigned aArgc, JS::Value* aVp);
+#endif // SPIDERMONKEY_PROMISE
 
   void AppendNativeHandler(PromiseNativeHandler* aRunnable);
 
@@ -219,23 +290,40 @@ public:
 
   JSCompartment* Compartment() const;
 
+#ifndef SPIDERMONKEY_PROMISE
   // Return a unique-to-the-process identifier for this Promise.
   uint64_t GetID();
+#endif // SPIDERMONKEY_PROMISE
 
-  // Queue an async microtask to current main or worker thread.
-  static void
-  DispatchToMicroTask(nsIRunnable* aRunnable);
-
+#ifndef SPIDERMONKEY_PROMISE
   enum JSCallbackSlots {
     SLOT_PROMISE = 0,
     SLOT_DATA
   };
+#endif // SPIDERMONKEY_PROMISE
+
+#ifdef SPIDERMONKEY_PROMISE
+  // Create a dom::Promise from a given SpiderMonkey Promise object.
+  // aPromiseObj MUST be in the compartment of aGlobal's global JS object.
+  static already_AddRefed<Promise>
+  CreateFromExisting(nsIGlobalObject* aGlobal,
+                     JS::Handle<JSObject*> aPromiseObj);
+#endif // SPIDERMONKEY_PROMISE
+
+  enum class PromiseState {
+    Pending,
+    Resolved,
+    Rejected
+  };
+
+  PromiseState State() const;
 
 protected:
   struct PromiseCapability;
 
-  // Do NOT call this unless you're Promise::Create.  I wish we could enforce
-  // that from inside this class too, somehow.
+  // Do NOT call this unless you're Promise::Create or
+  // Promise::CreateFromExisting.  I wish we could enforce that from inside this
+  // class too, somehow.
   explicit Promise(nsIGlobalObject* aGlobal);
 
   virtual ~Promise();
@@ -244,6 +332,7 @@ protected:
   // use the default prototype for the sort of Promise we have.
   void CreateWrapper(JS::Handle<JSObject*> aDesiredProto, ErrorResult& aRv);
 
+#ifndef SPIDERMONKEY_PROMISE
   // Create the JS resolving functions of resolve() and reject(). And provide
   // references to the two functions by calling PromiseInit passed from Promise
   // constructor.
@@ -282,15 +371,11 @@ protected:
   {
     return mWasNotifiedAsUncaught;
   }
+#endif // SPIDERMONKEY_PROMISE
 
 private:
+#ifndef SPIDERMONKEY_PROMISE
   friend class PromiseDebugging;
-
-  enum PromiseState {
-    Pending,
-    Resolved,
-    Rejected
-  };
 
   void SetState(PromiseState aState)
   {
@@ -324,7 +409,7 @@ private:
 
   void MaybeReportRejectedOnce() {
     MaybeReportRejected();
-    RemoveFeature();
+    RemoveWorkerHolder();
     mResult.setUndefined();
   }
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
@@ -338,14 +423,15 @@ private:
                        JS::Handle<JS::Value> aValue);
   void RejectInternal(JSContext* aCx,
                       JS::Handle<JS::Value> aValue);
+#endif // SPIDERMONKEY_PROMISE
 
   template <typename T>
   void MaybeSomething(T& aArgument, MaybeFunc aFunc) {
-    ThreadsafeAutoJSContext cx;
-    JSObject* wrapper = GetWrapper();
-    MOZ_ASSERT(wrapper); // We preserved it!
+    MOZ_ASSERT(PromiseObj()); // It was preserved!
 
-    JSAutoCompartment ac(cx, wrapper);
+    AutoEntryScript aes(mGlobal, "Promise resolution or rejection");
+    JSContext* cx = aes.cx();
+
     JS::Rooted<JS::Value> val(cx);
     if (!ToJSValue(cx, aArgument, &val)) {
       HandleException(cx);
@@ -355,6 +441,7 @@ private:
     (this->*aFunc)(cx, val);
   }
 
+#ifndef SPIDERMONKEY_PROMISE
   // Static methods for the PromiseInit functions.
   static bool
   JSCallback(JSContext *aCx, unsigned aArgc, JS::Value *aVp);
@@ -373,18 +460,20 @@ private:
   static JSObject*
   CreateThenableFunction(JSContext* aCx, Promise* aPromise, uint32_t aTask);
 
-  void HandleException(JSContext* aCx);
-
 #if defined(DOM_PROMISE_DEPRECATED_REPORTING)
-  void RemoveFeature();
+  void RemoveWorkerHolder();
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
 
   // Capture the current stack and store it in aTarget.  If false is
   // returned, an exception is presumably pending on aCx.
   bool CaptureStack(JSContext* aCx, JS::Heap<JSObject*>& aTarget);
+#endif // SPIDERMONKEY_PROMISE
+
+  void HandleException(JSContext* aCx);
 
   RefPtr<nsIGlobalObject> mGlobal;
 
+#ifndef SPIDERMONKEY_PROMISE
   nsTArray<RefPtr<PromiseCallback> > mResolveCallbacks;
   nsTArray<RefPtr<PromiseCallback> > mRejectCallbacks;
 
@@ -411,7 +500,7 @@ private:
   // needs to know when the worker is shutting down, to report the error on the
   // console before the worker's context is deleted. This feature is used for
   // that purpose.
-  nsAutoPtr<PromiseReportRejectFeature> mFeature;
+  nsAutoPtr<PromiseReportRejectWorkerHolder> mWorkerHolder;
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
 
   bool mTaskPending;
@@ -435,6 +524,9 @@ private:
   // Once `GetID()` has been called, a unique-to-the-process identifier for this
   // promise. Until then, `0`.
   uint64_t mID;
+#else // SPIDERMONKEY_PROMISE
+  JS::Heap<JSObject*> mPromiseObj;
+#endif // SPIDERMONKEY_PROMISE
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Promise, NS_PROMISE_IID)

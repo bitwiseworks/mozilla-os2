@@ -14,6 +14,7 @@
 #include "SpeechRecognitionResult.h"
 #include "SpeechRecognitionResultList.h"
 #include "nsIObserverService.h"
+#include "MediaPrefs.h"
 #include "mozilla/Services.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -30,7 +31,7 @@ namespace mozilla {
 
 using namespace dom;
 
-class DecodeResultTask : public nsRunnable
+class DecodeResultTask : public Runnable
 {
 public:
   DecodeResultTask(const nsString& hypstring,
@@ -46,7 +47,7 @@ public:
   }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread()); // This method is supposed to run on the main
                                    // thread!
@@ -85,7 +86,7 @@ private:
   nsCOMPtr<nsIThread> mWorkerThread;
 };
 
-class DecodeTask : public nsRunnable
+class DecodeTask : public Runnable
 {
 public:
   DecodeTask(WeakPtr<dom::SpeechRecognition> recogntion,
@@ -95,7 +96,7 @@ public:
   }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     char const* hyp;
     int rv;
@@ -302,7 +303,7 @@ PocketSphinxSpeechRecognitionService::Observe(nsISupports* aSubject,
                                               const char* aTopic,
                                               const char16_t* aData)
 {
-  MOZ_ASSERT(mRecognition->mTestConfig.mFakeRecognitionService,
+  MOZ_ASSERT(MediaPrefs::WebSpeechFakeRecognitionService(),
              "Got request to fake recognition service event, "
              "but " TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE " is not set");
 

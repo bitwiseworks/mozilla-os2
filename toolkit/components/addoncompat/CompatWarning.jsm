@@ -33,7 +33,7 @@ var CompatWarning = {
         filename.indexOf("RemoteAddonsParent.jsm") != -1 ||
         filename.indexOf("RemoteAddonsChild.jsm") != -1 ||
         filename.indexOf("multiprocessShims.js") != -1;
-    };
+    }
 
     let stack = Components.stack;
     while (stack && isShimLayer(stack.filename))
@@ -66,13 +66,13 @@ var CompatWarning = {
         message += `\nMore info at: ${warning.url}`;
 
       error.init(
-                 /*message*/ message,
-                 /*sourceName*/ stack ? stack.filename : "",
-                 /*sourceLine*/ stack ? stack.sourceLine : "",
-                 /*lineNumber*/ stack ? stack.lineNumber : 0,
-                 /*columnNumber*/ 0,
-                 /*flags*/ Ci.nsIScriptError.warningFlag,
-                 /*category*/ "chrome javascript");
+                 /* message*/ message,
+                 /* sourceName*/ stack ? stack.filename : "",
+                 /* sourceLine*/ stack ? stack.sourceLine : "",
+                 /* lineNumber*/ stack ? stack.lineNumber : 0,
+                 /* columnNumber*/ 0,
+                 /* flags*/ Ci.nsIScriptError.warningFlag,
+                 /* category*/ "chrome javascript");
       Services.console.logMessage(error);
 
       if (Preferences.get("dom.ipc.shims.dumpWarnings", false)) {

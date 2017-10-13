@@ -86,9 +86,16 @@ class CxxCodeGen(CodePrinter, Visitor):
 
 
     def visitTypedef(self, td):
-        self.printdent('typedef ')
-        td.fromtype.accept(self)
-        self.println(' '+ td.totypename +';')
+        if td.templateargs:
+            formals = ', '.join([ 'class ' + T for T in td.templateargs ])
+            args = ', '.join(td.templateargs)
+            self.printdent('template<' + formals + '> using ' + td.totypename + ' = ')
+            td.fromtype.accept(self)
+            self.println('<' + args + '>;')
+        else:
+            self.printdent('typedef ')
+            td.fromtype.accept(self)
+            self.println(' '+ td.totypename +';')
 
     def visitUsing(self, us):
         self.printdent('using ')
@@ -178,7 +185,7 @@ class CxxCodeGen(CodePrinter, Visitor):
             self.printdent()
 
         if md.warn_unused:
-            self.write('MOZ_WARN_UNUSED_RESULT ')
+            self.write('MOZ_MUST_USE ')
         if md.inline:
             self.write('inline ')
         if md.never_inline:
@@ -425,6 +432,19 @@ class CxxCodeGen(CodePrinter, Visitor):
 
         self.indent()
         self.visitBlock(sf)
+        self.dedent()
+        self.printdentln('}')
+
+
+    def visitStmtRangedFor(self, rf):
+        self.printdent('for (auto& ')
+        rf.var.accept(self)
+        self.write(' : ')
+        rf.iteree.accept(self)
+        self.println(') {')
+
+        self.indent()
+        self.visitBlock(rf)
         self.dedent()
         self.printdentln('}')
 

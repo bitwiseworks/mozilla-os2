@@ -9,6 +9,7 @@
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "nsXULAppAPI.h"
 #include "nsIObserverService.h"
+#include "base/task.h"
 
 using namespace mozilla::ipc;
 using namespace mozilla::jsipc;
@@ -26,7 +27,6 @@ ContentBridgeParent::ContentBridgeParent(Transport* aTransport)
 
 ContentBridgeParent::~ContentBridgeParent()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, new DeleteTask<Transport>(mTransport));
 }
 
 void
@@ -36,9 +36,7 @@ ContentBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
   if (os) {
     os->RemoveObserver(this, "content-child-shutdown");
   }
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ContentBridgeParent::DeferredDestroy));
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeParent::DeferredDestroy));
 }
 
 /*static*/ ContentBridgeParent*
@@ -84,12 +82,12 @@ ContentBridgeParent::RecvSyncMessage(const nsString& aMsg,
 
 bool
 ContentBridgeParent::RecvAsyncMessage(const nsString& aMsg,
-                                      const ClonedMessageData& aData,
                                       InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                      const IPC::Principal& aPrincipal)
+                                      const IPC::Principal& aPrincipal,
+                                      const ClonedMessageData& aData)
 {
-  return nsIContentParent::RecvAsyncMessage(aMsg, aData, Move(aCpows),
-                                            aPrincipal);
+  return nsIContentParent::RecvAsyncMessage(aMsg, Move(aCpows),
+                                            aPrincipal, aData);
 }
 
 PBlobParent*
@@ -168,9 +166,7 @@ ContentBridgeParent::NotifyTabDestroyed()
 {
   int32_t numLiveTabs = ManagedPBrowserParent().Count();
   if (numLiveTabs == 1) {
-    MessageLoop::current()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &ContentBridgeParent::Close));
+    MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeParent::Close));
   }
 }
 
@@ -195,6 +191,30 @@ ContentBridgeParent::Observe(nsISupports* aSubject,
     Close();
   }
   return NS_OK;
+}
+
+PFileDescriptorSetParent*
+ContentBridgeParent::AllocPFileDescriptorSetParent(const FileDescriptor& aFD)
+{
+  return nsIContentParent::AllocPFileDescriptorSetParent(aFD);
+}
+
+bool
+ContentBridgeParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
+{
+  return nsIContentParent::DeallocPFileDescriptorSetParent(aActor);
+}
+
+PSendStreamParent*
+ContentBridgeParent::AllocPSendStreamParent()
+{
+  return nsIContentParent::AllocPSendStreamParent();
+}
+
+bool
+ContentBridgeParent::DeallocPSendStreamParent(PSendStreamParent* aActor)
+{
+  return nsIContentParent::DeallocPSendStreamParent(aActor);
 }
 
 } // namespace dom

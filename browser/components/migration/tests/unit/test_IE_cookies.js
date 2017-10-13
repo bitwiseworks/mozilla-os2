@@ -1,3 +1,5 @@
+"use strict";
+
 XPCOMUtils.defineLazyModuleGetter(this, "ctypes",
                                   "resource://gre/modules/ctypes.jsm");
 
@@ -98,7 +100,7 @@ add_task(function* () {
                "Migrated the expected number of cookies");
 
   // Now check the cookie details.
-  let enumerator = Services.cookies.getCookiesFromHost(COOKIE.host);
+  let enumerator = Services.cookies.getCookiesFromHost(COOKIE.host, {});
   Assert.ok(enumerator.hasMoreElements());
   let foundCookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
 

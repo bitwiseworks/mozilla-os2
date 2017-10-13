@@ -9,12 +9,7 @@
 #include "MediaSegment.h"
 #include "nsCOMPtr.h"
 #include "gfxPoint.h"
-#include "nsAutoPtr.h"
-#if defined(MOZILLA_XPCOMRT_API)
-#include "SimpleImageBuffer.h"
-#else
 #include "ImageContainer.h"
-#endif
 
 namespace mozilla {
 
@@ -24,11 +19,7 @@ class Image;
 
 class VideoFrame {
 public:
-#if defined(MOZILLA_XPCOMRT_API)
-  typedef mozilla::SimpleImageBuffer Image;
-#else
   typedef mozilla::layers::Image Image;
-#endif
 
   VideoFrame(already_AddRefed<Image>& aImage, const gfx::IntSize& aIntrinsicSize);
   VideoFrame();
@@ -38,7 +29,8 @@ public:
   {
     return mIntrinsicSize == aFrame.mIntrinsicSize &&
            mForceBlack == aFrame.mForceBlack &&
-           ((mForceBlack && aFrame.mForceBlack) || mImage == aFrame.mImage);
+           ((mForceBlack && aFrame.mForceBlack) || mImage == aFrame.mImage) &&
+           mPrincipalHandle == aFrame.mPrincipalHandle;
   }
   bool operator!=(const VideoFrame& aFrame) const
   {
@@ -48,14 +40,14 @@ public:
   Image* GetImage() const { return mImage; }
   void SetForceBlack(bool aForceBlack) { mForceBlack = aForceBlack; }
   bool GetForceBlack() const { return mForceBlack; }
+  void SetPrincipalHandle(const PrincipalHandle& aPrincipalHandle) { mPrincipalHandle = aPrincipalHandle; }
+  PrincipalHandle GetPrincipalHandle() const { return mPrincipalHandle; }
   const gfx::IntSize& GetIntrinsicSize() const { return mIntrinsicSize; }
   void SetNull();
   void TakeFrom(VideoFrame* aFrame);
 
-#if !defined(MOZILLA_XPCOMRT_API)
   // Create a planar YCbCr black image.
   static already_AddRefed<Image> CreateBlackImage(const gfx::IntSize& aSize);
-#endif // !defined(MOZILLA_XPCOMRT_API)
 
 protected:
   // mImage can be null to indicate "no video" (aka "empty frame"). It can
@@ -64,6 +56,9 @@ protected:
   // The desired size to render the video frame at.
   gfx::IntSize mIntrinsicSize;
   bool mForceBlack;
+  // principalHandle for the image in this frame.
+  // This can be compared to an nsIPrincipal when back on main thread.
+  PrincipalHandle mPrincipalHandle;
 };
 
 struct VideoChunk {
@@ -96,18 +91,16 @@ struct VideoChunk {
     return 0;
   }
 
+  PrincipalHandle GetPrincipalHandle() const { return mFrame.GetPrincipalHandle(); }
+
   StreamTime mDuration;
   VideoFrame mFrame;
-  mozilla::TimeStamp mTimeStamp;
+  TimeStamp mTimeStamp;
 };
 
 class VideoSegment : public MediaSegmentBase<VideoSegment, VideoChunk> {
 public:
-#if defined(MOZILLA_XPCOMRT_API)
-  typedef mozilla::SimpleImageBuffer Image;
-#else
   typedef mozilla::layers::Image Image;
-#endif
   typedef mozilla::gfx::IntSize IntSize;
 
   VideoSegment();
@@ -116,7 +109,9 @@ public:
   void AppendFrame(already_AddRefed<Image>&& aImage,
                    StreamTime aDuration,
                    const IntSize& aIntrinsicSize,
-                   bool aForceBlack = false);
+                   const PrincipalHandle& aPrincipalHandle,
+                   bool aForceBlack = false,
+                   TimeStamp aTimeStamp = TimeStamp::Now());
   const VideoFrame* GetLastFrame(StreamTime* aStart = nullptr)
   {
     VideoChunk* c = GetLastChunk();
@@ -129,7 +124,7 @@ public:
     return &c->mFrame;
   }
   // Override default impl
-  virtual void ReplaceWithDisabled() override {
+  void ReplaceWithDisabled() override {
     for (ChunkIterator i(*this);
          !i.IsEnded(); i.Next()) {
       VideoChunk& chunk = *i;
@@ -140,10 +135,16 @@ public:
   // Segment-generic methods not in MediaSegmentBase
   static Type StaticType() { return VIDEO; }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
+
+  bool IsEmpty() const
+  {
+    return mChunks.IsEmpty();
+  }
+
 };
 
 } // namespace mozilla

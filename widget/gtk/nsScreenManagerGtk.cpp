@@ -4,10 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsScreenManagerGtk.h"
+
+#include "mozilla/RefPtr.h"
 #include "nsScreenGtk.h"
 #include "nsIComponentManager.h"
 #include "nsRect.h"
-#include "nsAutoPtr.h"
 #include "nsGtkUtils.h"
 
 #define SCREEN_MANAGER_LIBRARY_LOAD_FAILED ((PRLibrary*)1)
@@ -144,7 +145,7 @@ nsScreenManagerGtk :: Init()
 
     _XnrmQueryScreens_fn _XnrmQueryScreens = (_XnrmQueryScreens_fn)
         PR_FindFunctionSymbol(mXineramalib, "XineramaQueryScreens");
-        
+
     // get the number of screens via xinerama
     Display *display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
     if (_XnrmIsActive && _XnrmQueryScreens && _XnrmIsActive(display)) {
@@ -232,35 +233,17 @@ nsScreenManagerGtk :: ScreenForId ( uint32_t aId, nsIScreen **outScreen )
 
 
 //
-// ScreenForRect 
+// ScreenForRect
 //
 // Returns the screen that contains the rectangle. If the rect overlaps
 // multiple screens, it picks the screen with the greatest area of intersection.
 //
-// The coordinates are in CSS pixels (not app units) and in screen coordinates.
+// The coordinates are in desktop pixels.
 //
 NS_IMETHODIMP
-nsScreenManagerGtk :: ScreenForRect( int32_t aX, int32_t aY,
-                                     int32_t aWidth, int32_t aHeight,
-                                     nsIScreen **aOutScreen )
-{
-  uint32_t scale = nsScreenGtk::GetDPIScale();
-  return ScreenForRectPix(aX*scale, aY*scale, aWidth*scale, aHeight*scale,
-                          aOutScreen);
-}
-
-//
-// ScreenForRectPix
-//
-// Returns the screen that contains the rectangle. If the rect overlaps
-// multiple screens, it picks the screen with the greatest area of intersection.
-//
-// The coordinates are in device (X11) pixels.
-//
-nsresult
-nsScreenManagerGtk :: ScreenForRectPix( int32_t aX, int32_t aY,
-                                        int32_t aWidth, int32_t aHeight,
-                                        nsIScreen **aOutScreen )
+nsScreenManagerGtk::ScreenForRect(int32_t aX, int32_t aY,
+                                  int32_t aWidth, int32_t aHeight,
+                                  nsIScreen **aOutScreen)
 {
   nsresult rv;
   rv = EnsureInit();
@@ -296,7 +279,7 @@ nsScreenManagerGtk :: ScreenForRectPix( int32_t aX, int32_t aY,
   *aOutScreen = mCachedScreenArray.SafeObjectAt(which);
   NS_IF_ADDREF(*aOutScreen);
   return NS_OK;
-    
+
 } // ScreenForRect
 
 
@@ -306,8 +289,8 @@ nsScreenManagerGtk :: ScreenForRectPix( int32_t aX, int32_t aY,
 // The screen with the menubar/taskbar. This shouldn't be needed very
 // often.
 //
-NS_IMETHODIMP 
-nsScreenManagerGtk :: GetPrimaryScreen(nsIScreen * *aPrimaryScreen) 
+NS_IMETHODIMP
+nsScreenManagerGtk :: GetPrimaryScreen(nsIScreen * *aPrimaryScreen)
 {
   nsresult rv;
   rv =  EnsureInit();
@@ -318,7 +301,7 @@ nsScreenManagerGtk :: GetPrimaryScreen(nsIScreen * *aPrimaryScreen)
   *aPrimaryScreen = mCachedScreenArray.SafeObjectAt(0);
   NS_IF_ADDREF(*aPrimaryScreen);
   return NS_OK;
-  
+
 } // GetPrimaryScreen
 
 
@@ -338,7 +321,7 @@ nsScreenManagerGtk :: GetNumberOfScreens(uint32_t *aNumberOfScreens)
   }
   *aNumberOfScreens = mCachedScreenArray.Count();
   return NS_OK;
-  
+
 } // GetNumberOfScreens
 
 NS_IMETHODIMP
@@ -374,7 +357,7 @@ nsScreenManagerGtk :: ScreenForNativeWidget (void *aWidget, nsIScreen **outScree
     gdk_window_get_geometry(GDK_WINDOW(aWidget), &x, &y, &width, &height);
 #endif
     gdk_window_get_origin(GDK_WINDOW(aWidget), &x, &y);
-    rv = ScreenForRectPix(x, y, width, height, outScreen);
+    rv = ScreenForRect(x, y, width, height, outScreen);
   } else {
     rv = GetPrimaryScreen(outScreen);
   }

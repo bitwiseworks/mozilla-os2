@@ -31,7 +31,7 @@ struct MiscContainer final
         nscolor mColor;
         uint32_t mEnumValue;
         int32_t mPercent;
-        mozilla::css::Declaration* mCSSDeclaration;
+        mozilla::DeclarationBlock* mCSSDeclaration;
         mozilla::css::URLValue* mURL;
         mozilla::css::ImageValue* mImage;
         nsAttrValue::AtomArray* mAtomArray;
@@ -85,7 +85,7 @@ public:
   {
     // Nothing stops us from refcounting (and sharing) other types of
     // MiscContainer (except eDoubleValue types) but there's no compelling
-    // reason to 
+    // reason to.
     return mType == nsAttrValue::eCSSDeclaration;
   }
 
@@ -146,7 +146,7 @@ nsAttrValue::GetAtomArrayValue() const
   return GetMiscContainer()->mValue.mAtomArray;
 }
 
-inline mozilla::css::Declaration*
+inline mozilla::DeclarationBlock*
 nsAttrValue::GetCSSDeclarationValue() const
 {
   NS_PRECONDITION(Type() == eCSSDeclaration, "wrong type");

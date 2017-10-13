@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* eslint-disable block-spacing */
+
 var {utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/NetUtil.jsm");
@@ -102,12 +104,10 @@ function checkObjects(expected, actual) {
     do_check_neq(actual[key], undefined);
     if (expected[key] instanceof RegExp) {
       do_check_true(expected[key].test(actual[key].toString()));
+    } else if (expected[key] instanceof Object) {
+      checkObjects(expected[key], actual[key]);
     } else {
-      if (expected[key] instanceof Object) {
-        checkObjects(expected[key], actual[key]);
-      } else {
-        do_check_eq(expected[key], actual[key]);
-      }
+      do_check_eq(expected[key], actual[key]);
     }
   }
 
@@ -489,8 +489,8 @@ add_task(function* log_message_with_params() {
  */
 add_task(function* test_log_err_only() {
   let log = Log.repository.getLogger("error.only");
-  let testFormatter = { format: msg => msg };
-  let appender = new MockAppender(testFormatter);
+  let mockFormatter = { format: msg => msg };
+  let appender = new MockAppender(mockFormatter);
   log.addAppender(appender);
 
   /*
@@ -540,8 +540,8 @@ add_task(function* test_structured_basic() {
  */
 add_task(function* log_message_with_params() {
   let log = Log.repository.getLogger("error.logger");
-  let testFormatter = { format: msg => msg };
-  let appender = new MockAppender(testFormatter);
+  let mockFormatter = { format: msg => msg };
+  let appender = new MockAppender(mockFormatter);
   log.addAppender(appender);
 
   let testParams = {a:1, b:2};

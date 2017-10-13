@@ -31,11 +31,6 @@
 
 #define NS_APP_DEFAULTS_50_DIR                  "DefRt"         // The root dir of all defaults dirs
 #define NS_APP_PREF_DEFAULTS_50_DIR             "PrfDef"
-#define NS_APP_PROFILE_DEFAULTS_50_DIR          "profDef"       // The profile defaults of the "current"
-                                                                // locale. Should be first choice.
-#define NS_APP_PROFILE_DEFAULTS_NLOC_50_DIR     "ProfDefNoLoc"  // The profile defaults of the "default"
-                                                                // installed locale. Second choice
-                                                                // when above is not available.
                                                                                                                        
 #define NS_APP_USER_PROFILES_ROOT_DIR           "DefProfRt"     // The dir where user profile dirs live.
 #define NS_APP_USER_PROFILES_LOCAL_ROOT_DIR     "DefProfLRt"  // The dir where user profile temp dirs live.
@@ -79,8 +74,6 @@
 #define NS_APP_USER_MIMETYPES_50_FILE           "UMimTyp"
 #define NS_APP_CACHE_PARENT_DIR                 "cachePDir"
 
-#define NS_APP_BOOKMARKS_50_FILE                "BMarks"
-
 #define NS_APP_DOWNLOADS_50_FILE                "DLoads"
 
 #define NS_APP_SEARCH_50_FILE                   "SrchF"
@@ -90,4 +83,36 @@
 #define NS_APP_INDEXEDDB_PARENT_DIR             "indexedDBPDir"
 
 #define NS_APP_PERMISSION_PARENT_DIR            "permissionDBPDir"
-#endif
+
+#if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
+//
+// NS_APP_CONTENT_PROCESS_TEMP_DIR refers to a directory that is read and
+// write accessible from a sandboxed content process. The key may be used in
+// either process, but the directory is intended to be used for short-lived
+// files that need to be saved to the filesystem by the content process and
+// don't need to survive browser restarts. The directory is reset on startup.
+// The key is only valid when MOZ_CONTENT_SANDBOX is defined. When
+// MOZ_CONTENT_SANDBOX is defined, the directory the key refers to differs
+// depending on whether or not content sandboxing is enabled.
+//
+// When MOZ_CONTENT_SANDBOX is defined and sandboxing is enabled (versus
+// manually disabled via prefs), the content process replaces NS_OS_TEMP_DIR
+// with NS_APP_CONTENT_PROCESS_TEMP_DIR so that legacy code in content
+// attempting to write to NS_OS_TEMP_DIR will write to
+// NS_APP_CONTENT_PROCESS_TEMP_DIR instead. When MOZ_CONTENT_SANDBOX is
+// defined but sandboxing is disabled, NS_APP_CONTENT_PROCESS_TEMP_DIR
+// falls back to NS_OS_TEMP_DIR in both content and chrome processes.
+//
+// New code should avoid writing to the filesystem from the content process
+// and should instead proxy through the parent process whenever possible.
+//
+// At present, all sandboxed content processes use the same directory for
+// NS_APP_CONTENT_PROCESS_TEMP_DIR, but that should not be relied upon.
+//
+#define NS_APP_CONTENT_PROCESS_TEMP_DIR         "ContentTmpD"
+#else
+// Otherwise NS_APP_CONTENT_PROCESS_TEMP_DIR must match NS_OS_TEMP_DIR.
+#define NS_APP_CONTENT_PROCESS_TEMP_DIR         "TmpD"
+#endif // (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
+
+#endif // nsAppDirectoryServiceDefs_h___

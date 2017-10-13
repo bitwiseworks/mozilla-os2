@@ -49,6 +49,8 @@
 #ifndef SAMPLER_H
 #define SAMPLER_H
 
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
 #ifndef SPS_STANDALONE
 #include "js/TypeDecls.h"
 #endif
@@ -77,7 +79,7 @@ enum TracingMetadata {
   TRACING_TIMESTAMP
 };
 
-#if !defined(MOZ_ENABLE_PROFILER_SPS) || defined(MOZILLA_XPCOMRT_API)
+#if !defined(MOZ_ENABLE_PROFILER_SPS)
 
 #include <stdint.h>
 #include <stdarg.h>
@@ -102,7 +104,7 @@ enum TracingMetadata {
 // only recorded if a sample is collected while it is active, marker will always
 // be collected.
 #define PROFILER_MARKER(info) do {} while (0)
-#define PROFILER_MARKER_PAYLOAD(info, payload) do { nsAutoPtr<ProfilerMarkerPayload> payloadDeletor(payload); } while (0)
+#define PROFILER_MARKER_PAYLOAD(info, payload) do { mozilla::UniquePtr<ProfilerMarkerPayload> payloadDeletor(payload); } while (0)
 
 // Main thread specilization to avoid TLS lookup for performance critical use.
 #define PROFILER_MAIN_THREAD_LABEL(name_space, info, category) do {} while (0)
@@ -232,6 +234,7 @@ static inline void profiler_unregister_thread() {}
 // profiler_sleep_end() is an error.
 static inline void profiler_sleep_start() {}
 static inline void profiler_sleep_end() {}
+static inline bool profiler_is_sleeping() { return false; }
 
 // Call by the JSRuntime's operation callback. This is used to enable
 // profiling on auxilerary threads.
@@ -251,7 +254,7 @@ static inline void profiler_log(const char *fmt, va_list args) {}
 
 #endif
 
-class GeckoProfilerInitRAII {
+class MOZ_RAII GeckoProfilerInitRAII {
 public:
   explicit GeckoProfilerInitRAII(void* stackTop) {
     profiler_init(stackTop);
@@ -261,7 +264,7 @@ public:
   }
 };
 
-class GeckoProfilerSleepRAII {
+class MOZ_RAII GeckoProfilerSleepRAII {
 public:
   GeckoProfilerSleepRAII() {
     profiler_sleep_start();
@@ -269,6 +272,29 @@ public:
   ~GeckoProfilerSleepRAII() {
     profiler_sleep_end();
   }
+};
+
+/**
+ * Temporarily wake up the profiler while servicing events such as
+ * Asynchronous Procedure Calls (APCs).
+ */
+class MOZ_RAII GeckoProfilerWakeRAII {
+public:
+  GeckoProfilerWakeRAII()
+    : mIssuedWake(profiler_is_sleeping())
+  {
+    if (mIssuedWake) {
+      profiler_sleep_end();
+    }
+  }
+  ~GeckoProfilerWakeRAII() {
+    if (mIssuedWake) {
+      MOZ_ASSERT(!profiler_is_sleeping());
+      profiler_sleep_start();
+    }
+  }
+private:
+  bool mIssuedWake;
 };
 
 #endif // ifndef SAMPLER_H

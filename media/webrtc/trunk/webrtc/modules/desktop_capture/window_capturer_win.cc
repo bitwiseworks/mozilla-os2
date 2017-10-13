@@ -61,6 +61,10 @@ BOOL CALLBACK WindowsEnumerationHandler(HWND hwnd, LPARAM param) {
   WindowCapturer::Window window;
   window.id = reinterpret_cast<WindowCapturer::WindowId>(hwnd);
 
+  DWORD pid;
+  GetWindowThreadProcessId(hwnd, &pid);
+  window.pid = (pid_t)pid;
+
   const size_t kTitleLength = 500;
   WCHAR window_title[kTitleLength];
   // Truncate the title if it's longer than kTitleLength.
@@ -70,6 +74,12 @@ BOOL CALLBACK WindowsEnumerationHandler(HWND hwnd, LPARAM param) {
   // Skip windows when we failed to convert the title or it is empty.
   if (window.title.empty())
     return TRUE;
+  // Skip windows of zero visible area, except IconicWindows
+  RECT bounds;
+  if(GetClientRect(hwnd,&bounds) && !IsIconic(hwnd)
+    && IsRectEmpty(&bounds)){
+    return TRUE;
+  }
 
   list->push_back(window);
 
@@ -88,6 +98,7 @@ class WindowCapturerWin : public WindowCapturer {
 
   // DesktopCapturer interface.
   void Start(Callback* callback) override;
+  void Stop() override;
   void Capture(const DesktopRegion& region) override;
 
  private:
@@ -171,6 +182,10 @@ void WindowCapturerWin::Start(Callback* callback) {
   assert(callback);
 
   callback_ = callback;
+}
+
+void WindowCapturerWin::Stop() {
+  callback_ = NULL;
 }
 
 void WindowCapturerWin::Capture(const DesktopRegion& region) {

@@ -35,6 +35,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
                                   "resource://gre/modules/addons/AddonRepository.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
+
 
 // Shared code for suppressing bad cert dialogs.
 XPCOMUtils.defineLazyGetter(this, "CertUtils", function() {
@@ -274,8 +277,8 @@ function sanitizeUpdateURL(aUpdate, aRequest, aHashPattern, aHashString) {
  */
 function parseRDFManifest(aId, aUpdateKey, aRequest, aManifestData) {
   if (aManifestData.documentElement.namespaceURI != PREFIX_NS_RDF) {
-    throw Components.Exception("Update manifest had an unrecognised namespace: " + xml.documentElement.namespaceURI);
-    return;
+    throw Components.Exception("Update manifest had an unrecognised namespace: " +
+                               aManifestData.documentElement.namespaceURI);
   }
 
   function EM_R(aProp) {
@@ -320,9 +323,13 @@ function parseRDFManifest(aId, aUpdateKey, aRequest, aManifestData) {
   let extensionRes = gRDF.GetResource(PREFIX_EXTENSION + aId);
   let themeRes = gRDF.GetResource(PREFIX_THEME + aId);
   let itemRes = gRDF.GetResource(PREFIX_ITEM + aId);
-  let addonRes = ds.ArcLabelsOut(extensionRes).hasMoreElements() ? extensionRes
-               : ds.ArcLabelsOut(themeRes).hasMoreElements() ? themeRes
-               : itemRes;
+  let addonRes;
+  if (ds.ArcLabelsOut(extensionRes).hasMoreElements())
+    addonRes = extensionRes;
+  else if (ds.ArcLabelsOut(themeRes).hasMoreElements())
+    addonRes = themeRes;
+  else
+    addonRes = itemRes;
 
   // If we have an update key then the update manifest must be signed
   if (aUpdateKey) {
@@ -500,8 +507,10 @@ function parseJSONManifest(aId, aUpdateKey, aRequest, aManifestData) {
 
     // "gecko" is currently the only supported application entry. If
     // it's missing, skip this update.
-    if (!("gecko" in applications))
+    if (!("gecko" in applications)) {
+      logger.debug("gecko not in application entry, skipping update of ${addon}")
       continue;
+    }
 
     let app = getProperty(applications, "gecko", "object");
 
@@ -572,8 +581,7 @@ function UpdateParser(aId, aUpdateKey, aUrl, aObserver) {
 
   logger.debug("Requesting " + aUrl);
   try {
-    this.request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                   createInstance(Ci.nsIXMLHttpRequest);
+    this.request = new ServiceRequest();
     this.request.open("GET", this.url, true);
     this.request.channel.notificationCallbacks = new CertUtils.BadCertHandler(!requireBuiltIn);
     this.request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;

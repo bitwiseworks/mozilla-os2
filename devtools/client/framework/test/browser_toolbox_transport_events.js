@@ -1,5 +1,9 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
+
+"use strict";
 
 const { on, off } = require("sdk/event/core");
 const { DebuggerClient } = require("devtools/shared/client/main");
@@ -8,7 +12,7 @@ function test() {
   gDevTools.on("toolbox-created", onToolboxCreated);
   on(DebuggerClient, "connect", onDebuggerClientConnect);
 
-  addTab("about:blank").then(function() {
+  addTab("about:blank").then(function () {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
     gDevTools.showToolbox(target, "webconsole").then(testResults);
   });
@@ -25,9 +29,9 @@ function cleanUp(toolbox) {
   gDevTools.off("toolbox-created", onToolboxCreated);
   off(DebuggerClient, "connect", onDebuggerClientConnect);
 
-  toolbox.destroy().then(function() {
+  toolbox.destroy().then(function () {
     gBrowser.removeCurrentTab();
-    executeSoon(function() {
+    executeSoon(function () {
       finish();
     });
   });
@@ -71,11 +75,11 @@ function onToolboxCreated(eventId, toolbox) {
   let transport = client._transport;
 
   transport.on("send", send1);
-  transport.on("onPacket", onPacket1);
+  transport.on("packet", onPacket1);
 
   client.addOneTimeListener("closed", event => {
     transport.off("send", send1);
-    transport.off("onPacket", onPacket1);
+    transport.off("packet", onPacket1);
   });
 }
 
@@ -95,10 +99,10 @@ function onDebuggerClientConnect(client) {
   let transport = client._transport;
 
   transport.on("send", send2);
-  transport.on("onPacket", onPacket2);
+  transport.on("packet", onPacket2);
 
   client.addOneTimeListener("closed", event => {
     transport.off("send", send2);
-    transport.off("onPacket", onPacket2);
+    transport.off("packet", onPacket2);
   });
 }

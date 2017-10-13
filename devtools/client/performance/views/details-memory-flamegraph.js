@@ -3,6 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* import-globals-from ../performance-controller.js */
 /* import-globals-from ../performance-view.js */
+/* globals DetailsSubview */
 "use strict";
 
 /**
@@ -55,7 +56,7 @@ var MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
    * @param object interval [optional]
    *        The { startTime, endTime }, in milliseconds.
    */
-  render: function (interval={}) {
+  render: function (interval = {}) {
     let recording = PerformanceController.getCurrentRecording();
     let duration = recording.getDuration();
     let allocations = recording.getAllocations();
@@ -64,7 +65,8 @@ var MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
     let data = FlameGraphUtils.createFlameGraphDataFromThread(thread, {
       invertStack: PerformanceController.getOption("invert-flame-graph"),
       flattenRecursion: PerformanceController.getOption("flatten-tree-recursion"),
-      showIdleBlocks: PerformanceController.getOption("show-idle-blocks") && L10N.getStr("table.idle")
+      showIdleBlocks: PerformanceController.getOption("show-idle-blocks")
+                      && L10N.getStr("table.idle")
     });
 
     this.graph.setData({ data,
@@ -78,7 +80,7 @@ var MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
       }
     });
 
-    this.emit(EVENTS.MEMORY_FLAMEGRAPH_RENDERED);
+    this.emit(EVENTS.UI_MEMORY_FLAMEGRAPH_RENDERED);
   },
 
   /**
@@ -98,7 +100,7 @@ var MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
   /**
    * Called whenever a pref is changed and this view needs to be rerendered.
    */
-  _onRerenderPrefChanged: function() {
+  _onRerenderPrefChanged: function () {
     let recording = PerformanceController.getCurrentRecording();
     let allocations = recording.getAllocations();
     let thread = RecordingUtils.getProfileThreadFromAllocations(allocations);

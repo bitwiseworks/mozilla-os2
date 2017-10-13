@@ -27,7 +27,7 @@
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsLayoutUtils.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/ReflowInput.h"
 #include "nsIObjectLoadingContent.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
@@ -115,12 +115,12 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
   }
 
   // Get the node that was clicked on.
-  EventTarget* target = mouseEvent->InternalDOMEvent()->GetTarget();
+  EventTarget* target = mouseEvent->AsEvent()->InternalDOMEvent()->GetTarget();
   nsCOMPtr<nsIDOMNode> targetNode = do_QueryInterface(target);
 
   if (!targetNode && mIsContext) {
     // Not a DOM node, see if it's the DOM window (bug 380818).
-    nsCOMPtr<nsPIDOMWindow> domWin = do_QueryInterface(target);
+    nsCOMPtr<nsPIDOMWindowInner> domWin = do_QueryInterface(target);
     if (!domWin) {
       return NS_ERROR_DOM_WRONG_TYPE_ERR;
     }
@@ -138,13 +138,12 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
   if (!targetContent) {
     return NS_OK;
   }
-  if (targetContent->IsXULElement(nsGkAtoms::browser) &&
-      EventStateManager::IsRemoteTarget(targetContent)) {
+  if (EventStateManager::IsRemoteTarget(targetContent)) {
     return NS_OK;
   }
 
   bool preventDefault;
-  mouseEvent->GetDefaultPrevented(&preventDefault);
+  mouseEvent->AsEvent()->GetDefaultPrevented(&preventDefault);
   if (preventDefault && targetNode && mIsContext) {
     // Someone called preventDefault on a context menu.
     // Let's make sure they are allowed to do so.
@@ -242,7 +241,7 @@ nsXULPopupListener::FireFocusOnTargetContent(nsIDOMNode* aTargetNode, bool aIsTo
     if (!targetFrame) return NS_ERROR_FAILURE;
 
     const nsStyleUserInterface* ui = targetFrame->StyleUserInterface();
-    bool suppressBlur = (ui->mUserFocus == NS_STYLE_USER_FOCUS_IGNORE);
+    bool suppressBlur = (ui->mUserFocus == StyleUserFocus::Ignore);
 
     nsCOMPtr<nsIDOMElement> element;
     nsCOMPtr<nsIContent> newFocus = do_QueryInterface(content);
@@ -272,7 +271,7 @@ nsXULPopupListener::FireFocusOnTargetContent(nsIDOMNode* aTargetNode, bool aIsTo
         }
         fm->SetFocus(element, focusFlags);
       } else if (!suppressBlur) {
-        nsPIDOMWindow *window = doc->GetWindow();
+        nsPIDOMWindowOuter *window = doc->GetWindow();
         fm->ClearFocus(window);
       }
     }

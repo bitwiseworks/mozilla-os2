@@ -16,7 +16,6 @@ const CONTENT_PREFS_DB_FILENAME = "content-prefs.sqlite";
 const CONTENT_PREFS_BACKUP_DB_FILENAME = "content-prefs.sqlite.corrupt";
 
 var ContentPrefTest = {
-  //**************************************************************************//
   // Convenience Getters
 
   __dirSvc: null,
@@ -44,9 +43,8 @@ var ContentPrefTest = {
   },
 
 
-  //**************************************************************************//
   // nsISupports
-  
+
   interfaces: [Ci.nsIDirectoryServiceProvider, Ci.nsISupports],
 
   QueryInterface: function ContentPrefTest_QueryInterface(iid) {
@@ -56,7 +54,6 @@ var ContentPrefTest = {
   },
 
 
-  //**************************************************************************//
   // nsIDirectoryServiceProvider
 
   getFile: function ContentPrefTest_getFile(property, persistent) {
@@ -72,7 +69,6 @@ var ContentPrefTest = {
   },
 
 
-  //**************************************************************************//
   // Utilities
 
   getURI: function ContentPrefTest_getURI(spec) {
@@ -108,7 +104,7 @@ var ContentPrefTest = {
     var file = this.getProfileDir();
     file.append(CONTENT_PREFS_DB_FILENAME);
     if (file.exists())
-      try { file.remove(false); } catch(e) { /* stupid windows box */ }
+      try { file.remove(false); } catch (e) { /* stupid windows box */ }
     return file;
   },
 

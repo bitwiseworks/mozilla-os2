@@ -111,12 +111,12 @@ public:
 
   EParserState GetState() { return mState; }
 
-  static NS_METHOD SegmentWriter(nsIUnicharInputStream* aStream,
-                                 void* aClosure,
-                                 const char16_t* aFromSegment,
-                                 uint32_t aToOffset,
-                                 uint32_t aCount,
-                                 uint32_t* aWriteCount);
+  static nsresult SegmentWriter(nsIUnicharInputStream* aStream,
+                                void* aClosure,
+                                const char16_t* aFromSegment,
+                                uint32_t aToOffset,
+                                uint32_t aCount,
+                                uint32_t* aWriteCount);
 
   nsresult ParseBuffer(const char16_t* aBuffer, uint32_t aBufferLength);
 
@@ -343,7 +343,7 @@ nsPropertiesParser::ParseValueCharacter(char16_t aChar, const char16_t* aCur,
   return true;
 }
 
-NS_METHOD
+nsresult
 nsPropertiesParser::SegmentWriter(nsIUnicharInputStream* aStream,
                                   void* aClosure,
                                   const char16_t* aFromSegment,
@@ -486,8 +486,7 @@ NS_IMPL_ISUPPORTS(nsPersistentProperties, nsIPersistentProperties, nsIProperties
 NS_IMETHODIMP
 nsPersistentProperties::Load(nsIInputStream* aIn)
 {
-  nsresult rv = nsSimpleUnicharStreamFactory::GetInstance()->
-    CreateInstanceFromUTF8Stream(aIn, getter_AddRefs(mIn));
+  nsresult rv = NS_NewUnicharInputStream(aIn, getter_AddRefs(mIn));
 
   if (rv != NS_OK) {
     NS_WARNING("Error creating UnicharInputStream");
@@ -524,11 +523,11 @@ nsPersistentProperties::SetStringProperty(const nsACString& aKey,
 {
   const nsAFlatCString&  flatKey = PromiseFlatCString(aKey);
   auto entry = static_cast<PropertyTableEntry*>
-                          (mTable.Add(flatKey.get(), mozilla::fallible));
+                          (mTable.Add(flatKey.get()));
 
   if (entry->mKey) {
     aOldValue = entry->mValue;
-    NS_WARNING(nsPrintfCString("the property %s already exists\n",
+    NS_WARNING(nsPrintfCString("the property %s already exists",
                                flatKey.get()).get());
   } else {
     aOldValue.Truncate();
@@ -624,7 +623,7 @@ nsPersistentProperties::GetKeys(uint32_t* aCount, char*** aKeys)
 // PropertyElement
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_METHOD
+nsresult
 nsPropertyElement::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 {
   if (aOuter) {

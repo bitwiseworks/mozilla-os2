@@ -9,6 +9,7 @@
 #include "mozilla/dom/SVGAnimationElement.h"
 #include "mozilla/Move.h"
 #include "nsISMILAttr.h"
+#include "nsSMILCSSValueType.h"
 #include "nsSMILParserUtils.h"
 #include "nsSMILNullType.h"
 #include "nsSMILTimedElement.h"
@@ -17,7 +18,6 @@
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsIContent.h"
-#include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsReadableUtils.h"
 #include "nsString.h"
@@ -384,6 +384,15 @@ nsSMILAnimationFunction::InterpolateResult(const nsSMILValueArray& aValues,
 
   nsresult rv = NS_OK;
   nsSMILCalcMode calcMode = GetCalcMode();
+
+  // Force discrete calcMode for visibility since StyleAnimationValue will
+  // try to interpolate it using the special clamping behavior defined for
+  // CSS.
+  if (nsSMILCSSValueType::PropertyFromValue(aValues[0])
+        == eCSSProperty_visibility) {
+    calcMode = CALC_DISCRETE;
+  }
+
   if (calcMode != CALC_DISCRETE) {
     // Get the normalised progress between adjacent values
     const nsSMILValue* from = nullptr;

@@ -21,17 +21,20 @@ GlobalResolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolv
 
 BEGIN_TEST(testRedefineGlobalEval)
 {
-    static const JSClass cls = {
-        "global", JSCLASS_GLOBAL_FLAGS,
+    static const JSClassOps clsOps = {
         nullptr, nullptr, nullptr, nullptr,
         GlobalEnumerate, GlobalResolve, nullptr, nullptr,
         nullptr, nullptr, nullptr,
         JS_GlobalObjectTraceHook
     };
 
+    static const JSClass cls = {
+        "global", JSCLASS_GLOBAL_FLAGS,
+        &clsOps
+    };
+
     /* Create the global object. */
     JS::CompartmentOptions options;
-    options.setVersion(JSVERSION_LATEST);
     JS::Rooted<JSObject*> g(cx, JS_NewGlobalObject(cx, &cls, nullptr, JS::FireOnNewGlobalHook, options));
     if (!g)
         return false;

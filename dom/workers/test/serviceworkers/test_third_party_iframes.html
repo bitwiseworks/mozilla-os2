@@ -95,7 +95,7 @@ function testShouldIntercept(done) {
   }, {
     status: "swresponse",
     next: function() {
-      iframe.src = origin + basePath + "unregister.html";
+      iframe.src = thirdPartyOrigin + basePath + "unregister.html";
     }
   }, {
     status: "unregistrationdone",
@@ -122,7 +122,7 @@ function testShouldNotIntercept(done) {
   }, {
     status: "networkresponse",
     next: function() {
-      iframe.src = origin + basePath + "unregister.html";
+      iframe.src = thirdPartyOrigin + basePath + "unregister.html";
     }
   }, {
     status: "unregistrationdone",
@@ -144,7 +144,6 @@ let steps = [() => {
     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
     ["dom.serviceWorkers.enabled", true],
     ["dom.serviceWorkers.testing.enabled", true],
-    ["dom.serviceWorkers.interception.enabled", true],
     ["browser.dom.window.dump.enabled", true],
     ["network.cookie.cookieBehavior", COOKIE_BEHAVIOR_ACCEPT]
   ]}, next);

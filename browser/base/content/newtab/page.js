@@ -36,9 +36,6 @@ var gPage = {
 
     // Initialize customize controls.
     gCustomize.init();
-
-    // Initialize intro panel.
-    gIntro.init();
   },
 
   /**
@@ -54,7 +51,6 @@ var gPage = {
       // Update thumbnails to the new enhanced setting
       if (aData == "browser.newtabpage.enhanced") {
         this.update();
-        gIntro.showIfNecessary();
       }
 
       // Initialize the whole page if we haven't done that, yet.
@@ -118,13 +114,22 @@ var gPage = {
 
     this._initialized = true;
 
+    // Set submit button label for when CSS background are disabled (e.g.
+    // high contrast mode).
+    document.getElementById("newtab-search-submit").value =
+      document.body.getAttribute("dir") == "ltr" ? "\u25B6" : "\u25C0";
+
+    if (Services.prefs.getBoolPref("browser.newtabpage.compact")) {
+      document.body.classList.add("compact");
+    }
+
     // Initialize search.
     gSearch.init();
 
     if (document.hidden) {
       addEventListener("visibilitychange", this);
     } else {
-      setTimeout(_ => this.onPageFirstVisible());
+      setTimeout(() => this.onPageFirstVisible());
     }
 
     // Initialize and render the grid.
@@ -171,7 +176,7 @@ var gPage = {
     gAllPages.unregister(this);
     // compute page life-span and send telemetry probe: using milli-seconds will leave
     // many low buckets empty. Instead we use half-second precision to make low end
-    // of histogram linear and not loose the change in user attention
+    // of histogram linear and not lose the change in user attention
     let delta = Math.round((Date.now() - this._firstVisibleTime) / 500);
     if (this._suggestedTilePresent) {
       Services.telemetry.getHistogramById("NEWTAB_PAGE_LIFE_SPAN_SUGGESTED").add(delta);
@@ -255,9 +260,8 @@ var gPage = {
   onPageVisibleAndLoaded() {
     // Send the index of the last visible tile.
     this.reportLastVisibleTileIndex();
-
-    // Show the panel now that anchors are sized
-    gIntro.showIfNecessary();
+    // Maybe tell the user they can undo an initial automigration
+    this.maybeShowAutoMigrationUndoNotification();
   },
 
   reportLastVisibleTileIndex() {
@@ -285,5 +289,9 @@ var gPage = {
     }
 
     DirectoryLinksProvider.reportSitesAction(sites, "view", lastIndex);
-  }
+  },
+
+  maybeShowAutoMigrationUndoNotification() {
+    sendAsyncMessage("NewTab:MaybeShowAutoMigrationUndoNotification");
+  },
 };

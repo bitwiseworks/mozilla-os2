@@ -9,10 +9,10 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/HTMLFormElement.h"
+#include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/HTMLOutputElementBinding.h"
 #include "nsContentUtils.h"
-#include "nsDOMSettableTokenList.h"
-#include "nsFormSubmission.h"
+#include "nsDOMTokenList.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(Output)
 
@@ -75,7 +75,7 @@ HTMLOutputElement::Reset()
 }
 
 NS_IMETHODIMP
-HTMLOutputElement::SubmitNamesValues(nsFormSubmission* aFormSubmission)
+HTMLOutputElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
 {
   // The output element is not submittable.
   return NS_OK;
@@ -166,11 +166,11 @@ HTMLOutputElement::SetDefaultValue(const nsAString& aDefaultValue, ErrorResult& 
   }
 }
 
-nsDOMSettableTokenList*
+nsDOMTokenList*
 HTMLOutputElement::HtmlFor()
 {
   if (!mTokenList) {
-    mTokenList = new nsDOMSettableTokenList(this, nsGkAtoms::_for);
+    mTokenList = new nsDOMTokenList(this, nsGkAtoms::_for);
   }
   return mTokenList;
 }

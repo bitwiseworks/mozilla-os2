@@ -21,6 +21,7 @@ class ErrorResult;
 namespace dom {
 
 template<typename T> class MozMap;
+class HeadersEntry;
 
 class InternalHeaders final
 {
@@ -64,12 +65,17 @@ public:
   explicit InternalHeaders(const nsTArray<Entry>&& aHeaders,
                            HeadersGuardEnum aGuard = HeadersGuardEnum::None);
 
+  InternalHeaders(const nsTArray<HeadersEntry>& aHeadersEntryList,
+                  HeadersGuardEnum aGuard);
+
+  void ToIPC(nsTArray<HeadersEntry>& aIPCHeaders,
+             HeadersGuardEnum& aGuard);
+
   void Append(const nsACString& aName, const nsACString& aValue,
               ErrorResult& aRv);
   void Delete(const nsACString& aName, ErrorResult& aRv);
-  void Get(const nsACString& aName, nsCString& aValue, ErrorResult& aRv) const;
-  void GetAll(const nsACString& aName, nsTArray<nsCString>& aResults,
-              ErrorResult& aRv) const;
+  void Get(const nsACString& aName, nsACString& aValue, ErrorResult& aRv) const;
+  void GetFirst(const nsACString& aName, nsACString& aValue, ErrorResult& aRv) const;
   bool Has(const nsACString& aName, ErrorResult& aRv) const;
   void Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv);
 
@@ -98,6 +104,8 @@ public:
   void Fill(const MozMap<nsCString>& aInit, ErrorResult& aRv);
 
   bool HasOnlySimpleHeaders() const;
+
+  bool HasRevalidationHeaders() const;
 
   static already_AddRefed<InternalHeaders>
   BasicHeaders(InternalHeaders* aHeaders);
@@ -142,6 +150,8 @@ private:
 
   static bool IsSimpleHeader(const nsACString& aName,
                              const nsACString& aValue);
+
+  static bool IsRevalidationHeader(const nsACString& aName);
 };
 
 } // namespace dom

@@ -8,7 +8,6 @@ package org.mozilla.gecko.home;
 import org.mozilla.gecko.R;
 
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.home.PanelLayout.DatasetBacked;
 import org.mozilla.gecko.home.PanelLayout.FilterManager;
 
@@ -85,9 +84,7 @@ class PanelRefreshLayout extends SwipeRefreshLayout implements DatasetBacked {
                 return;
             }
 
-            final GeckoEvent event =
-                GeckoEvent.createBroadcastEvent("HomePanels:RefreshView", response.toString());
-            GeckoAppShell.sendEventToGecko(event);
+            GeckoAppShell.notifyObservers("HomePanels:RefreshView", response.toString());
         }
     }
 }

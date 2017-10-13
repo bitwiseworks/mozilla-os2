@@ -26,6 +26,7 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
@@ -93,6 +94,8 @@ public class PreSearchFragment extends Fragment {
         getLoaderManager().destroyLoader(LOADER_ID_SEARCH_HISTORY);
         cursorAdapter.swapCursor(null);
         cursorAdapter = null;
+
+        GeckoApplication.watchReference(getActivity(), this);
     }
 
     @Override
@@ -110,7 +113,7 @@ public class PreSearchFragment extends Fragment {
                     final Rect startBounds = new Rect();
                     view.getGlobalVisibleRect(startBounds);
 
-                    Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.HOMESCREEN, "history");
+                    Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.SUGGESTION, "history");
 
                     searchListener.onSearch(query, new SuggestionAnimation() {
                         @Override

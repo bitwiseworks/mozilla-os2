@@ -15,9 +15,6 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
-  disableServiceWorkerEvents(
-    'https://example.org/1'
-  );
   run_next_test();
 }
 
@@ -28,7 +25,6 @@ add_task(function* test_register_success() {
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -56,18 +52,26 @@ add_task(function* test_register_success() {
     }
   });
 
-  let newRecord = yield PushNotificationService.register(
-    'https://example.org/1',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
-  equal(newRecord.pushEndpoint, 'https://example.com/update/1',
+  let subModifiedPromise = promiseObserverNotification(
+    PushServiceComponent.subscriptionModifiedTopic);
+
+  let newRecord = yield PushService.register({
+    scope: 'https://example.org/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
+  equal(newRecord.endpoint, 'https://example.com/update/1',
     'Wrong push endpoint in registration record');
+
+  let {data: subModifiedScope} = yield subModifiedPromise;
+  equal(subModifiedScope, 'https://example.org/1',
+    'Should fire a subscription modified event after subscribing');
 
   let record = yield db.getByKeyID(channelID);
   equal(record.channelID, channelID,
     'Wrong channel ID in database record');
   equal(record.pushEndpoint, 'https://example.com/update/1',
     'Wrong push endpoint in database record');
-  equal(record.quota, Infinity,
+  equal(record.quota, 16,
     'Wrong quota in database record');
 });

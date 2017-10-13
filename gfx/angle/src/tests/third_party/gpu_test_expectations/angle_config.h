@@ -29,13 +29,18 @@ typedef uint32_t uint32;
 typedef int64_t int64;
 typedef uint64_t uint64;
 
-// Shim Chromium's base by importing functions in the bsae namespace.
+// Shim Chromium's base by importing functions in the base namespace.
 namespace base
 {
-    using angle::HexStringToUInt;
-    using angle::ReadFileToString;
+    using angle::kWhitespaceASCII;
+    using angle::TRIM_WHITESPACE;
+    using angle::KEEP_WHITESPACE;
+    using angle::SPLIT_WANT_ALL;
+    using angle::SPLIT_WANT_NONEMPTY;
     using angle::SplitString;
     using angle::SplitStringAlongWhitespace;
+    using angle::HexStringToUInt;
+    using angle::ReadFileToString;
 
     // StringPrintf is called differently in ANGLE but using cannot change
     // the name of the imported function. Use a define to change the name.
@@ -44,8 +49,11 @@ namespace base
 }
 
 // TODO(jmadill): other platforms
+// clang-format off
 #if defined(_WIN32) || defined(_WIN64)
 #    define OS_WIN
+#elif defined(ANDROID)
+#    define OS_ANDROID
 #elif defined(__linux__)
 #    define OS_LINUX
 #elif defined(__APPLE__)
@@ -53,5 +61,6 @@ namespace base
 #else
 #    error "Unsupported platform"
 #endif
+// clang-format on
 
 #endif

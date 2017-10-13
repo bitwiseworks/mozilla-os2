@@ -5,11 +5,11 @@
 
 #include "nsPrintProgress.h"
 
+#include "nsArray.h"
 #include "nsIBaseWindow.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsISupportsArray.h"
 #include "nsIXULWindow.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
@@ -42,7 +42,7 @@ nsPrintProgress::~nsPrintProgress()
   (void)ReleaseListeners();
 }
 
-NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(nsIDOMWindow *parent,
+NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(mozIDOMWindowProxy *parent,
                                                   const char *dialogURL,
                                                   nsISupports *parameters, 
                                                   nsIObserver *openDialogObserver,
@@ -61,9 +61,7 @@ NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(nsIDOMWindow *parent,
   if (parent)
   {
     // Set up window.arguments[0]...
-    nsCOMPtr<nsISupportsArray> array;
-    rv = NS_NewISupportsArray(getter_AddRefs(array));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIMutableArray> array = nsArray::Create();
 
     nsCOMPtr<nsISupportsInterfacePointer> ifptr =
       do_CreateInstance(NS_SUPPORTS_INTERFACE_POINTER_CONTRACTID, &rv);
@@ -72,16 +70,14 @@ NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(nsIDOMWindow *parent,
     ifptr->SetData(static_cast<nsIPrintProgress*>(this));
     ifptr->SetDataIID(&NS_GET_IID(nsIPrintProgress));
 
-    array->AppendElement(ifptr);
+    array->AppendElement(ifptr, /*weak =*/ false);
 
-    array->AppendElement(parameters);
+    array->AppendElement(parameters, /*weak =*/ false);
 
     // We will set the opener of the dialog to be the nsIDOMWindow for the
     // browser XUL window itself, as opposed to the content. That way, the
     // progress window has access to the opener.
-    nsCOMPtr<nsPIDOMWindow> pParentWindow = do_QueryInterface(parent);
-    NS_ENSURE_STATE(pParentWindow);
-
+    auto* pParentWindow = nsPIDOMWindowOuter::From(parent);
     nsCOMPtr<nsIDocShell> docShell = pParentWindow->GetDocShell();
     NS_ENSURE_STATE(docShell);
 
@@ -89,14 +85,13 @@ NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(nsIDOMWindow *parent,
     docShell->GetTreeOwner(getter_AddRefs(owner));
 
     nsCOMPtr<nsIXULWindow> ownerXULWindow = do_GetInterface(owner);
-    nsCOMPtr<nsIDOMWindow> ownerWindow = do_GetInterface(ownerXULWindow);
+    nsCOMPtr<mozIDOMWindowProxy> ownerWindow = do_GetInterface(ownerXULWindow);
     NS_ENSURE_STATE(ownerWindow);
 
-    nsCOMPtr<nsPIDOMWindow> piOwnerWindow = do_QueryInterface(ownerWindow);
-    MOZ_ASSERT(piOwnerWindow);
+    nsCOMPtr<nsPIDOMWindowOuter> piOwnerWindow = nsPIDOMWindowOuter::From(ownerWindow);
 
     // Open the dialog.
-    nsCOMPtr<nsIDOMWindow> newWindow;
+    nsCOMPtr<nsPIDOMWindowOuter> newWindow;
 
     rv = piOwnerWindow->OpenDialog(NS_ConvertASCIItoUTF16(dialogURL),
                                    NS_LITERAL_STRING("_blank"),
@@ -121,7 +116,7 @@ NS_IMETHODIMP nsPrintProgress::GetPrompter(nsIPrompt **_retval)
   *_retval = nullptr;
 
   if (! m_closeProgress && m_dialog) {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(m_dialog);
+    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(m_dialog);
     MOZ_ASSERT(window);
     return window->GetPrompter(_retval);
   }
@@ -260,7 +255,7 @@ NS_IMETHODIMP nsPrintProgress::ShowProgress(int32_t percent)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP nsPrintProgress::SetDocShell(nsIDocShell *shell, nsIDOMWindow *window)
+NS_IMETHODIMP nsPrintProgress::SetDocShell(nsIDocShell *shell, mozIDOMWindowProxy *window)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

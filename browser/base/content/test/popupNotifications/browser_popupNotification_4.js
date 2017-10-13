@@ -103,7 +103,6 @@ var tests = [
       showNotification(notifyObj);
       let win = gBrowser.replaceTabWithWindow(gBrowser.selectedTab);
       whenDelayedStartupFinished(win, function() {
-        let [tab] = win.gBrowser.tabs;
         let anchor = win.document.getElementById("default-notification-icon");
         win.PopupNotifications._reshowNotifications(anchor);
         ok(win.PopupNotifications.panel.childNodes.length == 0,
@@ -117,7 +116,10 @@ var tests = [
   },
   // Moving a tab to a new window should preserve swappable notifications.
   { id: "Test#6",
-    run: function() {
+    run: function* () {
+      let originalBrowser = gBrowser.selectedBrowser;
+      let originalWindow = window;
+
       gBrowser.selectedTab = gBrowser.addTab("about:blank");
       let notifyObj = new BasicNotification(this.id);
       let originalCallback = notifyObj.options.eventCallback;
@@ -126,17 +128,36 @@ var tests = [
         return eventName == "swapping";
       };
 
-      showNotification(notifyObj);
+      let notification = showNotification(notifyObj);
       let win = gBrowser.replaceTabWithWindow(gBrowser.selectedTab);
-      whenDelayedStartupFinished(win, function() {
-        let [tab] = win.gBrowser.tabs;
-        let anchor = win.document.getElementById("default-notification-icon");
-        win.PopupNotifications._reshowNotifications(anchor);
-        checkPopup(win.PopupNotifications.panel, notifyObj);
-        ok(notifyObj.swappingCallbackTriggered, "the swapping callback was triggered");
-        win.close();
-        goNext();
+      yield whenDelayedStartupFinished(win);
+
+      yield new Promise(resolve => {
+        let originalCallback = notification.options.eventCallback;
+        notification.options.eventCallback = function (eventName) {
+          originalCallback(eventName);
+          if (eventName == "shown") {
+            resolve();
+          }
+        };
+        info("Showing the notification again");
+        notification.reshow();
       });
+
+      checkPopup(win.PopupNotifications.panel, notifyObj);
+      ok(notifyObj.swappingCallbackTriggered, "the swapping callback was triggered");
+      yield BrowserTestUtils.closeWindow(win);
+
+      // These are the same checks that PopupNotifications.jsm makes before it
+      // allows a notification to open. Do not go to the next test until we are
+      // sure that its attempt to display a notification will not fail.
+      yield BrowserTestUtils.waitForCondition(() => originalBrowser.docShellIsActive,
+                                              "The browser should be active");
+      let fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
+      yield BrowserTestUtils.waitForCondition(() => fm.activeWindow == originalWindow,
+                                              "The window should be active")
+
+      goNext();
     }
   },
   // the hideNotNow option

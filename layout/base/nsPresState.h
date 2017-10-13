@@ -21,10 +21,12 @@ public:
   nsPresState()
     : mContentData(nullptr)
     , mScrollState(0, 0)
+    , mAllowScrollOriginDowngrade(true)
     , mResolution(1.0)
     , mScaleToResolution(false)
     , mDisabledSet(false)
     , mDisabled(false)
+    , mDroppedDown(false)
   {}
 
   void SetScrollState(const nsPoint& aState)
@@ -32,9 +34,19 @@ public:
     mScrollState = aState;
   }
 
-  nsPoint GetScrollState() const
+  nsPoint GetScrollPosition() const
   {
     return mScrollState;
+  }
+
+  void SetAllowScrollOriginDowngrade(bool aAllowScrollOriginDowngrade)
+  {
+    mAllowScrollOriginDowngrade = aAllowScrollOriginDowngrade;
+  }
+
+  bool GetAllowScrollOriginDowngrade()
+  {
+    return mAllowScrollOriginDowngrade;
   }
 
   void SetResolution(float aSize)
@@ -89,14 +101,26 @@ public:
     mContentData = aProperty;
   }
 
+  void SetDroppedDown(bool aDroppedDown)
+  {
+    mDroppedDown = aDroppedDown;
+  }
+
+  bool GetDroppedDown() const
+  {
+    return mDroppedDown;
+  }
+
 // MEMBER VARIABLES
 protected:
   nsCOMPtr<nsISupports> mContentData;
   nsPoint mScrollState;
+  bool mAllowScrollOriginDowngrade;
   float mResolution;
   bool mScaleToResolution;
   bool mDisabledSet;
   bool mDisabled;
+  bool mDroppedDown;
 };
 
 #endif /* nsPresState_h_ */

@@ -57,7 +57,7 @@ add_task(function* test_onlyBookmarked()
   var query = PlacesUtils.history.getNewQuery();
   query.setFolders([PlacesUtils.toolbarFolderId], 1);
   query.onlyBookmarked = true;
-  
+
   // query options
   var options = PlacesUtils.history.getNewQueryOptions();
   options.queryType = options.QUERY_TYPE_HISTORY;
@@ -66,7 +66,7 @@ add_task(function* test_onlyBookmarked()
   var result = PlacesUtils.history.executeQuery(query, options);
   var root = result.root;
   root.containerOpen = true;
-  
+
   // You can use this to compare the data in the array with the result set,
   // if the array's isInQuery: true items are sorted the same way as the result
   // set.
@@ -74,26 +74,23 @@ add_task(function* test_onlyBookmarked()
   compareArrayToResult(testData, root);
   do_print("end first test");
 
-  /* ******************
-  Test live-update
-  ********************/
- 
+  // Test live-update
   var liveUpdateTestData = [
-    //Add a bookmark that should show up
+    // Add a bookmark that should show up
     { isBookmark: true,
       uri: "http://bookmarked2.com/",
       parentGuid: PlacesUtils.bookmarks.toolbarGuid,
       index: PlacesUtils.bookmarks.DEFAULT_INDEX,
       isInQuery: true },
 
-    //Add a bookmark that should not show up
+    // Add a bookmark that should not show up
     { isBookmark: true,
       uri: "http://bookmarked-elsewhere2.com/",
       parentGuid: PlacesUtils.bookmarks.menuGuid,
       index: PlacesUtils.bookmarks.DEFAULT_INDEX,
       isInQuery: false }
   ];
-  
+
   yield task_populateDB(liveUpdateTestData); // add to the db
 
   // add to the test data

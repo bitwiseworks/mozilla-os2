@@ -8,10 +8,10 @@
 #ifndef SkDataTable_DEFINED
 #define SkDataTable_DEFINED
 
+#include "../private/SkTDArray.h"
 #include "SkChunkAlloc.h"
 #include "SkData.h"
 #include "SkString.h"
-#include "SkTDArray.h"
 
 /**
  *  Like SkData, SkDataTable holds an immutable data buffer. The data buffer is
@@ -20,8 +20,6 @@
  */
 class SK_API SkDataTable : public SkRefCnt {
 public:
-    SK_DECLARE_INST_COUNT(SkDataTable)
-
     /**
      *  Returns true if the table is empty (i.e. has no entries).
      */
@@ -65,7 +63,7 @@ public:
 
     typedef void (*FreeProc)(void* context);
 
-    static SkDataTable* NewEmpty();
+    static sk_sp<SkDataTable> MakeEmpty();
 
     /**
      *  Return a new DataTable that contains a copy of the data stored in each
@@ -76,8 +74,8 @@ public:
      *               ptrs[] array.
      *  @param count the number of array elements in ptrs[] and sizes[] to copy.
      */
-    static SkDataTable* NewCopyArrays(const void * const * ptrs,
-                                      const size_t sizes[], int count);
+    static sk_sp<SkDataTable> MakeCopyArrays(const void * const * ptrs,
+                                             const size_t sizes[], int count);
 
     /**
      *  Return a new table that contains a copy of the data in array.
@@ -87,11 +85,10 @@ public:
      *  @param count the number of entries to be copied out of array. The number
      *               of bytes that will be copied is count * elemSize.
      */
-    static SkDataTable* NewCopyArray(const void* array, size_t elemSize,
-                                     int count);
+    static sk_sp<SkDataTable> MakeCopyArray(const void* array, size_t elemSize, int count);
 
-    static SkDataTable* NewArrayProc(const void* array, size_t elemSize,
-                                     int count, FreeProc proc, void* context);
+    static sk_sp<SkDataTable> MakeArrayProc(const void* array, size_t elemSize, int count,
+                                            FreeProc proc, void* context);
 
 private:
     struct Dir {
@@ -166,7 +163,7 @@ public:
      *  calls to append(). This call also clears any accumluated entries from
      *  this builder, so its count() will be 0 after this call.
      */
-    SkDataTable* detachDataTable();
+    sk_sp<SkDataTable> detachDataTable();
 
 private:
     SkTDArray<SkDataTable::Dir> fDir;

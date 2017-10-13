@@ -6,26 +6,20 @@ config = {
     # l10n
     "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-beta",
 
-    # mar
-    "latest_mar_dir": "fake_kill_me",
-
     # repositories
     # staging beta dev releases use date repo for now
     "mozilla_dir": "date",
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
     }, {
-        "vcs": "hgtool",
+        "vcs": "hg",
         "repo": "https://hg.mozilla.org/projects/date",
-        "revision": "default",
+        "branch": "%(revision)s",
         "dest": "date",
-    }, {
-        "vcs": "hgtool",
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
+        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
     }],
     # purge options
     'is_automation': True,
@@ -33,6 +27,7 @@ config = {
     'default_actions': [
         "clobber",
         "pull",
+        "clone-locales",
         "list-locales",
         "setup",
         "repack",

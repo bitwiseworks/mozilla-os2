@@ -12,17 +12,22 @@ import java.util.Queue;
 import java.util.Set;
 
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.reader.ReaderModeUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.util.Log;
 
 class GlobalHistory {
     private static final String LOGTAG = "GeckoGlobalHistory";
+
+    public static final String EVENT_URI_AVAILABLE_IN_HISTORY = "URI_INSERTED_TO_HISTORY";
+    public static final String EVENT_PARAM_URI = "uri";
 
     private static final String TELEMETRY_HISTOGRAM_ADD = "FENNEC_GLOBALHISTORY_ADD_MS";
     private static final String TELEMETRY_HISTOGRAM_UPDATE = "FENNEC_GLOBALHISTORY_UPDATE_MS";
@@ -52,7 +57,7 @@ class GlobalHistory {
 
         public NotifierRunnable(final Context context) {
             mContentResolver = context.getContentResolver();
-            mDB = GeckoProfile.get(context).getDB();
+            mDB = BrowserDB.from(context);
         }
 
         @Override
@@ -118,12 +123,16 @@ class GlobalHistory {
         ThreadUtils.assertOnBackgroundThread();
         final long start = SystemClock.uptimeMillis();
 
-        db.updateVisitedHistory(context.getContentResolver(), uri);
+        // stripAboutReaderUrl only removes about:reader if present, in all other cases the original string is returned
+        final String uriToStore = ReaderModeUtils.stripAboutReaderUrl(uri);
+
+        db.updateVisitedHistory(context.getContentResolver(), uriToStore);
 
         final long end = SystemClock.uptimeMillis();
         final long took = end - start;
         Telemetry.addToHistogram(TELEMETRY_HISTOGRAM_ADD, (int) Math.min(took, Integer.MAX_VALUE));
-        addToGeckoOnly(uri);
+        addToGeckoOnly(uriToStore);
+        dispatchUriAvailableMessage(uri);
     }
 
     @SuppressWarnings("static-method")
@@ -131,7 +140,9 @@ class GlobalHistory {
         ThreadUtils.assertOnBackgroundThread();
         final long start = SystemClock.uptimeMillis();
 
-        db.updateHistoryTitle(cr, uri, title);
+        final String uriToStore = ReaderModeUtils.stripAboutReaderUrl(uri);
+
+        db.updateHistoryTitle(cr, uriToStore, title);
 
         final long end = SystemClock.uptimeMillis();
         final long took = end - start;
@@ -139,13 +150,15 @@ class GlobalHistory {
     }
 
     public void checkUriVisited(final String uri) {
+        final String storedURI = ReaderModeUtils.stripAboutReaderUrl(uri);
+
         final NotifierRunnable runnable = new NotifierRunnable(GeckoAppShell.getContext());
         mHandler.post(new Runnable() {
             @Override
             public void run() {
                 // this runs on the same handler thread as the processing loop,
                 // so no synchronization needed
-                mPendingUris.add(uri);
+                mPendingUris.add(storedURI);
                 if (mProcessing) {
                     // there's already a runnable queued up or working away, so
                     // no need to post another
@@ -155,5 +168,11 @@ class GlobalHistory {
                 mHandler.postDelayed(runnable, BATCHING_DELAY_MS);
             }
         });
+    }
+
+    private void dispatchUriAvailableMessage(String uri) {
+        final Bundle message = new Bundle();
+        message.putString(EVENT_PARAM_URI, uri);
+        EventDispatcher.getInstance().dispatch(EVENT_URI_AVAILABLE_IN_HISTORY, message);
     }
 }

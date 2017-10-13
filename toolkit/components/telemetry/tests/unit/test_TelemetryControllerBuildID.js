@@ -20,12 +20,7 @@ Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "gDatareportingService",
-  () => Cc["@mozilla.org/datareporting/service;1"]
-          .getService(Ci.nsISupports)
-          .wrappedJSObject);
-
-// Force the Telemetry enabled preference so that TelemetrySession.reset() doesn't exit early.
+// Force the Telemetry enabled preference so that TelemetrySession.testReset() doesn't exit early.
 Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, true);
 
 // Set up our dummy AppInfo object so we can control the appBuildID.
@@ -35,7 +30,7 @@ updateAppInfo();
 // Check that when run with no previous build ID stored, we update the pref but do not
 // put anything into the metadata.
 add_task(function* test_firstRun() {
-  yield TelemetrySession.reset();
+  yield TelemetryController.testReset();
   let metadata = TelemetrySession.getMetadata();
   do_check_false("previousBuildID" in metadata);
   let appBuildID = getAppInfo().appBuildID;
@@ -46,7 +41,7 @@ add_task(function* test_firstRun() {
 // Check that a subsequent run with the same build ID does not put prev build ID in
 // metadata. Assumes testFirstRun() has already been called to set the previousBuildID pref.
 add_task(function* test_secondRun() {
-  yield TelemetrySession.reset();
+  yield TelemetryController.testReset();
   let metadata = TelemetrySession.getMetadata();
   do_check_false("previousBuildID" in metadata);
 });
@@ -59,7 +54,7 @@ add_task(function* test_newBuild() {
   let info = getAppInfo();
   let oldBuildID = info.appBuildID;
   info.appBuildID = NEW_BUILD_ID;
-  yield TelemetrySession.reset();
+  yield TelemetryController.testReset();
   let metadata = TelemetrySession.getMetadata();
   do_check_eq(metadata.previousBuildId, oldBuildID);
   let buildIDPref = Services.prefs.getCharPref(TelemetrySession.Constants.PREF_PREVIOUS_BUILDID);
@@ -70,13 +65,6 @@ add_task(function* test_newBuild() {
 function run_test() {
   // Make sure we have a profile directory.
   do_get_profile();
-
-  // Send the needed startup notifications to the datareporting service
-  // to ensure that it has been initialized.
-  if ("@mozilla.org/datareporting/service;1" in Cc) {
-    gDatareportingService.observe(null, "app-startup", null);
-    gDatareportingService.observe(null, "profile-after-change", null);
-  }
 
   run_next_test();
 }

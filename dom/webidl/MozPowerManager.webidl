@@ -21,6 +21,7 @@ enum FactoryResetReason {
 /**
  * This interface implements navigator.mozPower
  */
+[ChromeOnly]
 interface MozPowerManager
 {
     [Throws]

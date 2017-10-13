@@ -32,7 +32,7 @@ namespace {
  * Important note: we maintain the invariant that these private data
  * slots are already addrefed.
  */
-class FinalizationEvent final: public nsRunnable
+class FinalizationEvent final: public Runnable
 {
 public:
   FinalizationEvent(const char* aTopic,
@@ -41,7 +41,7 @@ public:
     , mValue(aValue)
   { }
 
-  NS_METHOD Run() {
+  NS_IMETHOD Run() override {
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
     if (!observerService) {
@@ -116,9 +116,7 @@ void Finalize(JSFreeOp *fop, JSObject *objSelf)
   // during shutdown. In that case, there is not much we can do.
 }
 
-static const JSClass sWitnessClass = {
-  "FinalizationWitness",
-  JSCLASS_HAS_RESERVED_SLOTS(WITNESS_INSTANCES_SLOTS),
+static const JSClassOps sWitnessClassOps = {
   nullptr /* addProperty */,
   nullptr /* delProperty */,
   nullptr /* getProperty */,
@@ -127,6 +125,13 @@ static const JSClass sWitnessClass = {
   nullptr /* resolve */,
   nullptr /* mayResolve */,
   Finalize /* finalize */
+};
+
+static const JSClass sWitnessClass = {
+  "FinalizationWitness",
+  JSCLASS_HAS_RESERVED_SLOTS(WITNESS_INSTANCES_SLOTS) |
+  JSCLASS_FOREGROUND_FINALIZE,
+  &sWitnessClassOps
 };
 
 bool IsWitness(JS::Handle<JS::Value> v)
@@ -146,7 +151,7 @@ bool IsWitness(JS::Handle<JS::Value> v)
 bool ForgetImpl(JSContext* cx, const JS::CallArgs& args)
 {
   if (args.length() != 0) {
-    JS_ReportError(cx, "forget() takes no arguments");
+    JS_ReportErrorASCII(cx, "forget() takes no arguments");
     return false;
   }
   JS::Rooted<JS::Value> valSelf(cx, args.thisv());
@@ -154,7 +159,7 @@ bool ForgetImpl(JSContext* cx, const JS::CallArgs& args)
 
   RefPtr<FinalizationEvent> event = ExtractFinalizationEvent(objSelf);
   if (event == nullptr) {
-    JS_ReportError(cx, "forget() called twice");
+    JS_ReportErrorASCII(cx, "forget() called twice");
     return false;
   }
 

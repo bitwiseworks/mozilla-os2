@@ -5,7 +5,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CamerasChild.h"
-#include "CamerasUtils.h"
 
 #include "webrtc/video_engine/include/vie_capture.h"
 #undef FF
@@ -16,10 +15,9 @@
 #include "mozilla/Logging.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "MediaUtils.h"
 #include "nsThreadUtils.h"
-#include "base/singleton.h"
 
 #undef LOG
 #undef LOG_ENABLED
@@ -27,76 +25,53 @@ mozilla::LazyLogModule gCamerasChildLog("CamerasChild");
 #define LOG(args) MOZ_LOG(gCamerasChildLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gCamerasChildLog, mozilla::LogLevel::Debug)
 
+#define FAKE_ONDEVICECHANGE_EVENT_PERIOD_IN_MS 5000
+#define FAKE_ONDEVICECHANGE_EVENT_REPEAT_COUNT 30
+
 namespace mozilla {
 namespace camera {
 
-// We emulate the sync webrtc.org API with the help of singleton
-// CamerasSingleton, which manages a pointer to an IPC object, a thread
-// where IPC operations should run on, and a mutex.
-// The static function Cameras() will use that Singleton to set up,
-// if needed, both the thread and the associated IPC objects and return
-// a pointer to the IPC object. Users can then do IPC calls on that object
-// after dispatching them to aforementioned thread.
+CamerasSingleton::CamerasSingleton()
+  : mCamerasMutex("CamerasSingleton::mCamerasMutex"),
+    mCameras(nullptr),
+    mCamerasChildThread(nullptr),
+    mFakeDeviceChangeEventThread(nullptr) {
+  LOG(("CamerasSingleton: %p", this));
+}
 
-// 2 Threads are involved in this code:
-// - the MediaManager thread, which will call the (static, sync API) functions
-//   through MediaEngineRemoteVideoSource
-// - the Cameras IPC thread, which will be doing our IPC to the parent process
-//   via PBackground
+CamerasSingleton::~CamerasSingleton() {
+  LOG(("~CamerasSingleton: %p", this));
+}
 
-// Our main complication is that we emulate a sync API while (having to do)
-// async messaging. We dispatch the messages to another thread to send them
-// async and hold a Monitor to wait for the result to be asynchronously received
-// again. The requirement for async messaging originates on the parent side:
-// it's not reasonable to block all PBackground IPC there while waiting for
-// something like device enumeration to complete.
-
-class CamerasSingleton {
+class FakeOnDeviceChangeEventRunnable : public Runnable
+{
 public:
-  CamerasSingleton()
-    : mCamerasMutex("CamerasSingleton::mCamerasMutex"),
-      mCameras(nullptr),
-      mCamerasChildThread(nullptr) {
-    LOG(("CamerasSingleton: %p", this));
-  }
+  explicit FakeOnDeviceChangeEventRunnable(uint8_t counter)
+    : mCounter(counter) {}
 
-  ~CamerasSingleton() {
-    LOG(("~CamerasSingleton: %p", this));
-  }
+  NS_IMETHOD Run() override
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
 
-  static OffTheBooksMutex& Mutex() {
-    return gTheInstance.get()->mCamerasMutex;
-  }
+    CamerasChild* child = CamerasSingleton::Child();
+    if (child) {
+      child->OnDeviceChange();
 
-  static CamerasChild*& Child() {
-    Mutex().AssertCurrentThreadOwns();
-    return gTheInstance.get()->mCameras;
-  }
+      if (mCounter++ < FAKE_ONDEVICECHANGE_EVENT_REPEAT_COUNT) {
+        RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(mCounter);
+        CamerasSingleton::FakeDeviceChangeEventThread()->DelayedDispatch(evt.forget(),
+          FAKE_ONDEVICECHANGE_EVENT_PERIOD_IN_MS);
+      }
+    }
 
-  static nsCOMPtr<nsIThread>& Thread() {
-    Mutex().AssertCurrentThreadOwns();
-    return gTheInstance.get()->mCamerasChildThread;
+    return NS_OK;
   }
 
 private:
-  static Singleton<CamerasSingleton> gTheInstance;
-
-  // Reinitializing CamerasChild will change the pointers below.
-  // We don't want this to happen in the middle of preparing IPC.
-  // We will be alive on destruction, so this needs to be off the books.
-  mozilla::OffTheBooksMutex mCamerasMutex;
-
-  // This is owned by the IPC code, and the same code controls the lifetime.
-  // It will set and clear this pointer as appropriate in setup/teardown.
-  // We'd normally make this a WeakPtr but unfortunately the IPC code already
-  // uses the WeakPtr mixin in a protected base class of CamerasChild, and in
-  // any case the object becomes unusable as soon as IPC is tearing down, which
-  // will be before actual destruction.
-  CamerasChild* mCameras;
-  nsCOMPtr<nsIThread> mCamerasChildThread;
+  uint8_t mCounter;
 };
 
-class InitializeIPCThread : public nsRunnable
+class InitializeIPCThread : public Runnable
 {
 public:
   InitializeIPCThread()
@@ -109,13 +84,13 @@ public:
     // If it's not spun up yet, block until it is, and retry
     if (!existingBackgroundChild) {
       LOG(("No existingBackgroundChild"));
-      SynchronouslyCreatePBackground();
       existingBackgroundChild =
-        ipc::BackgroundChild::GetForCurrentThread();
+        ipc::BackgroundChild::SynchronouslyCreateForCurrentThread();
       LOG(("BackgroundChild: %p", existingBackgroundChild));
+      if (!existingBackgroundChild) {
+        return NS_ERROR_FAILURE;
+      }
     }
-    // By now PBackground is guaranteed to be up
-    MOZ_RELEASE_ASSERT(existingBackgroundChild);
 
     // Create CamerasChild
     // We will be returning the resulting pointer (synchronously) to our caller.
@@ -133,7 +108,7 @@ private:
   CamerasChild* mCamerasChild;
 };
 
-static CamerasChild*
+CamerasChild*
 GetCamerasChild() {
   CamerasSingleton::Mutex().AssertCurrentThreadOwns();
   if (!CamerasSingleton::Child()) {
@@ -150,7 +125,8 @@ GetCamerasChild() {
     // At this point we are in the MediaManager thread, and the thread we are
     // dispatching to is the specific Cameras IPC thread that was just made
     // above, so now we will fire off a runnable to run
-    // SynchronouslyCreatePBackground there, while we block in this thread.
+    // BackgroundChild::SynchronouslyCreateForCurrentThread there, while we
+    // block in this thread.
     // We block until the following happens in the Cameras IPC thread:
     // 1) Creation of PBackground finishes
     // 2) Creation of PCameras finishes by sending a message to the parent
@@ -163,6 +139,30 @@ GetCamerasChild() {
     LOG(("Failed to set up CamerasChild, are we in shutdown?"));
   }
   return CamerasSingleton::Child();
+}
+
+CamerasChild*
+GetCamerasChildIfExists() {
+  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
+  return CamerasSingleton::Child();
+}
+
+int CamerasChild::AddDeviceChangeCallback(DeviceChangeCallback* aCallback)
+{
+  // According to the spec, if the script sets
+  // navigator.mediaDevices.ondevicechange and the permission state is
+  // "always granted", the User Agent MUST fires a devicechange event when
+  // a new media input device is made available, even the script never
+  // call getusermedia or enumerateDevices.
+
+  // In order to detect the event, we need to init the camera engine.
+  // Currently EnsureInitialized(aCapEngine) is only called when one of
+  // CamerasaParent api, e.g., RecvNumberOfCaptureDevices(), is called.
+
+  // So here we setup camera engine via EnsureInitialized(aCapEngine)
+
+  EnsureInitialized(CameraEngine);
+  return DeviceChangeCallback::AddDeviceChangeCallback(aCallback);
 }
 
 bool
@@ -187,17 +187,6 @@ CamerasChild::RecvReplySuccess(void)
   return true;
 }
 
-int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF8)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->NumberOfCapabilities(aCapEngine, deviceUniqueIdUTF8);
-  } else {
-    return 0;
-  }
-}
-
 bool
 CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
 {
@@ -209,6 +198,62 @@ CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
   monitor.Notify();
   return true;
 }
+
+// Helper function to dispatch calls to the IPC Thread and
+// CamerasChild object. Takes the needed locks and dispatches.
+// Takes a "failed" value and a reference to the output variable
+// as parameters, will return the right one depending on whether
+// dispatching succeeded.
+template <class T = int>
+class LockAndDispatch
+{
+public:
+  LockAndDispatch(CamerasChild* aCamerasChild,
+                  const char* aRequestingFunc,
+                  nsIRunnable *aRunnable,
+                  const T& aFailureValue = T(-1), const T& aSuccessValue = T(0))
+    : mCamerasChild(aCamerasChild), mRequestingFunc(aRequestingFunc),
+      mRunnable(aRunnable),
+      mReplyLock(aCamerasChild->mReplyMonitor),
+      mRequestLock(aCamerasChild->mRequestMutex),
+      mSuccess(true),
+      mFailureValue(aFailureValue), mSuccessValue(aSuccessValue)
+  {
+    Dispatch();
+  }
+
+  const T& ReturnValue() const {
+    if (mSuccess) {
+      return mSuccessValue;
+    } else {
+      return mFailureValue;
+    }
+  }
+
+  const bool& Success() const {
+    return mSuccess;
+  }
+
+private:
+  void Dispatch() {
+    if (!mCamerasChild->DispatchToParent(mRunnable, mReplyLock)) {
+      LOG(("Cameras dispatch for IPC failed in %s", mRequestingFunc));
+      mSuccess = false;
+    }
+  }
+
+  CamerasChild* mCamerasChild;
+  const char* mRequestingFunc;
+  nsIRunnable* mRunnable;
+  // Prevent concurrent use of the reply variables by holding
+  // the mReplyMonitor. Note that this is unlocked while waiting for
+  // the reply to be filled in, necessitating the additional mRequestLock/Mutex;
+  MonitorAutoLock mReplyLock;
+  MutexAutoLock mRequestLock;
+  bool mSuccess;
+  const T& mFailureValue;
+  const T& mSuccessValue;
+};
 
 bool
 CamerasChild::DispatchToParent(nsIRunnable* aRunnable,
@@ -237,52 +282,27 @@ int
 CamerasChild::NumberOfCapabilities(CaptureEngine aCapEngine,
                                    const char* deviceUniqueIdUTF8)
 {
-  // Prevents multiple outstanding requests from happening.
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   LOG(("NumberOfCapabilities for %s", deviceUniqueIdUTF8));
   nsCString unique_id(deviceUniqueIdUTF8);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, nsCString>
     (this, &CamerasChild::SendNumberOfCapabilities, aCapEngine, unique_id);
-  // Prevent concurrent use of the reply variables. Note
-  // that this is unlocked while waiting for the reply to be
-  // filled in, necessitating the first Mutex above.
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    LOG(("Get capture capability count failed"));
-    return 0;
-  }
-  LOG(("Capture capability count: %d", mReplyInteger));
-  return mReplyInteger;
-}
-
-int NumberOfCaptureDevices(CaptureEngine aCapEngine)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->NumberOfCaptureDevices(aCapEngine);
-  } else {
-    return 0;
-  }
+  LockAndDispatch<> dispatcher(this, __func__, runnable, 0, mReplyInteger);
+  LOG(("Capture capability count: %d", dispatcher.ReturnValue()));
+  return dispatcher.ReturnValue();
 }
 
 int
 CamerasChild::NumberOfCaptureDevices(CaptureEngine aCapEngine)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine>
     (this, &CamerasChild::SendNumberOfCaptureDevices, aCapEngine);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    LOG(("Get NumberOfCaptureDevices failed"));
-    return 0;
-  }
-  LOG(("Capture Devices: %d", mReplyInteger));
-  return mReplyInteger;
+  LockAndDispatch<> dispatcher(this, __func__, runnable, 0, mReplyInteger);
+  LOG(("Capture Devices: %d", dispatcher.ReturnValue()));
+  return dispatcher.ReturnValue();
 }
 
 bool
@@ -297,20 +317,16 @@ CamerasChild::RecvReplyNumberOfCaptureDevices(const int& numdev)
   return true;
 }
 
-int GetCaptureCapability(CaptureEngine aCapEngine, const char* unique_idUTF8,
-                         const unsigned int capability_number,
-                         webrtc::CaptureCapability& capability)
+int
+CamerasChild::EnsureInitialized(CaptureEngine aCapEngine)
 {
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->GetCaptureCapability(aCapEngine,
-                                       unique_idUTF8,
-                                       capability_number,
-                                       capability);
-  } else {
-    return -1;
-  }
+  LOG((__PRETTY_FUNCTION__));
+  nsCOMPtr<nsIRunnable> runnable =
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine>
+    (this, &CamerasChild::SendEnsureInitialized, aCapEngine);
+  LockAndDispatch<> dispatcher(this, __func__, runnable, 0, mReplyInteger);
+  LOG(("Capture Devices: %d", dispatcher.ReturnValue()));
+  return dispatcher.ReturnValue();
 }
 
 int
@@ -319,18 +335,16 @@ CamerasChild::GetCaptureCapability(CaptureEngine aCapEngine,
                                    const unsigned int capability_number,
                                    webrtc::CaptureCapability& capability)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
   nsCString unique_id(unique_idUTF8);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString, unsigned int>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, nsCString, unsigned int>
     (this, &CamerasChild::SendGetCaptureCapability, aCapEngine, unique_id, capability_number);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    return -1;
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  if (dispatcher.Success()) {
+    capability = mReplyCapability;
   }
-  capability = mReplyCapability;
-  return 0;
+  return dispatcher.ReturnValue();
 }
 
 bool
@@ -351,53 +365,34 @@ CamerasChild::RecvReplyGetCaptureCapability(const CaptureCapability& ipcCapabili
   return true;
 }
 
-
-int GetCaptureDevice(CaptureEngine aCapEngine,
-                     unsigned int list_number, char* device_nameUTF8,
-                     const unsigned int device_nameUTF8Length,
-                     char* unique_idUTF8,
-                     const unsigned int unique_idUTF8Length)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->GetCaptureDevice(aCapEngine,
-                                   list_number,
-                                   device_nameUTF8,
-                                   device_nameUTF8Length,
-                                   unique_idUTF8,
-                                   unique_idUTF8Length);
-  } else {
-    return -1;
-  }
-}
-
 int
 CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
                                unsigned int list_number, char* device_nameUTF8,
                                const unsigned int device_nameUTF8Length,
                                char* unique_idUTF8,
-                               const unsigned int unique_idUTF8Length)
+                               const unsigned int unique_idUTF8Length,
+                               bool* scary)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, unsigned int>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, unsigned int>
     (this, &CamerasChild::SendGetCaptureDevice, aCapEngine, list_number);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    LOG(("GetCaptureDevice failed"));
-    return -1;
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  if (dispatcher.Success()) {
+    base::strlcpy(device_nameUTF8, mReplyDeviceName.get(), device_nameUTF8Length);
+    base::strlcpy(unique_idUTF8, mReplyDeviceID.get(), unique_idUTF8Length);
+    if (scary) {
+      *scary = mReplyScary;
+    }
+    LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
   }
-  base::strlcpy(device_nameUTF8, mReplyDeviceName.get(), device_nameUTF8Length);
-  base::strlcpy(unique_idUTF8, mReplyDeviceID.get(), unique_idUTF8Length);
-  LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
-  return 0;
+  return dispatcher.ReturnValue();
 }
 
 bool
 CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
-                                        const nsCString& device_id)
+                                        const nsCString& device_id,
+                                        const bool& scary)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
@@ -405,47 +400,30 @@ CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
   mReplySuccess = true;
   mReplyDeviceName = device_name;
   mReplyDeviceID = device_id;
+  mReplyScary = scary;
   monitor.Notify();
   return true;
-}
-
-int AllocateCaptureDevice(CaptureEngine aCapEngine,
-                          const char* unique_idUTF8,
-                          const unsigned int unique_idUTF8Length,
-                          int& capture_id)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->AllocateCaptureDevice(aCapEngine,
-                                        unique_idUTF8,
-                                        unique_idUTF8Length,
-                                        capture_id);
-  } else {
-    return -1;
-  }
 }
 
 int
 CamerasChild::AllocateCaptureDevice(CaptureEngine aCapEngine,
                                     const char* unique_idUTF8,
                                     const unsigned int unique_idUTF8Length,
-                                    int& capture_id)
+                                    int& capture_id,
+                                    const nsACString& aOrigin)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCString unique_id(unique_idUTF8);
+  nsCString origin(aOrigin);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString>
-    (this, &CamerasChild::SendAllocateCaptureDevice, aCapEngine, unique_id);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    LOG(("AllocateCaptureDevice failed"));
-    return -1;
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, nsCString, nsCString>
+    (this, &CamerasChild::SendAllocateCaptureDevice, aCapEngine, unique_id, origin);
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  if (dispatcher.Success()) {
+    LOG(("Capture Device allocated: %d", mReplyInteger));
+    capture_id = mReplyInteger;
   }
-  LOG(("Capture Device allocated: %d", mReplyInteger));
-  capture_id = mReplyInteger;
-  return 0;
+  return dispatcher.ReturnValue();
 }
 
 
@@ -461,31 +439,16 @@ CamerasChild::RecvReplyAllocateCaptureDevice(const int& numdev)
   return true;
 }
 
-int ReleaseCaptureDevice(CaptureEngine aCapEngine, const int capture_id)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->ReleaseCaptureDevice(aCapEngine, capture_id);
-  } else {
-    return -1;
-  }
-}
-
 int
 CamerasChild::ReleaseCaptureDevice(CaptureEngine aCapEngine,
                                    const int capture_id)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, int>
     (this, &CamerasChild::SendReleaseCaptureDevice, aCapEngine, capture_id);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    return -1;
-  }
-  return 0;
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  return dispatcher.ReturnValue();
 }
 
 void
@@ -513,30 +476,12 @@ CamerasChild::RemoveCallback(const CaptureEngine aCapEngine, const int capture_i
   }
 }
 
-int StartCapture(CaptureEngine aCapEngine,
-                 const int capture_id,
-                 webrtc::CaptureCapability& webrtcCaps,
-                 webrtc::ExternalRenderer* cb)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->StartCapture(aCapEngine,
-                               capture_id,
-                               webrtcCaps,
-                               cb);
-  } else {
-    return -1;
-  }
-}
-
 int
 CamerasChild::StartCapture(CaptureEngine aCapEngine,
                            const int capture_id,
                            webrtc::CaptureCapability& webrtcCaps,
                            webrtc::ExternalRenderer* cb)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   AddCallback(aCapEngine, capture_id, cb);
   CaptureCapability capCap(webrtcCaps.width,
@@ -547,40 +492,24 @@ CamerasChild::StartCapture(CaptureEngine aCapEngine,
                            webrtcCaps.codecType,
                            webrtcCaps.interlaced);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int, CaptureCapability>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, int, CaptureCapability>
     (this, &CamerasChild::SendStartCapture, aCapEngine, capture_id, capCap);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    return -1;
-  }
-  return 0;
-}
-
-int StopCapture(CaptureEngine aCapEngine, const int capture_id)
-{
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
-  CamerasChild* child = GetCamerasChild();
-  if (child) {
-    return child->StopCapture(aCapEngine, capture_id);
-  } else {
-    return -1;
-  }
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  return dispatcher.ReturnValue();
 }
 
 int
 CamerasChild::StopCapture(CaptureEngine aCapEngine, const int capture_id)
 {
-  MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int>
+    mozilla::NewNonOwningRunnableMethod<CaptureEngine, int>
     (this, &CamerasChild::SendStopCapture, aCapEngine, capture_id);
-  MonitorAutoLock monitor(mReplyMonitor);
-  if (!DispatchToParent(runnable, monitor)) {
-    return -1;
+  LockAndDispatch<> dispatcher(this, __func__, runnable);
+  if (dispatcher.Success()) {
+    RemoveCallback(aCapEngine, capture_id);
   }
-  RemoveCallback(aCapEngine, capture_id);
-  return 0;
+  return dispatcher.ReturnValue();
 }
 
 void
@@ -597,25 +526,23 @@ Shutdown(void)
   child->ShutdownAll();
 }
 
-class ShutdownRunnable : public nsRunnable {
+class ShutdownRunnable : public Runnable {
 public:
-  ShutdownRunnable(RefPtr<nsRunnable> aReplyEvent,
-                   nsIThread* aReplyThread)
-    : mReplyEvent(aReplyEvent), mReplyThread(aReplyThread) {};
+  explicit
+  ShutdownRunnable(already_AddRefed<Runnable>&& aReplyEvent)
+    : mReplyEvent(aReplyEvent) {};
 
   NS_IMETHOD Run() override {
     LOG(("Closing BackgroundChild"));
     ipc::BackgroundChild::CloseForCurrentThread();
 
-    LOG(("PBackground thread exists, shutting down thread"));
-    mReplyThread->Dispatch(mReplyEvent, NS_DISPATCH_NORMAL);
+    NS_DispatchToMainThread(mReplyEvent.forget());
 
     return NS_OK;
   }
 
 private:
-  RefPtr<nsRunnable> mReplyEvent;
-  nsIThread* mReplyThread;
+  RefPtr<Runnable> mReplyEvent;
 };
 
 void
@@ -638,10 +565,10 @@ CamerasChild::ShutdownParent()
   if (CamerasSingleton::Thread()) {
     LOG(("Dispatching actor deletion"));
     // Delete the parent actor.
-    RefPtr<nsRunnable> deleteRunnable =
-      // CamerasChild (this) will remain alive and is only deleted by the
-      // IPC layer when SendAllDone returns.
-      NS_NewNonOwningRunnableMethod(this, &CamerasChild::SendAllDone);
+    // CamerasChild (this) will remain alive and is only deleted by the
+    // IPC layer when SendAllDone returns.
+    nsCOMPtr<nsIRunnable> deleteRunnable =
+      mozilla::NewNonOwningRunnableMethod(this, &CamerasChild::SendAllDone);
     CamerasSingleton::Thread()->Dispatch(deleteRunnable, NS_DISPATCH_NORMAL);
   } else {
     LOG(("ShutdownParent called without PBackground thread"));
@@ -656,21 +583,28 @@ CamerasChild::ShutdownChild()
     LOG(("PBackground thread exists, dispatching close"));
     // Dispatch closing the IPC thread back to us when the
     // BackgroundChild is closed.
-    RefPtr<nsRunnable> event =
-      new ThreadDestructor(CamerasSingleton::Thread());
     RefPtr<ShutdownRunnable> runnable =
-      new ShutdownRunnable(event, NS_GetCurrentThread());
-    CamerasSingleton::Thread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+      new ShutdownRunnable(NewRunnableMethod(CamerasSingleton::Thread(),
+                                             &nsIThread::Shutdown));
+    CamerasSingleton::Thread()->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
   } else {
     LOG(("Shutdown called without PBackground thread"));
   }
   LOG(("Erasing sCameras & thread refs (original thread)"));
   CamerasSingleton::Child() = nullptr;
   CamerasSingleton::Thread() = nullptr;
+
+  if (CamerasSingleton::FakeDeviceChangeEventThread()) {
+    RefPtr<ShutdownRunnable> runnable =
+      new ShutdownRunnable(NewRunnableMethod(CamerasSingleton::FakeDeviceChangeEventThread(),
+                                             &nsIThread::Shutdown));
+    CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
+  }
+  CamerasSingleton::FakeDeviceChangeEventThread() = nullptr;
 }
 
 bool
-CamerasChild::RecvDeliverFrame(const int& capEngine,
+CamerasChild::RecvDeliverFrame(const CaptureEngine& capEngine,
                                const int& capId,
                                mozilla::ipc::Shmem&& shmem,
                                const size_t& size,
@@ -679,13 +613,12 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
                                const int64_t& render_time)
 {
   MutexAutoLock lock(mCallbackMutex);
-  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Callback(capEng, capId)) {
+  if (Callback(capEngine, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
-    Callback(capEng, capId)->DeliverFrame(image, size,
-                                          time_stamp,
-                                          ntp_time, render_time,
-                                          nullptr);
+    Callback(capEngine, capId)->DeliverFrame(image, size,
+                                             time_stamp,
+                                             ntp_time, render_time,
+                                             nullptr);
   } else {
     LOG(("DeliverFrame called with dead callback"));
   }
@@ -694,15 +627,43 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
 }
 
 bool
-CamerasChild::RecvFrameSizeChange(const int& capEngine,
+CamerasChild::RecvDeviceChange()
+{
+  this->OnDeviceChange();
+  return true;
+}
+
+int
+CamerasChild::SetFakeDeviceChangeEvents()
+{
+  CamerasSingleton::Mutex().AssertCurrentThreadOwns();
+
+  if(!CamerasSingleton::FakeDeviceChangeEventThread()) {
+    nsresult rv = NS_NewNamedThread("Fake DC Event",
+                                    getter_AddRefs(CamerasSingleton::FakeDeviceChangeEventThread()));
+    if (NS_FAILED(rv)) {
+      LOG(("Error launching Fake OnDeviceChange Event Thread"));
+      return -1;
+    }
+  }
+
+  // To simulate the devicechange event in mochitest,
+  // we fire a fake devicechange event in Camera IPC thread periodically
+  RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(0);
+  CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(evt.forget(), NS_DISPATCH_NORMAL);
+
+  return 0;
+}
+
+bool
+CamerasChild::RecvFrameSizeChange(const CaptureEngine& capEngine,
                                   const int& capId,
                                   const int& w, const int& h)
 {
   LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mCallbackMutex);
-  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Callback(capEng, capId)) {
-    Callback(capEng, capId)->FrameSizeChange(w, h, 0);
+  if (Callback(capEngine, capId)) {
+    Callback(capEngine, capId)->FrameSizeChange(w, h, 0);
   } else {
     LOG(("Frame size change with dead callback"));
   }

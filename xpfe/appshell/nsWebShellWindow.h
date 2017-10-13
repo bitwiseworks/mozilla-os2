@@ -39,6 +39,7 @@ public:
                       int32_t aInitialWidth, int32_t aInitialHeight,
                       bool aIsHiddenWindow,
                       nsITabParent *aOpeningTab,
+                      mozIDOMWindowProxy *aOpenerWIndow,
                       nsWidgetInitData& widgetInitData);
 
   nsresult Toolbar();
@@ -56,6 +57,7 @@ public:
   virtual bool WindowResized(nsIWidget* aWidget, int32_t aWidth, int32_t aHeight) override;
   virtual bool RequestWindowClose(nsIWidget* aWidget) override;
   virtual void SizeModeChanged(nsSizeMode sizeMode) override;
+  virtual void UIResolutionChanged() override;
   virtual void FullscreenChanged(bool aInFullscreen) override;
   virtual void OSToolbarButtonPressed() override;
   virtual bool ZLevelChanged(bool aImmediate, nsWindowZ *aPlacement,

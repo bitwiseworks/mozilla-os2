@@ -27,12 +27,14 @@
 
 class JSObject2WrappedJSMap
 {
-    typedef js::HashMap<JSObject*, nsXPCWrappedJS*, js::PointerHasher<JSObject*, 3>,
-                        js::SystemAllocPolicy> Map;
+    using Map = js::HashMap<JS::Heap<JSObject*>,
+                            nsXPCWrappedJS*,
+                            js::MovableCellHasher<JS::Heap<JSObject*>>,
+                            InfallibleAllocPolicy>;
 
 public:
     static JSObject2WrappedJSMap* newMap(int length) {
-        JSObject2WrappedJSMap* map = new JSObject2WrappedJSMap();
+        auto* map = new JSObject2WrappedJSMap();
         if (!map->mTable.init(length)) {
             // This is a decent estimate of the size of the hash table's
             // entry storage. The |2| is because on average the capacity is
@@ -66,7 +68,6 @@ public:
             return p->value();
         if (!mTable.add(p, obj, wrapper))
             return nullptr;
-        JS_StoreObjectPostBarrierCallback(cx, KeyMarkCallback, obj, this);
         return wrapper;
     }
 
@@ -82,7 +83,7 @@ public:
             r.front().value()->DebugDump(depth);
     }
 
-    void UpdateWeakPointersAfterGC(XPCJSRuntime* runtime);
+    void UpdateWeakPointersAfterGC(XPCJSContext* context);
 
     void ShutdownMarker();
 
@@ -94,17 +95,6 @@ public:
 
 private:
     JSObject2WrappedJSMap() {}
-
-    /*
-     * This function is called during minor GCs for each key in the HashMap that
-     * has been moved.
-     */
-    static void KeyMarkCallback(JSTracer* trc, JSObject* key, void* data) {
-        JSObject2WrappedJSMap* self = static_cast<JSObject2WrappedJSMap*>(data);
-        JSObject* prior = key;
-        JS_CallUnbarrieredObjectTracer(trc, &key, "XPCJSRuntime::mWrappedJSMap key");
-        self->mTable.rekeyIfMoved(prior, key);
-    }
 
     Map mTable;
 };
@@ -125,7 +115,7 @@ public:
     inline XPCWrappedNative* Find(nsISupports* Obj)
     {
         NS_PRECONDITION(Obj,"bad param");
-        auto entry = static_cast<Entry*>(mTable->Search(Obj));
+        auto entry = static_cast<Entry*>(mTable.Search(Obj));
         return entry ? entry->value : nullptr;
     }
 
@@ -134,7 +124,7 @@ public:
         NS_PRECONDITION(wrapper,"bad param");
         nsISupports* obj = wrapper->GetIdentityObject();
         MOZ_ASSERT(!Find(obj), "wrapper already in new scope!");
-        auto entry = static_cast<Entry*>(mTable->Add(obj, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(obj, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
@@ -154,21 +144,21 @@ public:
                    "nsISupports identity! This will most likely cause serious "
                    "problems!");
 #endif
-        mTable->Remove(wrapper->GetIdentityObject());
+        mTable.Remove(wrapper->GetIdentityObject());
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() const { return PLDHashTable::Iterator(mTable); }
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
+
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-    ~Native2WrappedNativeMap();
 private:
     Native2WrappedNativeMap();    // no implementation
     explicit Native2WrappedNativeMap(int size);
 
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /*************************/
@@ -188,7 +178,7 @@ public:
 
     inline nsXPCWrappedJSClass* Find(REFNSIID iid)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(&iid));
+        auto entry = static_cast<Entry*>(mTable.Search(&iid));
         return entry ? entry->value : nullptr;
     }
 
@@ -196,7 +186,7 @@ public:
     {
         NS_PRECONDITION(clazz,"bad param");
         const nsIID* iid = &clazz->GetIID();
-        auto entry = static_cast<Entry*>(mTable->Add(iid, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(iid, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
@@ -209,19 +199,20 @@ public:
     inline void Remove(nsXPCWrappedJSClass* clazz)
     {
         NS_PRECONDITION(clazz,"bad param");
-        mTable->Remove(&clazz->GetIID());
+        mTable.Remove(&clazz->GetIID());
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() const { return PLDHashTable::Iterator(mTable); }
+#ifdef DEBUG
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
+#endif
 
-    ~IID2WrappedJSClassMap();
 private:
     IID2WrappedJSClassMap();    // no implementation
     explicit IID2WrappedJSClassMap(int size);
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /*************************/
@@ -241,7 +232,7 @@ public:
 
     inline XPCNativeInterface* Find(REFNSIID iid)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(&iid));
+        auto entry = static_cast<Entry*>(mTable.Search(&iid));
         return entry ? entry->value : nullptr;
     }
 
@@ -249,7 +240,7 @@ public:
     {
         NS_PRECONDITION(iface,"bad param");
         const nsIID* iid = iface->GetIID();
-        auto entry = static_cast<Entry*>(mTable->Add(iid, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(iid, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
@@ -262,22 +253,21 @@ public:
     inline void Remove(XPCNativeInterface* iface)
     {
         NS_PRECONDITION(iface,"bad param");
-        mTable->Remove(iface->GetIID());
+        mTable.Remove(iface->GetIID());
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-    ~IID2NativeInterfaceMap();
 private:
     IID2NativeInterfaceMap();    // no implementation
     explicit IID2NativeInterfaceMap(int size);
 
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /*************************/
@@ -288,52 +278,54 @@ public:
     struct Entry : public PLDHashEntryHdr
     {
         nsIClassInfo* key;
-        XPCNativeSet* value;
+        XPCNativeSet* value; // strong reference
+        static const PLDHashTableOps sOps;
+
+    private:
+        static bool Match(const PLDHashEntryHdr* aEntry, const void* aKey);
+        static void Clear(PLDHashTable* aTable, PLDHashEntryHdr* aEntry);
     };
 
     static ClassInfo2NativeSetMap* newMap(int length);
 
     inline XPCNativeSet* Find(nsIClassInfo* info)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(info));
+        auto entry = static_cast<Entry*>(mTable.Search(info));
         return entry ? entry->value : nullptr;
     }
 
     inline XPCNativeSet* Add(nsIClassInfo* info, XPCNativeSet* set)
     {
         NS_PRECONDITION(info,"bad param");
-        auto entry = static_cast<Entry*>(mTable->Add(info, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(info, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
             return entry->value;
         entry->key = info;
-        entry->value = set;
+        NS_ADDREF(entry->value = set);
         return set;
     }
 
     inline void Remove(nsIClassInfo* info)
     {
         NS_PRECONDITION(info,"bad param");
-        mTable->Remove(info);
+        mTable.Remove(info);
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
-
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
     // ClassInfo2NativeSetMap holds pointers to *some* XPCNativeSets.
     // So we don't want to count those XPCNativeSets, because they are better
-    // counted elsewhere (i.e. in XPCJSRuntime::mNativeSetMap, which holds
+    // counted elsewhere (i.e. in XPCJSContext::mNativeSetMap, which holds
     // pointers to *all* XPCNativeSets).  Hence the "Shallow".
     size_t ShallowSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
-    ~ClassInfo2NativeSetMap();
 private:
     ClassInfo2NativeSetMap();    // no implementation
     explicit ClassInfo2NativeSetMap(int size);
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /*************************/
@@ -351,14 +343,14 @@ public:
 
     inline XPCWrappedNativeProto* Find(nsIClassInfo* info)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(info));
+        auto entry = static_cast<Entry*>(mTable.Search(info));
         return entry ? entry->value : nullptr;
     }
 
     inline XPCWrappedNativeProto* Add(nsIClassInfo* info, XPCWrappedNativeProto* proto)
     {
         NS_PRECONDITION(info,"bad param");
-        auto entry = static_cast<Entry*>(mTable->Add(info, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(info, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
@@ -371,23 +363,21 @@ public:
     inline void Remove(nsIClassInfo* info)
     {
         NS_PRECONDITION(info,"bad param");
-        mTable->Remove(info);
+        mTable.Remove(info);
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() const { return PLDHashTable::Iterator(mTable); }
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-    ~ClassInfo2WrappedNativeProtoMap();
 private:
     ClassInfo2WrappedNativeProtoMap();    // no implementation
     explicit ClassInfo2WrappedNativeProtoMap(int size);
 
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /*************************/
@@ -400,9 +390,7 @@ public:
         XPCNativeSet* key_value;
 
         static bool
-        Match(PLDHashTable* table,
-              const PLDHashEntryHdr* entry,
-              const void* key);
+        Match(const PLDHashEntryHdr* entry, const void* key);
 
         static const struct PLDHashTableOps sOps;
     };
@@ -411,15 +399,15 @@ public:
 
     inline XPCNativeSet* Find(XPCNativeSetKey* key)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(key));
+        auto entry = static_cast<Entry*>(mTable.Search(key));
         return entry ? entry->key_value : nullptr;
     }
 
     inline XPCNativeSet* Add(const XPCNativeSetKey* key, XPCNativeSet* set)
     {
-        NS_PRECONDITION(key,"bad param");
-        NS_PRECONDITION(set,"bad param");
-        auto entry = static_cast<Entry*>(mTable->Add(key, mozilla::fallible));
+        MOZ_ASSERT(key, "bad param");
+        MOZ_ASSERT(set, "bad param");
+        auto entry = static_cast<Entry*>(mTable.Add(key, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key_value)
@@ -428,34 +416,40 @@ public:
         return set;
     }
 
-    inline XPCNativeSet* Add(XPCNativeSet* set)
+    bool AddNew(const XPCNativeSetKey* key, XPCNativeSet* set)
     {
-        XPCNativeSetKey key(set, nullptr, 0);
-        return Add(&key, set);
+        XPCNativeSet* set2 = Add(key, set);
+        if (!set2) {
+            return false;
+        }
+#ifdef DEBUG
+        XPCNativeSetKey key2(set);
+        MOZ_ASSERT(key->Hash() == key2.Hash());
+        MOZ_ASSERT(set2 == set, "Should not have found an existing entry");
+#endif
+        return true;
     }
 
     inline void Remove(XPCNativeSet* set)
     {
-        NS_PRECONDITION(set,"bad param");
+        MOZ_ASSERT(set, "bad param");
 
-        XPCNativeSetKey key(set, nullptr, 0);
-        mTable->Remove(&key);
+        XPCNativeSetKey key(set);
+        mTable.Remove(&key);
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() const { return PLDHashTable::Iterator(mTable); }
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-    ~NativeSetMap();
 private:
     NativeSetMap();    // no implementation
     explicit NativeSetMap(int size);
 
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /***************************************************************************/
@@ -469,9 +463,7 @@ public:
         nsCOMPtr<nsIXPCFunctionThisTranslator> value;
 
         static bool
-        Match(PLDHashTable* table,
-              const PLDHashEntryHdr* entry,
-              const void* key);
+        Match(const PLDHashEntryHdr* entry, const void* key);
 
         static void
         Clear(PLDHashTable* table, PLDHashEntryHdr* entry);
@@ -483,14 +475,17 @@ public:
 
     inline nsIXPCFunctionThisTranslator* Find(REFNSIID iid)
     {
-        auto entry = static_cast<Entry*>(mTable->Search(&iid));
-        return entry ? entry->value : nullptr;
+        auto entry = static_cast<Entry*>(mTable.Search(&iid));
+        if (!entry) {
+            return nullptr;
+        }
+        return entry->value;
     }
 
     inline nsIXPCFunctionThisTranslator* Add(REFNSIID iid,
                                              nsIXPCFunctionThisTranslator* obj)
     {
-        auto entry = static_cast<Entry*>(mTable->Add(&iid, mozilla::fallible));
+        auto entry = static_cast<Entry*>(mTable.Add(&iid, mozilla::fallible));
         if (!entry)
             return nullptr;
         entry->value = obj;
@@ -500,53 +495,16 @@ public:
 
     inline void Remove(REFNSIID iid)
     {
-        mTable->Remove(&iid);
+        mTable.Remove(&iid);
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    ~IID2ThisTranslatorMap();
 private:
     IID2ThisTranslatorMap();    // no implementation
     explicit IID2ThisTranslatorMap(int size);
 private:
-    PLDHashTable* mTable;
-};
-
-/***************************************************************************/
-
-class XPCNativeScriptableSharedMap
-{
-public:
-    struct Entry : public PLDHashEntryHdr
-    {
-        XPCNativeScriptableShared* key;
-
-        static PLDHashNumber
-        Hash(PLDHashTable* table, const void* key);
-
-        static bool
-        Match(PLDHashTable* table,
-              const PLDHashEntryHdr* entry,
-              const void* key);
-
-        static const struct PLDHashTableOps sOps;
-    };
-
-    static XPCNativeScriptableSharedMap* newMap(int length);
-
-    bool GetNewOrUsed(uint32_t flags, char* name, XPCNativeScriptableInfo* si);
-
-    inline uint32_t Count() { return mTable->EntryCount(); }
-
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
-
-    ~XPCNativeScriptableSharedMap();
-private:
-    XPCNativeScriptableSharedMap();    // no implementation
-    explicit XPCNativeScriptableSharedMap(int size);
-private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /***************************************************************************/
@@ -562,7 +520,7 @@ public:
     {
         NS_PRECONDITION(proto,"bad param");
         auto entry = static_cast<PLDHashEntryStub*>
-                                (mTable->Add(proto, mozilla::fallible));
+                                (mTable.Add(proto, mozilla::fallible));
         if (!entry)
             return nullptr;
         if (entry->key)
@@ -574,34 +532,32 @@ public:
     inline void Remove(XPCWrappedNativeProto* proto)
     {
         NS_PRECONDITION(proto,"bad param");
-        mTable->Remove(proto);
+        mTable.Remove(proto);
     }
 
-    inline uint32_t Count() { return mTable->EntryCount(); }
+    inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() const { return PLDHashTable::Iterator(mTable); }
-    PLDHashTable::Iterator Iter() { return PLDHashTable::Iterator(mTable); }
+    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
 
-    ~XPCWrappedNativeProtoMap();
 private:
     XPCWrappedNativeProtoMap();    // no implementation
     explicit XPCWrappedNativeProtoMap(int size);
 private:
-    PLDHashTable* mTable;
+    PLDHashTable mTable;
 };
 
 /***************************************************************************/
 
 class JSObject2JSObjectMap
 {
-    using Map = js::GCHashMap<JS::Heap<JSObject*>,
+    using Map = JS::GCHashMap<JS::Heap<JSObject*>,
                               JS::Heap<JSObject*>,
                               js::MovableCellHasher<JS::Heap<JSObject*>>,
                               js::SystemAllocPolicy>;
 
 public:
     static JSObject2JSObjectMap* newMap(int length) {
-        JSObject2JSObjectMap* map = new JSObject2JSObjectMap();
+        auto* map = new JSObject2JSObjectMap();
         if (!map->mTable.init(length)) {
             // This is a decent estimate of the size of the hash table's
             // entry storage. The |2| is because on average the capacity is

@@ -23,7 +23,6 @@ using vixl::Instruction;
 static const uint32_t AlignmentAtPrologue = 0;
 static const uint32_t AlignmentMidPrologue = 8;
 static const Scale ScalePointer = TimesEight;
-static const uint32_t AlignmentAtAsmJSPrologue = sizeof(void*);
 
 // The MacroAssembler uses scratch registers extensively and unexpectedly.
 // For safety, scratch registers should always be acquired using
@@ -55,6 +54,7 @@ static constexpr Register CallTempReg5 = { Registers::x14 };
 static constexpr Register PreBarrierReg = { Registers::x1 };
 
 static constexpr Register ReturnReg = { Registers::x0 };
+static constexpr Register64 ReturnReg64(ReturnReg);
 static constexpr Register JSReturnReg = { Registers::x2 };
 static constexpr Register FramePointer = { Registers::fp };
 static constexpr Register ZeroRegister = { Registers::sp };
@@ -119,19 +119,27 @@ REGISTER_CODE_LIST(IMPORT_VIXL_VREGISTERS)
 static constexpr ValueOperand JSReturnOperand = ValueOperand(JSReturnReg);
 
 // Registers used in the GenerateFFIIonExit Enable Activation block.
-static constexpr Register AsmJSIonExitRegCallee = r8;
-static constexpr Register AsmJSIonExitRegE0 = r0;
-static constexpr Register AsmJSIonExitRegE1 = r1;
-static constexpr Register AsmJSIonExitRegE2 = r2;
-static constexpr Register AsmJSIonExitRegE3 = r3;
+static constexpr Register WasmIonExitRegCallee = r8;
+static constexpr Register WasmIonExitRegE0 = r0;
+static constexpr Register WasmIonExitRegE1 = r1;
 
 // Registers used in the GenerateFFIIonExit Disable Activation block.
 // None of these may be the second scratch register.
-static constexpr Register AsmJSIonExitRegReturnData = r2;
-static constexpr Register AsmJSIonExitRegReturnType = r3;
-static constexpr Register AsmJSIonExitRegD0 = r0;
-static constexpr Register AsmJSIonExitRegD1 = r1;
-static constexpr Register AsmJSIonExitRegD2 = r4;
+static constexpr Register WasmIonExitRegReturnData = r2;
+static constexpr Register WasmIonExitRegReturnType = r3;
+static constexpr Register WasmIonExitRegD0 = r0;
+static constexpr Register WasmIonExitRegD1 = r1;
+static constexpr Register WasmIonExitRegD2 = r4;
+
+// Registerd used in RegExpMatcher instruction (do not use JSReturnOperand).
+static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
+static constexpr Register RegExpMatcherStringReg = CallTempReg1;
+static constexpr Register RegExpMatcherLastIndexReg = CallTempReg2;
+
+// Registerd used in RegExpTester instruction (do not use ReturnReg).
+static constexpr Register RegExpTesterRegExpReg = CallTempReg0;
+static constexpr Register RegExpTesterStringReg = CallTempReg1;
+static constexpr Register RegExpTesterLastIndexReg = CallTempReg2;
 
 static constexpr Register JSReturnReg_Type = r3;
 static constexpr Register JSReturnReg_Data = r2;
@@ -161,8 +169,16 @@ static_assert(CodeAlignment % SimdMemoryAlignment == 0,
   "the constant sections of the code buffer.  Thus it should be larger than the "
   "alignment for SIMD constants.");
 
-static const uint32_t AsmJSStackAlignment = SimdMemoryAlignment;
-static const int32_t AsmJSGlobalRegBias = 1024;
+static const uint32_t WasmStackAlignment = SimdMemoryAlignment;
+static const int32_t WasmGlobalRegBias = 1024;
+
+// Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
+static constexpr bool SupportsUint32x4FloatConversions = false;
+
+// Does this architecture support comparisons of unsigned integer vectors?
+static constexpr bool SupportsUint8x16Compares = false;
+static constexpr bool SupportsUint16x8Compares = false;
+static constexpr bool SupportsUint32x4Compares = false;
 
 class Assembler : public vixl::Assembler
 {
@@ -195,6 +211,9 @@ class Assembler : public vixl::Assembler
     void bind(Label* label) { bind(label, nextOffset()); }
     void bind(Label* label, BufferOffset boff);
     void bind(RepatchLabel* label);
+    void bindLater(Label* label, wasm::TrapDesc target) {
+        MOZ_CRASH("NYI");
+    }
 
     bool oom() const {
         return AssemblerShared::oom() ||
@@ -245,14 +264,16 @@ class Assembler : public vixl::Assembler
     }
 
     void retarget(Label* cur, Label* next);
-    void retargetWithOffset(size_t baseOffset, const LabelBase* label, LabelBase* target) {
-        MOZ_CRASH("NYI");
-    }
 
     // The buffer is about to be linked. Ensure any constant pools or
     // excess bookkeeping has been flushed to the instruction stream.
     void flush() {
         armbuffer_.flushPool();
+    }
+
+    void comment(const char* msg) {
+        // This is not implemented because setPrinter() is not implemented.
+        // TODO spew("; %s", msg);
     }
 
     int actualIndex(int curOffset) {
@@ -269,6 +290,7 @@ class Assembler : public vixl::Assembler
     }
 
     static bool SupportsFloatingPoint() { return true; }
+    static bool SupportsUnalignedAccesses() { return true; }
     static bool SupportsSimd() { return js::jit::SupportsSimd; }
 
     // Tracks a jump that is patchable after finalization.
@@ -354,8 +376,6 @@ class Assembler : public vixl::Assembler
     static const size_t OffsetOfJumpTableEntryPointer = 8;
 
   public:
-    static void UpdateBoundsCheck(uint32_t logHeapSize, Instruction* inst);
-
     void writeCodePointer(AbsoluteLabel* absoluteLabel) {
         MOZ_ASSERT(!absoluteLabel->bound());
         uintptr_t x = LabelBase::INVALID_OFFSET;
@@ -431,20 +451,29 @@ class ABIArgGenerator
     ABIArg& current() { return current_; }
     uint32_t stackBytesConsumedSoFar() const { return stackOffset_; }
 
-  public:
-    static const Register NonArgReturnReg0;
-    static const Register NonArgReturnReg1;
-    static const Register NonVolatileReg;
-    static const Register NonArg_VolatileReg;
-    static const Register NonReturn_VolatileReg0;
-    static const Register NonReturn_VolatileReg1;
-
   protected:
     unsigned intRegIndex_;
     unsigned floatRegIndex_;
     uint32_t stackOffset_;
     ABIArg current_;
 };
+
+static constexpr Register ABINonArgReg0 = r8;
+static constexpr Register ABINonArgReg1 = r9;
+static constexpr Register ABINonArgReg2 = r10;
+static constexpr Register ABINonArgReturnReg0 = r8;
+static constexpr Register ABINonArgReturnReg1 = r9;
+
+// TLS pointer argument register for WebAssembly functions. This must not alias
+// any other register used for passing function arguments or return values.
+// Preserved by WebAssembly functions.
+static constexpr Register WasmTlsReg = { Registers::x17 };
+
+// Registers used for wasm table calls. These registers must be disjoint
+// from the ABI argument registers, WasmTlsReg and each other.
+static constexpr Register WasmTableCallScratchReg = ABINonArgReg0;
+static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
+static constexpr Register WasmTableCallIndexReg = ABINonArgReg2;
 
 static inline bool
 GetIntArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)

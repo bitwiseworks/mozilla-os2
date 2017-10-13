@@ -9,6 +9,7 @@
 #include "js/Class.h"
 #include "js/Proxy.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "nsCycleCollectionTraversalCallback.h"
 #include "nsCycleCollector.h"
@@ -24,11 +25,25 @@ nsWrapperCache::HasJSObjectMovedOp(JSObject* aWrapper)
 }
 #endif
 
-/* static */ void
+void
 nsWrapperCache::HoldJSObjects(void* aScriptObjectHolder,
                               nsScriptObjectTracer* aTracer)
 {
   cyclecollector::HoldJSObjectsImpl(aScriptObjectHolder, aTracer);
+  if (mWrapper && !JS::ObjectIsTenured(mWrapper)) {
+    CycleCollectedJSContext::Get()->NurseryWrapperPreserved(mWrapper);
+  }
+}
+
+void
+nsWrapperCache::SetWrapperJSObject(JSObject* aWrapper)
+{
+  mWrapper = aWrapper;
+  UnsetWrapperFlags(kWrapperFlagsMask & ~WRAPPER_IS_NOT_DOM_BINDING);
+
+  if (aWrapper && !JS::ObjectIsTenured(aWrapper)) {
+    CycleCollectedJSContext::Get()->NurseryWrapperAdded(this);
+  }
 }
 
 void
@@ -40,7 +55,7 @@ nsWrapperCache::ReleaseWrapper(void* aScriptObjectHolder)
     // from both here.
     JSObject* obj = GetWrapperPreserveColor();
     if (IsDOMBinding() && obj && js::IsProxy(obj)) {
-      DOMProxyHandler::GetAndClearExpandoObject(obj);
+      DOMProxyHandler::ClearExternalRefsForWrapperRelease(obj);
     }
     SetPreservingWrapper(false);
     cyclecollector::DropJSObjectsImpl(aScriptObjectHolder);
@@ -54,7 +69,7 @@ class DebugWrapperTraversalCallback : public nsCycleCollectionTraversalCallback
 public:
   explicit DebugWrapperTraversalCallback(JSObject* aWrapper)
     : mFound(false)
-    , mWrapper(aWrapper)
+    , mWrapper(JS::GCCellPtr(aWrapper))
   {
     mFlags = WANT_ALL_TRACES;
   }
@@ -69,14 +84,11 @@ public:
   {
   }
 
-  NS_IMETHOD_(void) NoteJSObject(JSObject* aChild)
+  NS_IMETHOD_(void) NoteJSChild(const JS::GCCellPtr& aChild)
   {
     if (aChild == mWrapper) {
       mFound = true;
     }
-  }
-  NS_IMETHOD_(void) NoteJSScript(JSScript* aChild)
-  {
   }
   NS_IMETHOD_(void) NoteXPCOMChild(nsISupports* aChild)
   {
@@ -93,7 +105,7 @@ public:
   bool mFound;
 
 private:
-  JSObject* mWrapper;
+  JS::GCCellPtr mWrapper;
 };
 
 static void
@@ -102,7 +114,7 @@ DebugWrapperTraceCallback(JS::GCCellPtr aPtr, const char* aName, void* aClosure)
   DebugWrapperTraversalCallback* callback =
     static_cast<DebugWrapperTraversalCallback*>(aClosure);
   if (aPtr.is<JSObject>()) {
-    callback->NoteJSObject(&aPtr.as<JSObject>());
+    callback->NoteJSChild(aPtr);
   }
 }
 

@@ -211,7 +211,7 @@ ServerBSO.prototype = {
     }
 
     // Alert when we see unrecognized fields.
-    for (let [key, value] in Iterator(parsed)) {
+    for (let [key, value] of Object.entries(parsed)) {
       switch (key) {
         case "payload":
           if (typeof(value) != "string") {
@@ -324,8 +324,13 @@ StorageServerCollection.prototype = {
    * @return an array of IDs.
    */
   keys: function keys(filter) {
-    return [id for ([id, bso] in Iterator(this._bsos))
-               if (!bso.deleted && (!filter || filter(id, bso)))];
+    let ids = [];
+    for (let [id, bso] of Object.entries(this._bsos)) {
+      if (!bso.deleted && (!filter || filter(id, bso))) {
+        ids.push(id);
+      }
+    }
+    return ids;
   },
 
   /**
@@ -339,8 +344,12 @@ StorageServerCollection.prototype = {
    * @return an array of ServerBSOs.
    */
   bsos: function bsos(filter) {
-    let os = [bso for ([id, bso] in Iterator(this._bsos))
-              if (!bso.deleted)];
+    let os = [];
+    for (let [id, bso] of Object.entries(this._bsos)) {
+      if (!bso.deleted) {
+        os.push(bso);
+      }
+    }
 
     if (!filter) {
       return os;
@@ -431,7 +440,7 @@ StorageServerCollection.prototype = {
   count: function count(options) {
     options = options || {};
     let c = 0;
-    for (let [id, bso] in Iterator(this._bsos)) {
+    for (let [id, bso] of Object.entries(this._bsos)) {
       if (bso.modified && this._inResultSet(bso, options)) {
         c++;
       }
@@ -564,8 +573,7 @@ StorageServerCollection.prototype = {
           failed[record.id] = "no bso configured";
         }
       } catch (ex) {
-        this._log.info("Exception when processing BSO: " +
-                       CommonUtils.exceptionStr(ex));
+        this._log.info("Exception when processing BSO", ex);
         failed[record.id] = "Exception when processing.";
       }
     }
@@ -590,7 +598,7 @@ StorageServerCollection.prototype = {
     }
 
     let deleted = [];
-    for (let [id, bso] in Iterator(this._bsos)) {
+    for (let [id, bso] of Object.entries(this._bsos)) {
       if (this._inResultSet(bso, options)) {
         this._log.debug("Deleting " + JSON.stringify(bso));
         deleted.push(bso.id);
@@ -924,7 +932,7 @@ StorageServer.prototype = {
     } catch (ex) {
       _("==========================================");
       _("Got exception starting Storage HTTP server on port " + this.port);
-      _("Error: " + CommonUtils.exceptionStr(ex));
+      _("Error: " + Log.exceptionStr(ex));
       _("Is there a process already listening on port " + this.port + "?");
       _("==========================================");
       do_throw(ex);
@@ -1044,10 +1052,10 @@ StorageServer.prototype = {
       throw new Error("Unknown user.");
     }
     let userCollections = this.users[username].collections;
-    for (let [id, contents] in Iterator(collections)) {
+    for (let [id, contents] of Object.entries(collections)) {
       let coll = userCollections[id] ||
                  this._insertCollection(userCollections, id);
-      for (let [bsoID, payload] in Iterator(contents)) {
+      for (let [bsoID, payload] of Object.entries(contents)) {
         coll.insert(bsoID, payload);
       }
     }
@@ -1128,7 +1136,7 @@ StorageServer.prototype = {
   infoCounts: function infoCounts(username) {
     let data = {};
     let collections = this.users[username].collections;
-    for (let [k, v] in Iterator(collections)) {
+    for (let [k, v] of Object.entries(collections)) {
       let count = v.count();
       if (!count) {
         continue;
@@ -1143,7 +1151,7 @@ StorageServer.prototype = {
   infoUsage: function infoUsage(username) {
     let data = {};
     let collections = this.users[username].collections;
-    for (let [k, v] in Iterator(collections)) {
+    for (let [k, v] of Object.entries(collections)) {
       data[k] = v.totalPayloadSize;
     }
 
@@ -1279,7 +1287,7 @@ StorageServer.prototype = {
       if (e instanceof HttpError) {
         this.respond(req, resp, e.code, e.description, "", {}, timestamp);
       } else {
-        this._log.warn(CommonUtils.exceptionStr(e));
+        this._log.warn("StorageServer: handleDefault caught an error", e);
         throw e;
       }
     }
@@ -1384,8 +1392,7 @@ StorageServer.prototype = {
       try {
         return handler.call(this, handler, req, resp, version, username, rest);
       } catch (ex) {
-        this._log.warn("Got exception during request: " +
-                       CommonUtils.exceptionStr(ex));
+        this._log.warn("Got exception during request", ex);
         throw ex;
       }
     }
@@ -1661,7 +1668,7 @@ StorageServer.prototype = {
 this.storageServerForUsers =
  function storageServerForUsers(users, contents, callback) {
   let server = new StorageServer(callback);
-  for (let [user, pass] in Iterator(users)) {
+  for (let [user, pass] of Object.entries(users)) {
     server.registerUser(user, pass);
     server.createContents(user, contents);
   }

@@ -31,7 +31,6 @@
 #include "mozilla/HashFunctions.h"
 
 #include "nsIAppsService.h"
-#include "mozIApplication.h"
 
 using namespace mozilla;
 
@@ -99,10 +98,10 @@ nsPrincipal::Init(nsIURI *aCodebase, const PrincipalOriginAttributes& aOriginAtt
   return NS_OK;
 }
 
-void
+nsresult
 nsPrincipal::GetScriptLocation(nsACString &aStr)
 {
-  mCodebase->GetSpec(aStr);
+  return mCodebase->GetSpec(aStr);
 }
 
 /* static */ nsresult
@@ -117,6 +116,17 @@ nsPrincipal::GetOriginForURI(nsIURI* aURI, nsACString& aOrigin)
     return NS_ERROR_FAILURE;
   }
 
+  nsresult rv;
+// NB: This is only compiled for Thunderbird/Suite.
+#if IS_ORIGIN_IS_FULL_SPEC_DEFINED
+  bool fullSpec = false;
+  rv = NS_URIChainHasFlags(origin, nsIProtocolHandler::ORIGIN_IS_FULL_SPEC, &fullSpec);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (fullSpec) {
+    return origin->GetAsciiSpec(aOrigin);
+  }
+#endif
+
   nsAutoCString hostPort;
 
   // chrome: URLs don't have a meaningful origin, so make
@@ -124,7 +134,7 @@ nsPrincipal::GetOriginForURI(nsIURI* aURI, nsACString& aOrigin)
   // XXX this should be removed in favor of the solution in
   // bug 160042.
   bool isChrome;
-  nsresult rv = origin->SchemeIs("chrome", &isChrome);
+  rv = origin->SchemeIs("chrome", &isChrome);
   if (NS_SUCCEEDED(rv) && !isChrome) {
     rv = origin->GetAsciiHostPort(hostPort);
     // Some implementations return an empty string, treat it as no support
@@ -198,10 +208,6 @@ nsPrincipal::SubsumesInternal(nsIPrincipal* aOther,
     return true;
   }
 
-  if (OriginAttributesRef() != Cast(aOther)->OriginAttributesRef()) {
-    return false;
-  }
-
   // If either the subject or the object has changed its principal by
   // explicitly setting document.domain then the other must also have
   // done so in order to be considered the same origin. This prevents
@@ -220,9 +226,9 @@ nsPrincipal::SubsumesInternal(nsIPrincipal* aOther,
     }
   }
 
-    nsCOMPtr<nsIURI> otherURI;
-    rv = aOther->GetURI(getter_AddRefs(otherURI));
-    NS_ENSURE_SUCCESS(rv, false);
+  nsCOMPtr<nsIURI> otherURI;
+  rv = aOther->GetURI(getter_AddRefs(otherURI));
+  NS_ENSURE_SUCCESS(rv, false);
 
   // Compare codebases.
   return nsScriptSecurityManager::SecurityCompareURIs(mCodebase, otherURI);
@@ -254,8 +260,8 @@ nsPrincipal::MayLoadInternal(nsIURI* aURI)
   if (uriWithPrin) {
     uriWithPrin->GetPrincipal(getter_AddRefs(uriPrin));
   }
-  if (uriPrin && nsIPrincipal::Subsumes(uriPrin)) {
-    return true;
+  if (uriPrin) {
+    return nsIPrincipal::Subsumes(uriPrin);
   }
 
   // If this principal is associated with an addon, check whether that addon
@@ -398,19 +404,14 @@ nsPrincipal::Read(nsIObjectInputStream* aStream)
   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // This may be null.
-  nsCOMPtr<nsIContentSecurityPolicy> csp = do_QueryInterface(supports, &rv);
-
   rv = Init(codebase, attrs);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = SetCsp(csp);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // need to link in the CSP context here (link in the URI of the protected
-  // resource).
-  if (csp) {
-    csp->SetRequestContext(nullptr, this);
+  mCSP = do_QueryInterface(supports, &rv);
+  // make sure setRequestContext is called after Init(),
+  // to make sure  the principals URI been initalized.
+  if (mCSP) {
+    mCSP->SetRequestContext(nullptr, this);
   }
 
   SetDomain(domain);
@@ -679,7 +680,8 @@ struct OriginComparator
   }
 };
 
-nsExpandedPrincipal::nsExpandedPrincipal(nsTArray<nsCOMPtr <nsIPrincipal> > &aWhiteList)
+nsExpandedPrincipal::nsExpandedPrincipal(nsTArray<nsCOMPtr<nsIPrincipal>> &aWhiteList,
+                                         const PrincipalOriginAttributes& aAttrs)
 {
   // We force the principals to be sorted by origin so that nsExpandedPrincipal
   // origins can have a canonical form.
@@ -687,6 +689,7 @@ nsExpandedPrincipal::nsExpandedPrincipal(nsTArray<nsCOMPtr <nsIPrincipal> > &aWh
   for (size_t i = 0; i < aWhiteList.Length(); ++i) {
     mPrincipals.InsertElementSorted(aWhiteList[i], c);
   }
+  mOriginAttributes = aAttrs;
 }
 
 nsExpandedPrincipal::~nsExpandedPrincipal()
@@ -735,6 +738,9 @@ nsExpandedPrincipal::SubsumesInternal(nsIPrincipal* aOther,
     nsTArray< nsCOMPtr<nsIPrincipal> >* otherList;
     expanded->GetWhiteList(&otherList);
     for (uint32_t i = 0; i < otherList->Length(); ++i){
+      // Use SubsumesInternal rather than Subsumes here, since OriginAttribute
+      // checks are only done between non-expanded sub-principals, and we don't
+      // need to incur the extra virtual call overhead.
       if (!SubsumesInternal((*otherList)[i], aConsideration)) {
         return false;
       }
@@ -792,6 +798,17 @@ nsExpandedPrincipal::GetBaseDomain(nsACString& aBaseDomain)
 }
 
 bool
+nsExpandedPrincipal::AddonHasPermission(const nsAString& aPerm)
+{
+  for (size_t i = 0; i < mPrincipals.Length(); ++i) {
+    if (BasePrincipal::Cast(mPrincipals[i])->AddonHasPermission(aPerm)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
 nsExpandedPrincipal::IsOnCSSUnprefixingWhitelist()
 {
   // CSS Unprefixing Whitelist is a per-origin thing; doesn't really make sense
@@ -800,7 +817,7 @@ nsExpandedPrincipal::IsOnCSSUnprefixingWhitelist()
 }
 
 
-void
+nsresult
 nsExpandedPrincipal::GetScriptLocation(nsACString& aStr)
 {
   aStr.Assign("[Expanded Principal [");
@@ -810,12 +827,14 @@ nsExpandedPrincipal::GetScriptLocation(nsACString& aStr)
     }
 
     nsAutoCString spec;
-    nsJSPrincipals::get(mPrincipals.ElementAt(i))->GetScriptLocation(spec);
+    nsresult rv =
+      nsJSPrincipals::get(mPrincipals.ElementAt(i))->GetScriptLocation(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     aStr.Append(spec);
-
   }
   aStr.Append("]]");
+  return NS_OK;
 }
 
 //////////////////////////////////////////

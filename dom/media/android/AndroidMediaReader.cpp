@@ -14,6 +14,7 @@
 #include "ImageContainer.h"
 #include "AbstractMediaDecoder.h"
 #include "gfx2DGlue.h"
+#include "VideoFrameContainer.h"
 #include "mozilla/CheckedInt.h"
 
 namespace mozilla {
@@ -105,14 +106,14 @@ AndroidMediaReader::Shutdown()
 }
 
 // Resets all state related to decoding, emptying all buffers etc.
-nsresult AndroidMediaReader::ResetDecode()
+nsresult AndroidMediaReader::ResetDecode(TrackSet aTracks)
 {
   if (mLastVideoFrame) {
     mLastVideoFrame = nullptr;
   }
   mSeekRequest.DisconnectIfExists();
   mSeekPromise.RejectIfExists(NS_OK, __func__);
-  return MediaDecoderReader::ResetDecode();
+  return MediaDecoderReader::ResetDecode(aTracks);
 }
 
 bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
@@ -156,8 +157,8 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       // when a frame is a keyframe.
 #if 0
       if (!frame.mKeyFrame) {
-        ++a.mParsed;
-        ++a.mDropped;
+        ++a.mStats.mParsedFrames;
+        ++a.mStats.mDroppedFrames;
         continue;
       }
 #endif
@@ -186,7 +187,6 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       }
 
       v = VideoData::CreateFromImage(mInfo.mVideo,
-                                     mDecoder->GetImageContainer(),
                                      pos,
                                      frame.mTimeUs,
                                      1, // We don't know the duration yet.
@@ -231,23 +231,23 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       }
 
       // This is the approximate byte position in the stream.
-      v = VideoData::Create(mInfo.mVideo,
-                            mDecoder->GetImageContainer(),
-                            pos,
-                            frame.mTimeUs,
-                            1, // We don't know the duration yet.
-                            b,
-                            frame.mKeyFrame,
-                            -1,
-                            picture);
+      v = VideoData::CreateAndCopyData(mInfo.mVideo,
+                                       mDecoder->GetImageContainer(),
+                                       pos,
+                                       frame.mTimeUs,
+                                       1, // We don't know the duration yet.
+                                       b,
+                                       frame.mKeyFrame,
+                                       -1,
+                                       picture);
     }
 
     if (!v) {
       return false;
     }
-    a.mParsed++;
-    a.mDecoded++;
-    NS_ASSERTION(a.mDecoded <= a.mParsed, "Expect to decode fewer frames than parsed in AndroidMedia...");
+    a.mStats.mParsedFrames++;
+    a.mStats.mDecodedFrames++;
+    NS_ASSERTION(a.mStats.mDecodedFrames <= a.mStats.mParsedFrames, "Expect to decode fewer frames than parsed in AndroidMedia...");
 
     // Since MPAPI doesn't give us the end time of frames, we keep one frame
     // buffered in AndroidMediaReader and push it into the queue as soon
@@ -315,7 +315,7 @@ bool AndroidMediaReader::DecodeAudioData()
 }
 
 RefPtr<MediaDecoderReader::SeekPromise>
-AndroidMediaReader::Seek(int64_t aTarget, int64_t aEndTime)
+AndroidMediaReader::Seek(SeekTarget aTarget, int64_t aEndTime)
 {
   MOZ_ASSERT(OnTaskQueue());
 
@@ -329,21 +329,21 @@ AndroidMediaReader::Seek(int64_t aTarget, int64_t aEndTime)
     // stream to the preceeding keyframe first, get the stream time, and then
     // seek the audio stream to match the video stream's time. Otherwise, the
     // audio and video streams won't be in sync after the seek.
-    mVideoSeekTimeUs = aTarget;
+    mVideoSeekTimeUs = aTarget.GetTime().ToMicroseconds();
 
     RefPtr<AndroidMediaReader> self = this;
     mSeekRequest.Begin(DecodeToFirstVideoData()->Then(OwnerThread(), __func__, [self] (MediaData* v) {
       self->mSeekRequest.Complete();
       self->mAudioSeekTimeUs = v->mTime;
-      self->mSeekPromise.Resolve(self->mAudioSeekTimeUs, __func__);
+      self->mSeekPromise.Resolve(media::TimeUnit::FromMicroseconds(self->mAudioSeekTimeUs), __func__);
     }, [self, aTarget] () {
       self->mSeekRequest.Complete();
-      self->mAudioSeekTimeUs = aTarget;
-      self->mSeekPromise.Resolve(aTarget, __func__);
+      self->mAudioSeekTimeUs = aTarget.GetTime().ToMicroseconds();
+      self->mSeekPromise.Resolve(aTarget.GetTime(), __func__);
     }));
   } else {
-    mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
-    mSeekPromise.Resolve(aTarget, __func__);
+    mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget.GetTime().ToMicroseconds();
+    mSeekPromise.Resolve(aTarget.GetTime(), __func__);
   }
 
   return p;
@@ -368,7 +368,7 @@ AndroidMediaReader::ImageBufferCallback::operator()(size_t aWidth, size_t aHeigh
     case MPAPI::RGB565:
       image = mozilla::layers::CreateSharedRGBImage(mImageContainer,
                                                     nsIntSize(aWidth, aHeight),
-                                                    gfxImageFormat::RGB16_565);
+                                                    SurfaceFormat::R5G6B5_UINT16);
       if (!image) {
         NS_WARNING("Could not create rgb image");
         return nullptr;
@@ -435,7 +435,7 @@ AndroidMediaReader::ImageBufferCallback::CreateI420Image(size_t aWidth,
   frameDesc.mPicY = 0;
   frameDesc.mPicSize = IntSize(aWidth, aHeight);
 
-  yuvImage->SetDataNoCopy(frameDesc);
+  yuvImage->AdoptData(frameDesc);
 
   return buffer;
 }

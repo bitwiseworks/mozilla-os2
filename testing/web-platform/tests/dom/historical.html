@@ -10,7 +10,6 @@ function isInterfaceNuked(name) {
   }, "Historical DOM features must be removed: " + name)
 }
 var nukedInterfaces = [
-  "CDATASection",
   "DOMConfiguration",
   "DOMError",
   "DOMErrorHandler",
@@ -18,6 +17,7 @@ var nukedInterfaces = [
   "DOMImplementationSource",
   "DOMLocator",
   "DOMObject",
+  "DOMSettableTokenList",
   "DOMUserData",
   "Entity",
   "EntityReference",
@@ -38,7 +38,6 @@ function isNukedFromDocument(name) {
   }, "Historical DOM features must be removed: " + name)
 }
 var documentNuked = [
-  "createCDATASection",
   "createEntityReference",
   "xmlEncoding",
   "xmlStandalone",
@@ -116,7 +115,8 @@ var nodeNuked = [
   "isSupported",
   "getFeature",
   "getUserData",
-  "setUserData"
+  "setUserData",
+  "rootNode",
 ]
 nodeNuked.forEach(isNukedFromNode)
 

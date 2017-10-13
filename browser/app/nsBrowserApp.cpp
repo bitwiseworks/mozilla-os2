@@ -16,18 +16,12 @@
 #if defined(XP_WIN)
 #include <windows.h>
 #include <stdlib.h>
-#include <io.h>
-#include <fcntl.h>
 #elif defined(XP_OS2)
 #include <time.h>
 #include <unistd.h>
 #elif defined(XP_UNIX)
 #include <sys/resource.h>
 #include <unistd.h>
-#endif
-
-#ifdef XP_MACOSX
-#include "MacQuirks.h"
 #endif
 
 #include <stdio.h>
@@ -39,24 +33,30 @@
 #include "nsStringGlue.h"
 
 #ifdef XP_WIN
-// we want a wmain entry point
 #ifdef MOZ_ASAN
 // ASAN requires firefox.exe to be built with -MD, and it's OK if we don't
 // support Windows XP SP2 in ASAN builds.
 #define XRE_DONT_SUPPORT_XPSP2
 #endif
-#include "nsWindowsWMain.cpp"
-#if defined(_MSC_VER) && (_MSC_VER < 1900)
-#define snprintf _snprintf
-#endif
+#define XRE_WANT_ENVIRON
 #define strcasecmp _stricmp
+#ifdef MOZ_SANDBOX
+#include "mozilla/sandboxing/SandboxInitialization.h"
+#endif
 #endif
 #include "BinaryPath.h"
 
 #include "nsXPCOMPrivate.h" // for MAXPATHLEN and XPCOM_DLL
 
+#include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/WindowsDllBlocklist.h"
+
+#if !defined(MOZ_WIDGET_COCOA) && !defined(MOZ_WIDGET_ANDROID) \
+  && !(defined(XP_LINUX) && defined(MOZ_SANDBOX))
+#define MOZ_BROWSER_CAN_BE_CONTENTPROC
+#include "../../ipc/contentproc/plugin-container.cpp"
+#endif
 
 using namespace mozilla;
 
@@ -155,6 +155,15 @@ XRE_TelemetryAccumulateType XRE_TelemetryAccumulate;
 XRE_StartupTimelineRecordType XRE_StartupTimelineRecord;
 XRE_mainType XRE_main;
 XRE_StopLateWriteChecksType XRE_StopLateWriteChecks;
+XRE_XPCShellMainType XRE_XPCShellMain;
+XRE_GetProcessTypeType XRE_GetProcessType;
+XRE_SetProcessTypeType XRE_SetProcessType;
+XRE_InitChildProcessType XRE_InitChildProcess;
+XRE_EnableSameExecutableForContentProcType XRE_EnableSameExecutableForContentProc;
+#ifdef LIBFUZZER
+XRE_LibFuzzerSetMainType XRE_LibFuzzerSetMain;
+XRE_LibFuzzerGetFuncsType XRE_LibFuzzerGetFuncs;
+#endif
 
 static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_GetFileFromPath", (NSFuncPtr*) &XRE_GetFileFromPath },
@@ -164,10 +173,30 @@ static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_StartupTimelineRecord", (NSFuncPtr*) &XRE_StartupTimelineRecord },
     { "XRE_main", (NSFuncPtr*) &XRE_main },
     { "XRE_StopLateWriteChecks", (NSFuncPtr*) &XRE_StopLateWriteChecks },
+    { "XRE_XPCShellMain", (NSFuncPtr*) &XRE_XPCShellMain },
+    { "XRE_GetProcessType", (NSFuncPtr*) &XRE_GetProcessType },
+    { "XRE_SetProcessType", (NSFuncPtr*) &XRE_SetProcessType },
+    { "XRE_InitChildProcess", (NSFuncPtr*) &XRE_InitChildProcess },
+    { "XRE_EnableSameExecutableForContentProc", (NSFuncPtr*) &XRE_EnableSameExecutableForContentProc },
+#ifdef LIBFUZZER
+    { "XRE_LibFuzzerSetMain", (NSFuncPtr*) &XRE_LibFuzzerSetMain },
+    { "XRE_LibFuzzerGetFuncs", (NSFuncPtr*) &XRE_LibFuzzerGetFuncs },
+#endif
     { nullptr, nullptr }
 };
 
-static int do_main(int argc, char* argv[], nsIFile *xreDirectory, bool greIsXre)
+#ifdef LIBFUZZER
+int libfuzzer_main(int argc, char **argv);
+
+/* This wrapper is used by the libFuzzer main to call into libxul */
+
+void libFuzzerGetFuncs(const char* moduleName, LibFuzzerInitFunc* initFunc,
+                       LibFuzzerTestingFunc* testingFunc) {
+  return XRE_LibFuzzerGetFuncs(moduleName, initFunc, testingFunc);
+}
+#endif
+
+static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory, bool greIsXre)
 {
   nsCOMPtr<nsIFile> appini;
   nsresult rv;
@@ -196,14 +225,26 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory, bool greIsXre)
     }
 
     char appEnv[MAXPATHLEN];
-    snprintf(appEnv, MAXPATHLEN, "XUL_APP_FILE=%s", argv[2]);
-    if (putenv(appEnv)) {
+    SprintfLiteral(appEnv, "XUL_APP_FILE=%s", argv[2]);
+    if (putenv(strdup(appEnv))) {
       Output("Couldn't set %s.\n", appEnv);
       return 255;
     }
     argv[2] = argv[0];
     argv += 2;
     argc -= 2;
+  } else if (argc > 1 && IsArg(argv[1], "xpcshell")) {
+    for (int i = 1; i < argc; i++) {
+      argv[i] = argv[i + 1];
+    }
+
+    XREShellData shellData;
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+    shellData.sandboxBrokerServices =
+      sandboxing::GetInitializedBrokerServices();
+#endif
+
+    return XRE_XPCShellMain(--argc, argv, envp, &shellData);
   }
 
   if (appini) {
@@ -213,6 +254,13 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory, bool greIsXre)
       Output("Couldn't read application.ini");
       return 255;
     }
+#if defined(HAS_DLL_BLOCKLIST)
+    // The dll blocklist operates in the exe vs. xullib. Pass a flag to
+    // xullib so automated tests can check the result once the browser
+    // is up and running.
+    appData->flags |=
+      DllBlocklist_CheckStatus() ? NS_XRE_DLL_BLOCKLIST_ENABLED : 0;
+#endif
     // xreDirectory already has a refcount from NS_NewLocalFile
     appData->xreDirectory = xreDirectory;
     int result = XRE_main(argc, argv, appData, mainFlags);
@@ -245,6 +293,28 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory, bool greIsXre)
   // xreDirectory already has a refcount from NS_NewLocalFile
   appData.xreDirectory = xreDirectory;
 
+#if defined(HAS_DLL_BLOCKLIST)
+  appData.flags |=
+    DllBlocklist_CheckStatus() ? NS_XRE_DLL_BLOCKLIST_ENABLED : 0;
+#endif
+
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+  sandbox::BrokerServices* brokerServices =
+    sandboxing::GetInitializedBrokerServices();
+#if defined(MOZ_CONTENT_SANDBOX)
+  if (!brokerServices) {
+    Output("Couldn't initialize the broker services.\n");
+    return 255;
+  }
+#endif
+  appData.sandboxBrokerServices = brokerServices;
+#endif
+
+#ifdef LIBFUZZER
+  if (getenv("LIBFUZZER"))
+    XRE_LibFuzzerSetMain(argc, argv, libfuzzer_main);
+#endif
+
   return XRE_main(argc, argv, &appData, mainFlags);
 }
 
@@ -276,8 +346,8 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory, bool *greIsXre)
   }
 
   char *lastSlash = strrchr(exePath, XPCOM_FILE_PATH_SEPARATOR[0]);
-  if (!lastSlash || (size_t(lastSlash - exePath) > MAXPATHLEN -
-sizeof(XPCOM_DLL)))
+  if (!lastSlash ||
+      (size_t(lastSlash - exePath) > MAXPATHLEN - sizeof(XPCOM_DLL)))
     return NS_ERROR_FAILURE;
 
   strcpy(lastSlash + 1, XPCOM_DLL);
@@ -355,46 +425,28 @@ sizeof(XPCOM_DLL)))
   // This will set this thread as the main thread.
   NS_LogInit();
 
-  // chop XPCOM_DLL off exePath
-  *lastSlash = '\0';
+  if (xreDirectory) {
+    // chop XPCOM_DLL off exePath
+    *lastSlash = '\0';
 #ifdef XP_MACOSX
-  lastSlash = strrchr(exePath, XPCOM_FILE_PATH_SEPARATOR[0]);
-  strcpy(lastSlash + 1, kOSXResourcesFolder);
+    lastSlash = strrchr(exePath, XPCOM_FILE_PATH_SEPARATOR[0]);
+    strcpy(lastSlash + 1, kOSXResourcesFolder);
 #endif
 #ifdef XP_WIN
-  rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(exePath), false,
-                       xreDirectory);
+    rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(exePath), false,
+                         xreDirectory);
 #else
-  rv = NS_NewNativeLocalFile(nsDependentCString(exePath), false,
-                             xreDirectory);
+    rv = NS_NewNativeLocalFile(nsDependentCString(exePath), false,
+                               xreDirectory);
 #endif
+  }
 
   return rv;
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char* argv[], char* envp[])
 {
   mozilla::TimeStamp start = mozilla::TimeStamp::Now();
-
-#ifdef XP_MACOSX
-  TriggerQuirks();
-#endif
-
-  int gotCounters;
-#if defined(XP_UNIX)
-  struct rusage initialRUsage;
-  gotCounters = !getrusage(RUSAGE_SELF, &initialRUsage);
-#elif defined(XP_WIN)
-  IO_COUNTERS ioCounters;
-  gotCounters = GetProcessIoCounters(GetCurrentProcess(), &ioCounters);
-#elif defined(XP_OS2)
-  // no counters at the moment
-  gotCounters = 0;
-#else
-  #error "Unknown platform"  // having this here keeps cppcheck happy
-#endif
-
-  nsIFile *xreDirectory;
 
 #ifdef HAS_DLL_BLOCKLIST
   DllBlocklist_Initialize();
@@ -409,6 +461,37 @@ int main(int argc, char* argv[])
 #endif
 
   bool greIsXre;
+
+#ifdef MOZ_BROWSER_CAN_BE_CONTENTPROC
+  // We are launching as a content process, delegate to the appropriate
+  // main
+  if (argc > 1 && IsArg(argv[1], "contentproc")) {
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+    // We need to initialize the sandbox TargetServices before InitXPCOMGlue
+    // because we might need the sandbox broker to give access to some files.
+    if (IsSandboxedProcess() && !sandboxing::GetInitializedTargetServices()) {
+      Output("Failed to initialize the sandbox target services.");
+      return 255;
+    }
+#endif
+
+    nsresult rv = InitXPCOMGlue(argv[0], nullptr, &greIsXre);
+    if (NS_FAILED(rv)) {
+      return 255;
+    }
+
+    int result = content_process_main(argc, argv);
+
+    // InitXPCOMGlue calls NS_LogInit, so we need to balance it here.
+    NS_LogTerm();
+
+    return result;
+  }
+#endif
+
+
+  nsIFile *xreDirectory;
+
   nsresult rv = InitXPCOMGlue(argv[0], &xreDirectory, &greIsXre);
   if (NS_FAILED(rv)) {
     return 255;
@@ -416,35 +499,11 @@ int main(int argc, char* argv[])
 
   XRE_StartupTimelineRecord(mozilla::StartupTimeline::START, start);
 
-  if (gotCounters) {
-#if defined(XP_WIN)
-    XRE_TelemetryAccumulate(mozilla::Telemetry::EARLY_GLUESTARTUP_READ_OPS,
-                            int(ioCounters.ReadOperationCount));
-    XRE_TelemetryAccumulate(mozilla::Telemetry::EARLY_GLUESTARTUP_READ_TRANSFER,
-                            int(ioCounters.ReadTransferCount / 1024));
-    IO_COUNTERS newIoCounters;
-    if (GetProcessIoCounters(GetCurrentProcess(), &newIoCounters)) {
-      XRE_TelemetryAccumulate(mozilla::Telemetry::GLUESTARTUP_READ_OPS,
-                              int(newIoCounters.ReadOperationCount - ioCounters.ReadOperationCount));
-      XRE_TelemetryAccumulate(mozilla::Telemetry::GLUESTARTUP_READ_TRANSFER,
-                              int((newIoCounters.ReadTransferCount - ioCounters.ReadTransferCount) / 1024));
-    }
-#elif defined(XP_UNIX)
-    XRE_TelemetryAccumulate(mozilla::Telemetry::EARLY_GLUESTARTUP_HARD_FAULTS,
-                            int(initialRUsage.ru_majflt));
-    struct rusage newRUsage;
-    if (!getrusage(RUSAGE_SELF, &newRUsage)) {
-      XRE_TelemetryAccumulate(mozilla::Telemetry::GLUESTARTUP_HARD_FAULTS,
-                              int(newRUsage.ru_majflt - initialRUsage.ru_majflt));
-    }
-#elif defined(XP_OS2)
-    // nothing to do at the moment
-#else
-  #error "Unknown platform"  // having this here keeps cppcheck happy
+#ifdef MOZ_BROWSER_CAN_BE_CONTENTPROC
+  XRE_EnableSameExecutableForContentProc();
 #endif
-  }
 
-  int result = do_main(argc, argv, xreDirectory, greIsXre);
+  int result = do_main(argc, argv, envp, xreDirectory, greIsXre);
 
   NS_LogTerm();
 

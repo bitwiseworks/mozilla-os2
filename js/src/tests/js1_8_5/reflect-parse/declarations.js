@@ -4,7 +4,7 @@ function test() {
 // Bug 632056: constant-folding
 program([exprStmt(ident("f")),
          ifStmt(lit(1),
-                funDecl(ident("f"), [], blockStmt([])),
+                blockStmt([funDecl(ident("f"), [], blockStmt([]))]),
                 null)]).assert(Reflect.parse("f; if (1) function f(){}"));
 // declarations
 
@@ -58,7 +58,7 @@ assertDecl("function f(a,[x,y]) { function a() { } }",
 // redeclarations (TOK_NAME nodes with lexdef)
 
 assertStmt("function f() { function g() { } function g() { } }",
-           funDecl(ident("f"), [], blockStmt([emptyStmt,
+           funDecl(ident("f"), [], blockStmt([funDecl(ident("g"), [], blockStmt([])),
                                               funDecl(ident("g"), [], blockStmt([]))])));
 
 // Fails due to parser quirks (bug 638577)
@@ -85,5 +85,13 @@ assertProg("f.p = 1; var f; f.p; function f(){}",
             exprStmt(dotExpr(ident("f"), ident("p"))),
             funDecl(ident("f"), [], blockStmt([]))]);
 }
+
+assertBlockStmt("{ function f(x) {} }",
+                blockStmt([funDecl(ident("f"), [ident("x")], blockStmt([]))]));
+
+// Annex B semantics should not change parse tree.
+assertBlockStmt("{ let f; { function f(x) {} } }",
+                blockStmt([letDecl([{ id: ident("f"), init: null }]),
+                           blockStmt([funDecl(ident("f"), [ident("x")], blockStmt([]))])]));
 
 runtest(test);

@@ -61,7 +61,7 @@ public:
     {
     }
     ~txLoadedDocumentsHash();
-    void init(txXPathNode* aSourceDocument);
+    MOZ_MUST_USE nsresult init(txXPathNode* aSourceDocument);
 
 private:
     friend class txExecutionState;
@@ -164,7 +164,7 @@ private:
     RefPtr<txAExprResult> mGlobalVarPlaceholderValue;
     int32_t mRecursionDepth;
 
-    AutoInfallibleTArray<TemplateRule, 10> mTemplateRules;
+    AutoTArray<TemplateRule, 10> mTemplateRules;
 
     txIEvalContext* mEvalContext;
     txIEvalContext* mInitialEvalContext;

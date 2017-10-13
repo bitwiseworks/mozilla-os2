@@ -225,30 +225,29 @@ function plInit() {
           return E10SUtils.canLoadURIInProcess(pageUrls[0], Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT);
         }
 
-        // For e10s windows, the initial browser is not remote until it attempts to
-        // browse to a URI that should be remote (landed at bug 1047603).
-        // However, when it loads such URI and reinitialize as remote, we lose the
-        // load listener and the injected tpRecordTime.
-        // The same thing happens if the initial browser starts as remote but the
-        // first page is not-remote (such as with TART/CART which load a chrome URI).
-        //
-        // The preferred pageloader behaviour in e10s is to run the pages as as remote,
-        // so if the page can load as remote, we will load it as remote.
-        //
-        // It also probably means that per test (or, in fact, per pageloader browser
-        // instance which adds the load listener and injects tpRecordTime), all the
-        // pages should be able to load in the same mode as the initial page - due
-        // to this reinitialization on the switch.
-        if (browserWindow.gMultiProcessBrowser) {
-          if (firstPageCanLoadAsRemote())
-            browserWindow.XULBrowserWindow.forceInitialBrowserRemote();
-          // Implicit else: initial browser in e10s is non-remote by default.
-        }
-
         // do this half a second after load, because we need to be
         // able to resize the window and not have it get clobbered
         // by the persisted values
         setTimeout(function () {
+                     // For e10s windows, since bug 1261842, the initial browser is remote unless
+                     // it attempts to browse to a URI that should be non-remote (landed at bug 1047603).
+                     //
+                     // However, when it loads such URI and reinitializes as non-remote, we lose the
+                     // load listener and the injected tpRecordTime.
+                     //
+                     // The preferred pageloader behaviour in e10s is to run the pages as as remote,
+                     // so if the page can load as remote, we will load it as remote.
+                     //
+                     // It also probably means that per test (or, in fact, per pageloader browser
+                     // instance which adds the load listener and injects tpRecordTime), all the
+                     // pages should be able to load in the same mode as the initial page - due
+                     // to this reinitialization on the switch.
+                     if (browserWindow.gMultiProcessBrowser) {
+                       if (!firstPageCanLoadAsRemote())
+                         browserWindow.XULBrowserWindow.forceInitialBrowserNonRemote(null);
+                       // Implicit else: initial browser in e10s is remote by default.
+                     }
+
                      browserWindow.resizeTo(winWidth, winHeight);
                      browserWindow.moveTo(0, 0);
                      browserWindow.focus();
@@ -466,7 +465,7 @@ var plNextPage = Task.async(function*() {
     doNextPage = true;
   } else {
     if (profilingInfo) {
-      Profiler.finishTest();
+      yield Profiler.finishTestAsync();
     }
 
     if (pageIndex < pages.length-1) {
@@ -808,9 +807,21 @@ function plStopAll(force) {
 function plLoadURLsFromURI(manifestUri) {
   var fstream = Cc["@mozilla.org/network/file-input-stream;1"]
     .createInstance(Ci.nsIFileInputStream);
+
   var uriFile = manifestUri.QueryInterface(Ci.nsIFileURL);
 
-  fstream.init(uriFile.file, -1, 0, 0);
+  if (uriFile.file.isFile() === false) {
+    dumpLine("tp: invalid file: %s" % uriFile.file);
+    return null;
+  }
+
+  try {
+    fstream.init(uriFile.file, -1, 0, 0);
+  } catch(ex) {
+      dumpLine("tp: the file %s doesn't exist" % uriFile.file);
+      return null;
+  }
+
   var lstream = fstream.QueryInterface(Ci.nsILineInputStream);
 
   var d = [];
@@ -862,7 +873,7 @@ function plLoadURLsFromURI(manifestUri) {
       // Note that if we have the scrollTest flag but the item already has "%", then we do
       // nothing (the scroll test will not execute, and the page will report with its
       // own tpRecordTime and not the one from the scroll test).
-      if (scrollTest && items[0].indexOf("%") < 0) {
+      if (scrollTest && items.length == 1) {  // scroll enabled and no "%"
         items.unshift("%");
         flags |= EXECUTE_SCROLL_TEST;
       }

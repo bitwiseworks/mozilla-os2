@@ -5,12 +5,13 @@
  * Test that we get a "TimeStamp" marker.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
-const { consoleMethod, PMM_loadFrameScripts } = require("devtools/shared/performance/process-communication");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
+const { pmmConsoleMethod, pmmLoadFrameScripts, pmmClearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 const MARKER_NAME = "TimeStamp";
 
-add_task(function*() {
-  let doc = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+add_task(function* () {
+  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+  let doc = browser.contentDocument;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -19,9 +20,9 @@ add_task(function*() {
   yield front.connect();
   let rec = yield front.startRecording({ withMarkers: true });
 
-  PMM_loadFrameScripts(gBrowser);
-  consoleMethod("timeStamp");
-  consoleMethod("timeStamp", "myLabel");
+  pmmLoadFrameScripts(gBrowser);
+  pmmConsoleMethod("timeStamp");
+  pmmConsoleMethod("timeStamp", "myLabel");
 
   let markers = yield waitForMarkerType(front, MARKER_NAME, markers => markers.length >= 2);
 
@@ -35,6 +36,8 @@ add_task(function*() {
   is(markers[0].causeName, void 0, "Unlabeled timestamps have an empty causeName");
   is(markers[1].causeName, "myLabel", "Labeled timestamps have correct causeName");
 
-  yield closeDebuggerClient(client);
+  pmmClearFrameScripts();
+
+  yield client.close();
   gBrowser.removeCurrentTab();
 });

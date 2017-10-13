@@ -89,6 +89,7 @@ nrappkit copyright:
 #include <sys/types.h>
 #include <assert.h>
 #include <errno.h>
+#include <string>
 
 #include "nspr.h"
 #include "prerror.h"
@@ -110,8 +111,15 @@ nrappkit copyright:
 #include "nsTArray.h"
 #include "mozilla/dom/TCPSocketBinding.h"
 #include "nsITCPSocketCallback.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
+#include "nsISocketFilter.h"
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#ifdef XP_WIN
+#include "mozilla/WindowsVersion.h"
+#endif
+
+#if defined(MOZILLA_INTERNAL_API)
 // csi_platform.h deep in nrappkit defines LOG_INFO and LOG_WARNING
 #ifdef LOG_INFO
 #define LOG_TEMP_INFO LOG_INFO
@@ -127,12 +135,6 @@ nrappkit copyright:
 #endif
 #undef strlcpy
 
-// TCPSocketChild.h doesn't include TypedArray.h
-namespace mozilla {
-namespace dom {
-class ArrayBuffer;
-}
-}
 #include "mozilla/dom/network/TCPSocketChild.h"
 
 #ifdef LOG_TEMP_INFO
@@ -164,11 +166,12 @@ extern "C" {
 }
 #include "nr_socket_prsock.h"
 #include "simpletokenbucket.h"
+#include "test_nr_socket.h"
 
 // Implement the nsISupports ref counting
 namespace mozilla {
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 class SingletonThreadHolder final
 {
 private:
@@ -256,7 +259,7 @@ static void ClearSingletonOnShutdown()
 static nsIThread* GetIOThreadAndAddUse_s()
 {
   // Always runs on STS thread!
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
   // We need to safely release this on shutdown to avoid leaks
   if (!sThread) {
     sThread = new SingletonThreadHolder(NS_LITERAL_CSTRING("mtransport"));
@@ -355,6 +358,9 @@ void NrSocket::OnSocketReady(PRFileDesc *fd, int16_t outflags) {
     fire_callback(NR_ASYNC_WAIT_READ);
   if (outflags & PR_POLL_WRITE & poll_flags())
     fire_callback(NR_ASYNC_WAIT_WRITE);
+  if (outflags & (PR_POLL_ERR | PR_POLL_NVAL | PR_POLL_HUP))
+    // TODO: Bug 946423: how do we notify the upper layers about this?
+    close();
 }
 
 void NrSocket::OnSocketDetached(PRFileDesc *fd) {
@@ -498,7 +504,7 @@ int nr_netaddr_to_transport_addr(const net::NetAddr *netaddr,
         MOZ_ASSERT(false);
         ABORT(R_BAD_ARGS);
     }
-    _status=0;
+    _status = 0;
   abort:
     return(_status);
   }
@@ -536,7 +542,7 @@ int nr_praddr_to_transport_addr(const PRNetAddr *praddr,
         ABORT(R_BAD_ARGS);
     }
 
-    _status=0;
+    _status = 0;
  abort:
     return(_status);
   }
@@ -563,7 +569,7 @@ int nr_transport_addr_get_addrstring_and_port(nr_transport_addr *addr,
 
   *host = addr_string;
 
-  _status=0;
+  _status = 0;
 abort:
   return(_status);
 }
@@ -593,6 +599,53 @@ int NrSocket::create(nr_transport_addr *addr) {
               "family=%d, err=%d", naddr.raw.family, PR_GetError());
         ABORT(R_INTERNAL);
       }
+#ifdef XP_WIN
+      if (!mozilla::IsWin8OrLater()) {
+        // Increase default send and receive buffer sizes on <= Win7 to be able to
+        // receive and send an unpaced HD (>= 720p = 1280x720 - I Frame ~ 21K size)
+        // stream without losing packets.
+        // Manual testing showed that 100K buffer size was not enough and the
+        // packet loss dis-appeared with 256K buffer size.
+        // See bug 1252769 for future improvements of this.
+        PRSize min_buffer_size = 256 * 1024;
+        PRSocketOptionData opt_rcvbuf;
+        opt_rcvbuf.option = PR_SockOpt_RecvBufferSize;
+        if ((status = PR_GetSocketOption(fd_, &opt_rcvbuf)) == PR_SUCCESS) {
+          if (opt_rcvbuf.value.recv_buffer_size < min_buffer_size) {
+            opt_rcvbuf.value.recv_buffer_size = min_buffer_size;
+            if ((status = PR_SetSocketOption(fd_, &opt_rcvbuf)) != PR_SUCCESS) {
+              r_log(LOG_GENERIC, LOG_CRIT,
+                "Couldn't set socket receive buffer size: %d", status);
+            }
+          } else {
+            r_log(LOG_GENERIC, LOG_INFO,
+              "Socket receive buffer size is already: %d",
+              opt_rcvbuf.value.recv_buffer_size);
+          }
+        } else {
+          r_log(LOG_GENERIC, LOG_CRIT,
+            "Couldn't get socket receive buffer size: %d", status);
+        }
+        PRSocketOptionData opt_sndbuf;
+        opt_sndbuf.option = PR_SockOpt_SendBufferSize;
+        if ((status = PR_GetSocketOption(fd_, &opt_sndbuf)) == PR_SUCCESS) {
+          if (opt_sndbuf.value.recv_buffer_size < min_buffer_size) {
+            opt_sndbuf.value.recv_buffer_size = min_buffer_size;
+            if ((status = PR_SetSocketOption(fd_, &opt_sndbuf)) != PR_SUCCESS) {
+              r_log(LOG_GENERIC, LOG_CRIT,
+                "Couldn't set socket send buffer size: %d", status);
+            }
+          } else {
+            r_log(LOG_GENERIC, LOG_INFO,
+              "Socket send buffer size is already: %d",
+              opt_sndbuf.value.recv_buffer_size);
+          }
+        } else {
+          r_log(LOG_GENERIC, LOG_CRIT,
+            "Couldn't get socket send buffer size: %d", status);
+        }
+      }
+#endif
       break;
     case IPPROTO_TCP:
       if (!(fd_ = PR_OpenTCPSocket(naddr.raw.family))) {
@@ -679,7 +732,8 @@ int NrSocket::create(nr_transport_addr *addr) {
   // Finally, register with the STS
   rv = stservice->AttachSocket(fd_, this);
   if (!NS_SUCCEEDED(rv)) {
-    r_log(LOG_GENERIC, LOG_CRIT, "Couldn't attach socket to STS");
+    r_log(LOG_GENERIC, LOG_CRIT, "Couldn't attach socket to STS, rv=%u",
+          static_cast<unsigned>(rv));
     ABORT(R_INTERNAL);
   }
 
@@ -687,6 +741,58 @@ int NrSocket::create(nr_transport_addr *addr) {
 
 abort:
   return(_status);
+}
+
+static int ShouldDrop(size_t len) {
+  // Global rate limiting for stun requests, to mitigate the ice hammer DoS
+  // (see http://tools.ietf.org/html/draft-thomson-mmusic-ice-webrtc)
+
+  // Tolerate rate of 8k/sec, for one second.
+  static SimpleTokenBucket burst(16384*1, 16384);
+  // Tolerate rate of 7.2k/sec over twenty seconds.
+  static SimpleTokenBucket sustained(7372*20, 7372);
+
+  // Check number of tokens in each bucket.
+  if (burst.getTokens(UINT32_MAX) < len) {
+    r_log(LOG_GENERIC, LOG_ERR,
+               "Short term global rate limit for STUN requests exceeded.");
+#ifdef MOZILLA_INTERNAL_API
+    nr_socket_short_term_violation_time = TimeStamp::Now();
+#endif
+
+// Bug 1013007
+#if !EARLY_BETA_OR_EARLIER
+    return R_WOULDBLOCK;
+#else
+    MOZ_ASSERT(false,
+               "Short term global rate limit for STUN requests exceeded. Go "
+               "bug bcampen@mozilla.com if you weren't intentionally "
+               "spamming ICE candidates, or don't know what that means.");
+#endif
+  }
+
+  if (sustained.getTokens(UINT32_MAX) < len) {
+    r_log(LOG_GENERIC, LOG_ERR,
+               "Long term global rate limit for STUN requests exceeded.");
+#ifdef MOZILLA_INTERNAL_API
+    nr_socket_long_term_violation_time = TimeStamp::Now();
+#endif
+// Bug 1013007
+#if !EARLY_BETA_OR_EARLIER
+    return R_WOULDBLOCK;
+#else
+    MOZ_ASSERT(false,
+               "Long term global rate limit for STUN requests exceeded. Go "
+               "bug bcampen@mozilla.com if you weren't intentionally "
+               "spamming ICE candidates, or don't know what that means.");
+#endif
+  }
+
+  // Take len tokens from both buckets.
+  // (not threadsafe, but no problem since this is only called from STS)
+  burst.getTokens(len);
+  sustained.getTokens(len);
+  return 0;
 }
 
 // This should be called on the STS thread.
@@ -703,55 +809,8 @@ int NrSocket::sendto(const void *msg, size_t len,
   if(fd_==nullptr)
     ABORT(R_EOD);
 
-  if (nr_is_stun_request_message((UCHAR*)msg, len)) {
-    // Global rate limiting for stun requests, to mitigate the ice hammer DoS
-    // (see http://tools.ietf.org/html/draft-thomson-mmusic-ice-webrtc)
-
-    // Tolerate rate of 8k/sec, for one second.
-    static SimpleTokenBucket burst(16384*1, 16384);
-    // Tolerate rate of 7.2k/sec over twenty seconds.
-    static SimpleTokenBucket sustained(7372*20, 7372);
-
-    // Check number of tokens in each bucket.
-    if (burst.getTokens(UINT32_MAX) < len) {
-      r_log(LOG_GENERIC, LOG_ERR,
-                 "Short term global rate limit for STUN requests exceeded.");
-#ifdef MOZILLA_INTERNAL_API
-      nr_socket_short_term_violation_time = TimeStamp::Now();
-#endif
-
-// Bug 1013007
-#if !EARLY_BETA_OR_EARLIER
-      ABORT(R_WOULDBLOCK);
-#else
-      MOZ_ASSERT(false,
-                 "Short term global rate limit for STUN requests exceeded. Go "
-                 "bug bcampen@mozilla.com if you weren't intentionally "
-                 "spamming ICE candidates, or don't know what that means.");
-#endif
-    }
-
-    if (sustained.getTokens(UINT32_MAX) < len) {
-      r_log(LOG_GENERIC, LOG_ERR,
-                 "Long term global rate limit for STUN requests exceeded.");
-#ifdef MOZILLA_INTERNAL_API
-      nr_socket_long_term_violation_time = TimeStamp::Now();
-#endif
-// Bug 1013007
-#if !EARLY_BETA_OR_EARLIER
-      ABORT(R_WOULDBLOCK);
-#else
-      MOZ_ASSERT(false,
-                 "Long term global rate limit for STUN requests exceeded. Go "
-                 "bug bcampen@mozilla.com if you weren't intentionally "
-                 "spamming ICE candidates, or don't know what that means.");
-#endif
-    }
-
-    // Take len tokens from both buckets.
-    // (not threadsafe, but no problem since this is only called from STS)
-    burst.getTokens(len);
-    sustained.getTokens(len);
+  if (nr_is_stun_request_message((UCHAR*)msg, len) && ShouldDrop(len)) {
+    ABORT(R_WOULDBLOCK);
   }
 
   // TODO: Convert flags?
@@ -765,7 +824,7 @@ int NrSocket::sendto(const void *msg, size_t len,
     ABORT(R_IO_ERROR);
   }
 
-  _status=0;
+  _status = 0;
 abort:
   return(_status);
 }
@@ -785,14 +844,14 @@ int NrSocket::recvfrom(void * buf, size_t maxlen,
     r_log(LOG_GENERIC, LOG_INFO, "Error in recvfrom: %d", (int)PR_GetError());
     ABORT(R_IO_ERROR);
   }
-  *len=status;
+  *len = status;
 
   if((r=nr_praddr_to_transport_addr(&nfrom,from,my_addr_.protocol,0)))
     ABORT(r);
 
   //r_log(LOG_GENERIC,LOG_DEBUG,"Read %d bytes from %s",*len,addr->as_string);
 
-  _status=0;
+  _status = 0;
 abort:
   return(_status);
 }
@@ -848,7 +907,7 @@ int NrSocket::connect(nr_transport_addr *addr) {
     ABORT(R_WOULDBLOCK);
   }
 
-  _status=0;
+  _status = 0;
 abort:
   return(_status);
 }
@@ -872,7 +931,7 @@ int NrSocket::write(const void *msg, size_t len, size_t *written) {
 
   *written = status;
 
-  _status=0;
+  _status = 0;
 abort:
   return _status;
 }
@@ -909,10 +968,12 @@ int NrSocket::listen(int backlog) {
   assert(fd_);
   status = PR_Listen(fd_, backlog);
   if (status != PR_SUCCESS) {
+    r_log(LOG_GENERIC, LOG_CRIT, "%s: PR_GetError() == %d",
+          __FUNCTION__, PR_GetError());
     ABORT(R_IO_ERROR);
   }
 
-  _status=0;
+  _status = 0;
 abort:
   return(_status);
 }
@@ -990,7 +1051,7 @@ int NrSocket::accept(nr_transport_addr *addrp, nr_socket **sockp) {
 
   // Add a reference so that we can delete it in destroy()
   sock->AddRef();
-  _status=0;
+  _status = 0;
 abort:
   if (_status) {
     delete sock;
@@ -1044,6 +1105,11 @@ NS_IMETHODIMP NrUdpSocketIpcProxy::CallListenerOpened() {
   return socket_->CallListenerOpened();
 }
 
+// callback while UDP socket is connected
+NS_IMETHODIMP NrUdpSocketIpcProxy::CallListenerConnected() {
+  return socket_->CallListenerConnected();
+}
+
 // callback while UDP socket is closed
 NS_IMETHODIMP NrUdpSocketIpcProxy::CallListenerClosed() {
   return socket_->CallListenerClosed();
@@ -1062,7 +1128,7 @@ NrUdpSocketIpc::~NrUdpSocketIpc()
   // also guarantees socket_child_ is released from the io_thread, and
   // tells the SingletonThreadHolder we're done with it
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
   // close(), but transfer the socket_child_ reference to die as well
   RUN_ON_THREAD(io_thread_,
                 mozilla::WrapRunnableNM(&NrUdpSocketIpc::release_child_i,
@@ -1079,8 +1145,8 @@ NS_IMETHODIMP NrUdpSocketIpc::CallListenerError(const nsACString &message,
                                                 uint32_t line_number) {
   ASSERT_ON_THREAD(io_thread_);
 
-  r_log(LOG_GENERIC, LOG_ERR, "UDP socket error:%s at %s:%d",
-        message.BeginReading(), filename.BeginReading(), line_number );
+  r_log(LOG_GENERIC, LOG_ERR, "UDP socket error:%s at %s:%d this=%p",
+        message.BeginReading(), filename.BeginReading(), line_number, (void*) this );
 
   ReentrantMonitorAutoEnter mon(monitor_);
   err_ = true;
@@ -1127,11 +1193,7 @@ NS_IMETHODIMP NrUdpSocketIpc::CallListenerReceivedData(const nsACString &host,
   return NS_OK;
 }
 
-// callback while UDP socket is opened
-NS_IMETHODIMP NrUdpSocketIpc::CallListenerOpened() {
-  ASSERT_ON_THREAD(io_thread_);
-  ReentrantMonitorAutoEnter mon(monitor_);
-
+nsresult NrUdpSocketIpc::SetAddress() {
   uint16_t port;
   if (NS_FAILED(socket_child_->GetLocalPort(&port))) {
     err_ = true;
@@ -1170,12 +1232,48 @@ NS_IMETHODIMP NrUdpSocketIpc::CallListenerOpened() {
     MOZ_ASSERT(false, "Failed to copy local host to my_addr_");
   }
 
-  if (nr_transport_addr_cmp(&expected_addr, &my_addr_,
+  if (!nr_transport_addr_is_wildcard(&expected_addr) &&
+      nr_transport_addr_cmp(&expected_addr, &my_addr_,
                             NR_TRANSPORT_ADDR_CMP_MODE_ADDR)) {
     err_ = true;
     MOZ_ASSERT(false, "Address of opened socket is not expected");
   }
 
+  return NS_OK;
+}
+
+// callback while UDP socket is opened
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerOpened() {
+  ASSERT_ON_THREAD(io_thread_);
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  r_log(LOG_GENERIC, LOG_DEBUG, "UDP socket opened this=%p", (void*) this);
+  nsresult rv = SetAddress();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  mon.NotifyAll();
+
+  return NS_OK;
+}
+
+// callback while UDP socket is connected
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerConnected() {
+  ASSERT_ON_THREAD(io_thread_);
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  r_log(LOG_GENERIC, LOG_DEBUG, "UDP socket connected this=%p", (void*) this);
+  MOZ_ASSERT(state_ == NR_CONNECTED);
+
+  nsresult rv = SetAddress();
+  if (NS_FAILED(rv)) {
+    mon.NotifyAll();
+    return rv;
+  }
+
+  r_log(LOG_GENERIC, LOG_INFO, "Exit UDP socket connected");
   mon.NotifyAll();
 
   return NS_OK;
@@ -1187,6 +1285,7 @@ NS_IMETHODIMP NrUdpSocketIpc::CallListenerClosed() {
 
   ReentrantMonitorAutoEnter mon(monitor_);
 
+  r_log(LOG_GENERIC, LOG_DEBUG, "UDP socket closed this=%p", (void*) this);
   MOZ_ASSERT(state_ == NR_CONNECTED || state_ == NR_CLOSING);
   state_ = NR_CLOSED;
 
@@ -1237,6 +1336,7 @@ int NrUdpSocketIpc::create(nr_transport_addr *addr) {
   mon.Wait();
 
   if (err_) {
+    close();
     ABORT(R_INTERNAL);
   }
 
@@ -1268,6 +1368,10 @@ int NrUdpSocketIpc::sendto(const void *msg, size_t len, int flags,
     return r;
   }
 
+  if (nr_is_stun_request_message((UCHAR*)msg, len) && ShouldDrop(len)) {
+    return R_WOULDBLOCK;
+  }
+
   nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t*>(msg), len));
 
   RUN_ON_THREAD(io_thread_,
@@ -1279,6 +1383,8 @@ int NrUdpSocketIpc::sendto(const void *msg, size_t len, int flags,
 }
 
 void NrUdpSocketIpc::close() {
+  r_log(LOG_GENERIC, LOG_DEBUG, "NrUdpSocketIpc::close()");
+
   ASSERT_ON_THREAD(sts_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
@@ -1351,8 +1457,37 @@ int NrUdpSocketIpc::getaddr(nr_transport_addr *addrp) {
 }
 
 int NrUdpSocketIpc::connect(nr_transport_addr *addr) {
-  MOZ_ASSERT(false);
-  return R_INTERNAL;
+  int r,_status;
+  int32_t port;
+  nsCString host;
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+  r_log(LOG_GENERIC, LOG_DEBUG, "NrUdpSocketIpc::connect(%s) this=%p", addr->as_string,
+        (void*) this);
+
+  if ((r=nr_transport_addr_get_addrstring_and_port(addr, &host, &port))) {
+    ABORT(r);
+  }
+
+  RUN_ON_THREAD(io_thread_,
+                mozilla::WrapRunnable(RefPtr<NrUdpSocketIpc>(this),
+                                      &NrUdpSocketIpc::connect_i,
+                                      host, static_cast<uint16_t>(port)),
+                NS_DISPATCH_NORMAL);
+
+  // Wait until connect() completes.
+  mon.Wait();
+
+  r_log(LOG_GENERIC, LOG_DEBUG, "NrUdpSocketIpc::connect this=%p completed err_ = %s",
+        (void*) this, err_ ? "true" : "false");
+
+  if (err_) {
+    ABORT(R_INTERNAL);
+  }
+
+  _status = 0;
+abort:
+  return _status;
 }
 
 int NrUdpSocketIpc::write(const void *msg, size_t len, size_t *written) {
@@ -1379,6 +1514,7 @@ int NrUdpSocketIpc::accept(nr_transport_addr *addrp, nr_socket **sockp) {
 void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
   ASSERT_ON_THREAD(io_thread_);
 
+  uint32_t minBuffSize = 0;
   nsresult rv;
   nsCOMPtr<nsIUDPSocketChild> socketChild = do_CreateInstance("@mozilla.org/udp-socket-child;1", &rv);
   if (NS_FAILED(rv)) {
@@ -1394,7 +1530,7 @@ void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
   ReentrantMonitorAutoEnter mon(monitor_);
   if (!socket_child_) {
     socket_child_ = socketChild;
-    socket_child_->SetFilterName(nsCString("stun"));
+    socket_child_->SetFilterName(nsCString(NS_NETWORK_SOCKET_FILTER_HANDLER_STUN_SUFFIX));
   } else {
     socketChild = nullptr;
   }
@@ -1407,16 +1543,51 @@ void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
     return;
   }
 
+#ifdef XP_WIN
+  if (!mozilla::IsWin8OrLater()) {
+    // Increase default receive and send buffer size on <= Win7 to be able to
+    // receive and send an unpaced HD (>= 720p = 1280x720 - I Frame ~ 21K size)
+    // stream without losing packets.
+    // Manual testing showed that 100K buffer size was not enough and the
+    // packet loss dis-appeared with 256K buffer size.
+    // See bug 1252769 for future improvements of this.
+    minBuffSize = 256 * 1024;
+  }
+#endif
   // XXX bug 1126232 - don't use null Principal!
   if (NS_FAILED(socket_child_->Bind(proxy, nullptr, host, port,
                                     /* reuse = */ false,
-                                    /* loopback = */ false))) {
+                                    /* loopback = */ false,
+                                    /* recv buffer size */ minBuffSize,
+                                    /* send buffer size */ minBuffSize))) {
     err_ = true;
     MOZ_ASSERT(false, "Failed to create UDP socket");
     mon.NotifyAll();
     return;
   }
 }
+
+void NrUdpSocketIpc::connect_i(const nsACString &host, const uint16_t port) {
+  ASSERT_ON_THREAD(io_thread_);
+  nsresult rv;
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  RefPtr<NrUdpSocketIpcProxy> proxy(new NrUdpSocketIpcProxy);
+  rv = proxy->Init(this);
+  if (NS_FAILED(rv)) {
+    err_ = true;
+    mon.NotifyAll();
+    return;
+  }
+
+  if (NS_FAILED(socket_child_->Connect(proxy, host, port))) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to connect UDP socket");
+    mon.NotifyAll();
+    return;
+  }
+}
+
 
 void NrUdpSocketIpc::sendto_i(const net::NetAddr &addr, nsAutoPtr<DataBuffer> buf) {
   ASSERT_ON_THREAD(io_thread_);
@@ -1444,7 +1615,7 @@ void NrUdpSocketIpc::close_i() {
   }
 }
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 // close(), but transfer the socket_child_ reference to die as well
 // static
 void NrUdpSocketIpc::release_child_i(nsIUDPSocketChild* aChild,
@@ -1483,15 +1654,15 @@ void NrUdpSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
   }
 }
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 // TCPSocket.
-class NrTcpSocketIpc::TcpSocketReadyRunner: public nsRunnable
+class NrTcpSocketIpc::TcpSocketReadyRunner: public Runnable
 {
 public:
   explicit TcpSocketReadyRunner(NrTcpSocketIpc *sck)
     : socket_(sck) {}
 
-  NS_IMETHODIMP Run() {
+  NS_IMETHOD Run() override {
     socket_->maybe_post_socket_ready();
     return NS_OK;
   }
@@ -1603,12 +1774,6 @@ NS_IMETHODIMP NrTcpSocketIpc::FireErrorEvent(const nsAString &type,
 }
 
 // methods of nsITCPSocketCallback that we are not going to implement.
-
-NS_IMETHODIMP NrTcpSocketIpc::FireDataEvent(JSContext* aCx,
-                                            const nsAString &type,
-                                            const JS::HandleValue data) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
 
 NS_IMETHODIMP NrTcpSocketIpc::FireDataStringEvent(const nsAString &type,
                                                   const nsACString &data) {
@@ -1780,12 +1945,10 @@ int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
 }
 
 int NrTcpSocketIpc::listen(int backlog) {
-  MOZ_ASSERT(false);
   return R_INTERNAL;
 }
 
 int NrTcpSocketIpc::accept(nr_transport_addr *addrp, nr_socket **sockp) {
-  MOZ_ASSERT(false);
   return R_INTERNAL;
 }
 
@@ -1798,6 +1961,8 @@ void NrTcpSocketIpc::connect_i(const nsACString &remote_addr,
 
   dom::TCPSocketChild* child = new dom::TCPSocketChild(NS_ConvertUTF8toUTF16(remote_addr), remote_port);
   socket_child_ = child;
+
+  // Bug 1285330: put filtering back in here
 
   // XXX remove remote!
   socket_child_->SendWindowlessOpenBind(this,
@@ -1963,24 +2128,26 @@ static nr_socket_vtbl nr_socket_local_vtbl={
   nr_socket_local_accept
 };
 
-int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp) {
-  RefPtr<NrSocketBase> sock;
+/* static */
+int
+NrSocketBase::CreateSocket(nr_transport_addr *addr, RefPtr<NrSocketBase> *sock)
+{
   int r, _status;
 
   // create IPC bridge for content process
   if (XRE_IsParentProcess()) {
-    sock = new NrSocket();
+    *sock = new NrSocket();
   } else {
     switch (addr->protocol) {
       case IPPROTO_UDP:
-        sock = new NrUdpSocketIpc();
+        *sock = new NrUdpSocketIpc();
         break;
       case IPPROTO_TCP:
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
         {
           nsCOMPtr<nsIThread> main_thread;
           NS_GetMainThread(getter_AddRefs(main_thread));
-          sock = new NrTcpSocketIpc(main_thread.get());
+          *sock = new NrTcpSocketIpc(main_thread.get());
         }
 #else
         ABORT(R_REJECTED);
@@ -1989,9 +2156,26 @@ int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp
     }
   }
 
-  r = sock->create(addr);
+  r = (*sock)->create(addr);
   if (r)
     ABORT(r);
+
+  _status = 0;
+abort:
+  if (_status) {
+    *sock = nullptr;
+  }
+  return _status;
+}
+
+int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp) {
+  RefPtr<NrSocketBase> sock;
+  int r, _status;
+
+  r = NrSocketBase::CreateSocket(addr, &sock);
+  if (r) {
+    ABORT(r);
+  }
 
   r = nr_socket_create_int(static_cast<void *>(sock),
                            sock->vtbl(), sockp);
@@ -2017,7 +2201,7 @@ static int nr_socket_local_destroy(void **objp) {
     return 0;
 
   NrSocketBase *sock = static_cast<NrSocketBase *>(*objp);
-  *objp=0;
+  *objp = 0;
 
   sock->close();  // Signal STS that we want not to listen
   sock->Release();  // Decrement the ref count
@@ -2065,33 +2249,33 @@ static int nr_socket_local_close(void *obj) {
 
 static int nr_socket_local_write(void *obj, const void *msg, size_t len,
                                  size_t *written) {
-  NrSocket *sock = static_cast<NrSocket *>(obj);
+  NrSocketBase *sock = static_cast<NrSocketBase *>(obj);
 
   return sock->write(msg, len, written);
 }
 
 static int nr_socket_local_read(void *obj, void * restrict buf, size_t maxlen,
                                 size_t *len) {
-  NrSocket *sock = static_cast<NrSocket *>(obj);
+  NrSocketBase *sock = static_cast<NrSocketBase *>(obj);
 
   return sock->read(buf, maxlen, len);
 }
 
 static int nr_socket_local_connect(void *obj, nr_transport_addr *addr) {
-  NrSocket *sock = static_cast<NrSocket *>(obj);
+  NrSocketBase *sock = static_cast<NrSocketBase *>(obj);
 
   return sock->connect(addr);
 }
 
 static int nr_socket_local_listen(void *obj, int backlog) {
-  NrSocket *sock = static_cast<NrSocket *>(obj);
+  NrSocketBase *sock = static_cast<NrSocketBase *>(obj);
 
   return sock->listen(backlog);
 }
 
 static int nr_socket_local_accept(void *obj, nr_transport_addr *addrp,
                                   nr_socket **sockp) {
-  NrSocket *sock = static_cast<NrSocket *>(obj);
+  NrSocketBase *sock = static_cast<NrSocketBase *>(obj);
 
   return sock->accept(addrp, sockp);
 }

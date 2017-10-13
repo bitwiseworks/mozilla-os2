@@ -17,14 +17,20 @@ using namespace js::jit;
 
 using mozilla::FloorLog2;
 
-void
-LIRGeneratorARM64::useBoxFixed(LInstruction* lir, size_t n, MDefinition* mir, Register reg1, Register,                               bool useAtStart)
+LBoxAllocation
+LIRGeneratorARM64::useBoxFixed(MDefinition* mir, Register reg1, Register, bool useAtStart)
 {
     MOZ_CRASH("useBoxFixed");
 }
 
 LAllocation
 LIRGeneratorARM64::useByteOpRegister(MDefinition* mir)
+{
+    MOZ_CRASH("useByteOpRegister");
+}
+
+LAllocation
+LIRGeneratorARM64::useByteOpRegisterAtStart(MDefinition* mir)
 {
     MOZ_CRASH("useByteOpRegister");
 }
@@ -88,6 +94,34 @@ template void LIRGeneratorARM64::lowerForFPU(LInstructionHelper<1, 2, 1>* ins, M
                                              MDefinition* lhs, MDefinition* rhs);
 
 void
+LIRGeneratorARM64::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0>* ins,
+                                    MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+LIRGeneratorARM64::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    MOZ_CRASH("NYI");
+}
+
+template<size_t Temps>
+void
+LIRGeneratorARM64::lowerForShiftInt64(LInstructionHelper<INT64_PIECES, INT64_PIECES + 1, Temps>* ins,
+                                      MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    MOZ_CRASH("NYI");
+}
+
+template void LIRGeneratorARM64::lowerForShiftInt64(
+    LInstructionHelper<INT64_PIECES, INT64_PIECES+1, 0>* ins, MDefinition* mir,
+    MDefinition* lhs, MDefinition* rhs);
+template void LIRGeneratorARM64::lowerForShiftInt64(
+    LInstructionHelper<INT64_PIECES, INT64_PIECES+1, 1>* ins, MDefinition* mir,
+    MDefinition* lhs, MDefinition* rhs);
+
+void
 LIRGeneratorARM64::lowerForBitAndAndBranch(LBitAndAndBranch* baab, MInstruction* mir,
                                          MDefinition* lhs, MDefinition* rhs)
 {
@@ -130,6 +164,18 @@ void
 LIRGeneratorARM64::lowerModI(MMod* mod)
 {
     MOZ_CRASH("lowerModI");
+}
+
+void
+LIRGeneratorARM64::lowerDivI64(MDiv* div)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+LIRGeneratorARM64::lowerModI64(MMod* mod)
+{
+    MOZ_CRASH("NYI");
 }
 
 void
@@ -176,6 +222,12 @@ LIRGeneratorARM64::visitAsmJSNeg(MAsmJSNeg* ins)
 }
 
 void
+LIRGeneratorARM64::visitWasmSelect(MWasmSelect* ins)
+{
+    MOZ_CRASH("visitWasmSelect");
+}
+
+void
 LIRGeneratorARM64::lowerUDiv(MDiv* div)
 {
     MOZ_CRASH("lowerUDiv");
@@ -188,15 +240,15 @@ LIRGeneratorARM64::lowerUMod(MMod* mod)
 }
 
 void
-LIRGeneratorARM64::visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble* ins)
+LIRGeneratorARM64::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins)
 {
-    MOZ_CRASH("visitAsmJSUnsignedToDouble");
+    MOZ_CRASH("visitWasmUnsignedToDouble");
 }
 
 void
-LIRGeneratorARM64::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins)
+LIRGeneratorARM64::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins)
 {
-    MOZ_CRASH("visitAsmJSUnsignedToFloat32");
+    MOZ_CRASH("visitWasmUnsignedToFloat32");
 }
 
 void
@@ -209,12 +261,6 @@ void
 LIRGeneratorARM64::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 {
     MOZ_CRASH("visitAsmJSStoreHeap");
-}
-
-void
-LIRGeneratorARM64::visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins)
-{
-    MOZ_CRASH("visitAsmJSLoadFuncPtr");
 }
 
 void
@@ -254,30 +300,6 @@ LIRGeneratorARM64::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStat
 }
 
 void
-LIRGeneratorARM64::visitSimdBinaryArith(MSimdBinaryArith* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdSelect(MSimdSelect* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdSplatX4(MSimdSplatX4* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdValueX4(MSimdValueX4* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
 LIRGeneratorARM64::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
 {
     MOZ_CRASH("NYI");
@@ -308,4 +330,40 @@ LIRGeneratorARM64::visitRandom(MRandom* ins)
                                         temp(),
                                         temp());
     defineFixed(lir, ins, LFloatReg(ReturnDoubleReg));
+}
+
+void
+LIRGeneratorARM64::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitWasmLoad(MWasmLoad* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitWasmStore(MWasmStore* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitCopySign(MCopySign* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
+{
+    MOZ_CRASH("NYI");
 }

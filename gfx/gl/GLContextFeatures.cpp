@@ -6,10 +6,6 @@
 #include "GLContext.h"
 #include "nsPrintfCString.h"
 
-#ifdef XP_MACOSX
-#include "nsCocoaFeatures.h"
-#endif
-
 namespace mozilla {
 namespace gl {
 
@@ -36,6 +32,7 @@ enum class GLESVersion : uint32_t {
     ES2   = 200,
     ES3   = 300,
     ES3_1 = 310,
+    ES3_2 = 320,
 };
 
 // ARB_ES2_compatibility is natively supported in OpenGL 4.1.
@@ -127,7 +124,7 @@ static const FeatureInfo sFeatureInfoArr[] = {
     {
         "draw_buffers",
         GLVersion::GL2,
-        GLESVersion::NONE,
+        GLESVersion::ES3,
         GLContext::Extension_None,
         {
             GLContext::ARB_draw_buffers,
@@ -183,6 +180,16 @@ static const FeatureInfo sFeatureInfoArr[] = {
         GLESVersion::ES3, // OpenGL ES version
         GLContext::ARB_ES3_compatibility, // no suffix on ARB extension
         {
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "EXT_color_buffer_float",
+        GLVersion::GL3,
+        GLESVersion::ES3_2,
+        GLContext::Extension_None,
+        {
+            GLContext::EXT_color_buffer_float,
             GLContext::Extensions_End
         }
     },
@@ -433,6 +440,25 @@ static const FeatureInfo sFeatureInfoArr[] = {
         }
     },
     {
+        "prim_restart",
+        GLVersion::GL3_1,
+        GLESVersion::NONE,
+        GLContext::Extension_None,
+        {
+            //GLContext::NV_primitive_restart, // Has different enum values.
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "prim_restart_fixed",
+        kGLCoreVersionForES3Compat,
+        GLESVersion::ES3,
+        GLContext::ARB_ES3_compatibility,
+        {
+            GLContext::Extensions_End
+        }
+    },
+    {
         "query_counter",
         GLVersion::GL3_3,
         GLESVersion::NONE,
@@ -486,7 +512,7 @@ static const FeatureInfo sFeatureInfoArr[] = {
     {
         "renderbuffer_color_float",
         GLVersion::GL3,
-        GLESVersion::ES3,
+        GLESVersion::ES3_2,
         GLContext::Extension_None,
         {
             GLContext::ARB_texture_float,
@@ -497,10 +523,11 @@ static const FeatureInfo sFeatureInfoArr[] = {
     {
         "renderbuffer_color_half_float",
         GLVersion::GL3,
-        GLESVersion::ES3,
+        GLESVersion::ES3_2,
         GLContext::Extension_None,
         {
             GLContext::ARB_texture_float,
+            GLContext::EXT_color_buffer_float,
             GLContext::EXT_color_buffer_half_float,
             GLContext::Extensions_End
         }
@@ -544,6 +571,26 @@ static const FeatureInfo sFeatureInfoArr[] = {
         GLESVersion::ES3,
         GLContext::ARB_sampler_objects,
         {
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "seamless_cube_map_opt_in",
+        GLVersion::GL3_2,
+        GLESVersion::NONE,
+        GLContext::ARB_seamless_cube_map,
+        {
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "shader_texture_lod",
+        GLVersion::NONE,
+        GLESVersion::NONE,
+        GLContext::Extension_None,
+        {
+            GLContext::ARB_shader_texture_lod,
+            GLContext::EXT_shader_texture_lod,
             GLContext::Extensions_End
         }
     },
@@ -678,6 +725,15 @@ static const FeatureInfo sFeatureInfoArr[] = {
         {
             GLContext::ARB_texture_non_power_of_two,
             GLContext::OES_texture_npot,
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "texture_rg",
+        GLVersion::GL3,
+        GLESVersion::ES3,
+        GLContext::ARB_texture_rg,
+        {
             GLContext::Extensions_End
         }
     },
@@ -843,16 +899,6 @@ GLContext::InitFeatures()
                           IsSupported(feature) ? "enabled" : "disabled",
                           GetFeatureName(feature));
         }
-    }
-
-    if (WorkAroundDriverBugs()) {
-#ifdef XP_MACOSX
-        // MacOSX 10.6 reports to support EXT_framebuffer_sRGB and EXT_texture_sRGB but
-        // fails to convert from sRGB to linear when reading from an sRGB texture attached
-        // to an FBO. (bug 843668)
-        if (!nsCocoaFeatures::OnLionOrLater())
-            MarkUnsupported(GLFeature::sRGB_framebuffer);
-#endif // XP_MACOSX
     }
 }
 

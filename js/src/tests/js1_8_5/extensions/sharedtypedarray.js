@@ -24,18 +24,16 @@ function testSharedArrayBuffer() {
     assertEq(b instanceof SharedArrayBuffer, true);
     assertEq(b.byteLength, 4096);
 
-    assertEq(!!SharedArrayBuffer.isView, true);
-
     b.fnord = "Hi there";
     assertEq(b.fnord, "Hi there");
 
     SharedArrayBuffer.prototype.abracadabra = "no wishing for wishes!";
     assertEq(b.abracadabra, "no wishing for wishes!");
 
-    // can "convert" a buffer (really works as an assertion)
-    assertEq(SharedArrayBuffer(b), b);
+    // SharedArrayBuffer is not a conversion operator, not even for instances of itself
+    assertThrowsInstanceOf(() => SharedArrayBuffer(b), TypeError);
 
-    // can't convert any other object
+    // can't convert any other object either
     assertThrowsInstanceOf(() => SharedArrayBuffer({}), TypeError);
 
     // byteLength can be invoked as per normal, indirectly
@@ -50,9 +48,9 @@ function testSharedTypedArray() {
     var x1 = new Int8Array(b);
     var x2 = new Int32Array(b);
 
-    assertEq(SharedArrayBuffer.isView(x1), true);
-    assertEq(SharedArrayBuffer.isView(x2), true);
-    assertEq(SharedArrayBuffer.isView({}), false);
+    assertEq(ArrayBuffer.isView(x1), true); // ArrayBuffer.isView() works even if the buffer is a SharedArrayBuffer
+    assertEq(ArrayBuffer.isView(x2), true);
+    assertEq(ArrayBuffer.isView({}), false);
 
     assertEq(x1.buffer, b);
     assertEq(x2.buffer, b);
@@ -84,13 +82,13 @@ function testSharedTypedArray() {
     assertThrowsInstanceOf(() => new Int8Array(b, -7), RangeError);
 
     // not congruent mod element size
-    assertThrowsInstanceOf(() => new Int32Array(b, 3), TypeError); // Bug 1227207: should be RangeError
+    assertThrowsInstanceOf(() => new Int32Array(b, 3), RangeError);
 
     // start out of range
-    assertThrowsInstanceOf(() => new Int32Array(b, 4104), TypeError); // Ditto
+    assertThrowsInstanceOf(() => new Int32Array(b, 4104), RangeError);
 
     // end out of range
-    assertThrowsInstanceOf(() => new Int32Array(b, 4092, 2), TypeError); // Ditto
+    assertThrowsInstanceOf(() => new Int32Array(b, 4092, 2), RangeError);
 
     // Views alias the storage
     x2[0] = -1;
@@ -176,21 +174,48 @@ function testSharedTypedArrayMethods() {
 
 function testClone1() {
     var sab1 = b;
-    var blob = serialize(sab1, [sab1]);
+    var blob = serialize(sab1, []);
     var sab2 = deserialize(blob);
-    assertEq(sharedAddress(sab1), sharedAddress(sab2));
+    if (typeof sharedAddress != "undefined")
+	assertEq(sharedAddress(sab1), sharedAddress(sab2));
 }
 
 function testClone2() {
     var sab = b;
     var ia1 = new Int32Array(sab);
-    var blob = serialize(ia1, [sab]);
+    var blob = serialize(ia1, []);
     var ia2 = deserialize(blob);
     assertEq(ia1.length, ia2.length);
     assertEq(ia1.buffer instanceof SharedArrayBuffer, true);
-    assertEq(sharedAddress(ia1.buffer), sharedAddress(ia2.buffer));
+    if (typeof sharedAddress != "undefined")
+	assertEq(sharedAddress(ia1.buffer), sharedAddress(ia2.buffer));
     ia1[10] = 37;
     assertEq(ia2[10], 37);
+}
+
+// Serializing a SharedArrayBuffer should fail if we've set its flag to 'deny' or if
+// the flag is bogus.
+
+function testNoClone() {
+    // This just tests the API in serialize()
+    assertThrowsInstanceOf(() => serialize(b, [], {SharedArrayBuffer: false}), Error);
+
+    // This tests the actual cloning functionality - should fail
+    assertThrowsInstanceOf(() => serialize(b, [], {SharedArrayBuffer: 'deny'}), TypeError);
+
+    // Ditto - should succeed
+    assertEq(typeof serialize(b, [], {SharedArrayBuffer: 'allow'}), "object");
+}
+
+// Eventually, this will be prohibited, but for now, allow the SAB to
+// appear in the transfer list.  See bug 1302036 and bug 1302037.
+
+function testRedundantTransfer() {
+    var sab1 = b;
+    var blob = serialize(sab1, [sab1]);
+    var sab2 = deserialize(blob);
+    if (typeof sharedAddress != "undefined")
+	assertEq(sharedAddress(sab1), sharedAddress(sab2));
 }
 
 function testApplicable() {
@@ -231,6 +256,8 @@ testSharedTypedArray();
 testSharedTypedArrayMethods();
 testClone1();
 testClone2();
+testNoClone();
+testRedundantTransfer();
 testApplicable();
 
 reportCompare(0, 0, 'ok');

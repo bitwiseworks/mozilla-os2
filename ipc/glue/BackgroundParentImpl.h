@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -58,6 +60,9 @@ protected:
                                         PBackgroundIndexedDBUtilsParent* aActor)
                                         override;
 
+  virtual bool
+  RecvFlushPendingFileDeletions() override;
+
   virtual PBlobParent*
   AllocPBlobParent(const BlobConstructorParams& aParams) override;
 
@@ -85,27 +90,22 @@ protected:
   virtual PBroadcastChannelParent*
   AllocPBroadcastChannelParent(const PrincipalInfo& aPrincipalInfo,
                                const nsCString& aOrigin,
-                               const nsString& aChannel,
-                               const bool& aPrivateBrowsing) override;
+                               const nsString& aChannel) override;
 
   virtual bool
   RecvPBroadcastChannelConstructor(PBroadcastChannelParent* actor,
                                    const PrincipalInfo& aPrincipalInfo,
                                    const nsCString& origin,
-                                   const nsString& channel,
-                                   const bool& aPrivateBrowsing) override;
+                                   const nsString& channel) override;
 
   virtual bool
   DeallocPBroadcastChannelParent(PBroadcastChannelParent* aActor) override;
 
-  virtual PNuwaParent*
-  AllocPNuwaParent() override;
+  virtual PSendStreamParent*
+  AllocPSendStreamParent() override;
 
   virtual bool
-  RecvPNuwaConstructor(PNuwaParent* aActor) override;
-
-  virtual bool
-  DeallocPNuwaParent(PNuwaParent* aActor) override;
+  DeallocPSendStreamParent(PSendStreamParent* aActor) override;
 
   virtual PServiceWorkerManagerParent*
   AllocPServiceWorkerManagerParent() override;
@@ -183,6 +183,29 @@ protected:
 
   virtual bool
   DeallocPQuotaParent(PQuotaParent* aActor) override;
+
+  virtual PFileSystemRequestParent*
+  AllocPFileSystemRequestParent(const FileSystemParams&) override;
+
+  virtual bool
+  RecvPFileSystemRequestConstructor(PFileSystemRequestParent* actor,
+                                    const FileSystemParams& params) override;
+
+  virtual bool
+  DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
+
+  // Gamepad API Background IPC
+  virtual PGamepadEventChannelParent*
+  AllocPGamepadEventChannelParent() override;
+
+  virtual bool
+  DeallocPGamepadEventChannelParent(PGamepadEventChannelParent *aActor) override;
+
+  virtual PGamepadTestChannelParent*
+  AllocPGamepadTestChannelParent() override;
+
+  virtual bool
+  DeallocPGamepadTestChannelParent(PGamepadTestChannelParent* aActor) override;
 };
 
 } // namespace ipc

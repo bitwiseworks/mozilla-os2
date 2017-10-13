@@ -14,7 +14,6 @@
 #include "nsEscape.h"
 #include "nsAboutProtocolUtils.h"
 #include "nsPrintfCString.h"
-#include "nsDOMString.h"
 
 #include "nsICacheStorageService.h"
 #include "nsICacheStorage.h"
@@ -25,18 +24,33 @@
 
 using namespace mozilla::net;
 
-NS_IMPL_ISUPPORTS(nsAboutCache, nsIAboutModule, nsICacheStorageVisitor)
+NS_IMPL_ISUPPORTS(nsAboutCache, nsIAboutModule)
+NS_IMPL_ISUPPORTS(nsAboutCache::Channel, nsIChannel, nsIRequest, nsICacheStorageVisitor)
 
 NS_IMETHODIMP
 nsAboutCache::NewChannel(nsIURI* aURI,
                          nsILoadInfo* aLoadInfo,
                          nsIChannel** result)
 {
-    NS_ENSURE_ARG_POINTER(aURI);
-
     nsresult rv;
 
-    *result = nullptr;
+    NS_ENSURE_ARG_POINTER(aURI);
+
+    RefPtr<Channel> channel = new Channel();
+    rv = channel->Init(aURI, aLoadInfo);
+    if (NS_FAILED(rv)) return rv;
+
+    channel.forget(result);
+
+    return NS_OK;
+}
+
+nsresult
+nsAboutCache::Channel::Init(nsIURI* aURI, nsILoadInfo* aLoadInfo)
+{
+    nsresult rv;
+
+    mCancel = false;
 
     nsCOMPtr<nsIInputStream> inputStream;
     rv = NS_NewPipe(getter_AddRefs(inputStream), getter_AddRefs(mStream),
@@ -64,8 +78,7 @@ nsAboutCache::NewChannel(nsIURI* aURI,
     // The entries header is added on encounter of the first entry
     mEntriesHeaderAdded = false;
 
-    nsCOMPtr<nsIChannel> channel;
-    rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
+    rv = NS_NewInputStreamChannelInternal(getter_AddRefs(mChannel),
                                           aURI,
                                           inputStream,
                                           NS_LITERAL_CSTRING("text/html"),
@@ -115,18 +128,50 @@ nsAboutCache::NewChannel(nsIURI* aURI,
         mBuffer.AppendLiteral("\">Back to overview</a>");
     }
 
-    FlushBuffer();
+    rv = FlushBuffer();
+    if (NS_FAILED(rv)) {
+        NS_WARNING("Failed to flush buffer");
+    }
 
-    // Kick it, this goes async.
-    rv = VisitNextStorage();
-    if (NS_FAILED(rv)) return rv;
-
-    channel.forget(result);
     return NS_OK;
 }
 
+NS_IMETHODIMP nsAboutCache::Channel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
+{
+    nsresult rv;
+
+    if (!mChannel) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    // Kick the walk loop.
+    rv = VisitNextStorage();
+    if (NS_FAILED(rv)) return rv;
+
+    MOZ_ASSERT(!aContext, "asyncOpen2() does not take a context argument");
+    rv = NS_MaybeOpenChannelUsingAsyncOpen2(mChannel, aListener);
+    if (NS_FAILED(rv)) return rv;
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP nsAboutCache::Channel::AsyncOpen2(nsIStreamListener *aListener)
+{
+    return AsyncOpen(aListener, nullptr);
+}
+
+NS_IMETHODIMP nsAboutCache::Channel::Open(nsIInputStream * *_retval)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP nsAboutCache::Channel::Open2(nsIInputStream * *_retval)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 nsresult
-nsAboutCache::ParseURI(nsIURI * uri, nsACString & storage)
+nsAboutCache::Channel::ParseURI(nsIURI * uri, nsACString & storage)
 {
     //
     // about:cache[?storage=<storage-name>[&context=<context-key>]]
@@ -167,7 +212,7 @@ nsAboutCache::ParseURI(nsIURI * uri, nsACString & storage)
 }
 
 nsresult
-nsAboutCache::VisitNextStorage()
+nsAboutCache::Channel::VisitNextStorage()
 {
     if (!mStorageList.Length())
         return NS_ERROR_NOT_AVAILABLE;
@@ -179,13 +224,11 @@ nsAboutCache::VisitNextStorage()
     // from visitor callback.  The cache v1 service doesn't like it.
     // TODO - mayhemer, bug 913828, remove this dispatch and call
     // directly.
-    nsCOMPtr<nsIRunnable> event =
-        NS_NewRunnableMethod(this, &nsAboutCache::FireVisitStorage);
-    return NS_DispatchToMainThread(event);
+    return NS_DispatchToMainThread(mozilla::NewRunnableMethod(this, &nsAboutCache::Channel::FireVisitStorage));
 }
 
 void
-nsAboutCache::FireVisitStorage()
+nsAboutCache::Channel::FireVisitStorage()
 {
     nsresult rv;
 
@@ -205,7 +248,10 @@ nsAboutCache::FireVisitStorage()
             free(escaped);
         }
 
-        FlushBuffer();
+        rv = FlushBuffer();
+        if (NS_FAILED(rv)) {
+            NS_WARNING("Failed to flush buffer");
+        }
 
         // Simulate finish of a visit cycle, this tries the next storage
         // or closes the output stream (i.e. the UI loader will stop spinning)
@@ -214,7 +260,7 @@ nsAboutCache::FireVisitStorage()
 }
 
 nsresult
-nsAboutCache::VisitStorage(nsACString const & storageName)
+nsAboutCache::Channel::VisitStorage(nsACString const & storageName)
 {
     nsresult rv;
 
@@ -259,8 +305,8 @@ nsAboutCache::GetStorage(nsACString const & storageName,
 }
 
 NS_IMETHODIMP
-nsAboutCache::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
-                                 uint64_t aCapacity, nsIFile * aDirectory)
+nsAboutCache::Channel::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
+                                          uint64_t aCapacity, nsIFile * aDirectory)
 {
     // We need mStream for this
     if (!mStream) {
@@ -331,7 +377,10 @@ nsAboutCache::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
     // The entries header is added on encounter of the first entry
     mEntriesHeaderAdded = false;
 
-    FlushBuffer();
+    nsresult rv = FlushBuffer();
+    if (NS_FAILED(rv)) {
+        NS_WARNING("Failed to flush buffer");
+    }
 
     if (mOverview) {
         // OnCacheEntryVisitCompleted() is not called when we do not iterate
@@ -344,13 +393,14 @@ nsAboutCache::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
 }
 
 NS_IMETHODIMP
-nsAboutCache::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
-                               int64_t aDataSize, int32_t aFetchCount,
-                               uint32_t aLastModified, uint32_t aExpirationTime,
-                               bool aPinned)
+nsAboutCache::Channel::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
+                                        int64_t aDataSize, int32_t aFetchCount,
+                                        uint32_t aLastModified, uint32_t aExpirationTime,
+                                        bool aPinned)
 {
     // We need mStream for this
-    if (!mStream) {
+    if (!mStream || mCancel) {
+        // Returning a failure from this callback stops the iteration
         return NS_ERROR_FAILURE;
     }
 
@@ -435,7 +485,7 @@ nsAboutCache::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
         PrintTimeString(buf, sizeof(buf), aLastModified);
         mBuffer.Append(buf);
     } else {
-        mBuffer.AppendLiteral("No last modified time (bug 1000338)");
+        mBuffer.AppendLiteral("No last modified time");
     }
     mBuffer.AppendLiteral("</td>\n");
 
@@ -461,12 +511,11 @@ nsAboutCache::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
     // Entry is done...
     mBuffer.AppendLiteral("  </tr>\n");
 
-    FlushBuffer();
-    return NS_OK;
+    return FlushBuffer();
 }
 
 NS_IMETHODIMP
-nsAboutCache::OnCacheEntryVisitCompleted()
+nsAboutCache::Channel::OnCacheEntryVisitCompleted()
 {
     if (!mStream) {
         return NS_ERROR_FAILURE;
@@ -488,32 +537,36 @@ nsAboutCache::OnCacheEntryVisitCompleted()
     // We are done!
     mBuffer.AppendLiteral("</body>\n"
                           "</html>\n");
-    FlushBuffer();
+    nsresult rv = FlushBuffer();
+    if (NS_FAILED(rv)) {
+        NS_WARNING("Failed to flush buffer");
+    }
     mStream->Close();
 
     return NS_OK;
 }
 
-void
-nsAboutCache::FlushBuffer()
+nsresult
+nsAboutCache::Channel::FlushBuffer()
 {
+    nsresult rv;
+
     uint32_t bytesWritten;
-    mStream->Write(mBuffer.get(), mBuffer.Length(), &bytesWritten);
+    rv = mStream->Write(mBuffer.get(), mBuffer.Length(), &bytesWritten);
     mBuffer.Truncate();
+
+    if (NS_FAILED(rv)) {
+        mCancel = true;
+    }
+
+    return rv;
 }
 
 NS_IMETHODIMP
 nsAboutCache::GetURIFlags(nsIURI *aURI, uint32_t *result)
 {
-    *result = 0;
+    *result = nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT;
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsAboutCache::GetIndexedDBOriginPostfix(nsIURI *aURI, nsAString &result)
-{
-    SetDOMStringToNull(result);
-    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 // static

@@ -52,7 +52,7 @@ this.LoginManagerStorage_json.prototype = {
                                   "logins.json");
       this._store = new LoginStore(jsonPath);
 
-      return Task.spawn(function () {
+      return Task.spawn(function* () {
         // Load the data asynchronously.
         this.log("Opening database at", this._store.path);
         yield this._store.load();
@@ -97,7 +97,7 @@ this.LoginManagerStorage_json.prototype = {
    */
   terminate() {
     this._store._saver.disarm();
-    return this._store.save();
+    return this._store._save();
   },
 
   addLogin(login) {
@@ -150,7 +150,8 @@ this.LoginManagerStorage_json.prototype = {
     this._store.saveSoon();
 
     // Send a notification that a login was added.
-    this._sendNotification("addLogin", loginClone);
+    LoginHelper.notifyStorageChanged("addLogin", loginClone);
+    return loginClone;
   },
 
   removeLogin(login) {
@@ -166,7 +167,7 @@ this.LoginManagerStorage_json.prototype = {
       this._store.saveSoon();
     }
 
-    this._sendNotification("removeLogin", storedLogin);
+    LoginHelper.notifyStorageChanged("removeLogin", storedLogin);
   },
 
   modifyLogin(oldLogin, newLoginData) {
@@ -180,8 +181,7 @@ this.LoginManagerStorage_json.prototype = {
 
     // Check if the new GUID is duplicate.
     if (newLogin.guid != oldStoredLogin.guid &&
-        !this._isGuidUnique(newLogin.guid))
-    {
+        !this._isGuidUnique(newLogin.guid)) {
       throw new Error("specified GUID already exists");
     }
 
@@ -218,7 +218,7 @@ this.LoginManagerStorage_json.prototype = {
       }
     }
 
-    this._sendNotification("modifyLogin", [oldStoredLogin, newLogin]);
+    LoginHelper.notifyStorageChanged("modifyLogin", [oldStoredLogin, newLogin]);
   },
 
   /**
@@ -244,14 +244,25 @@ this.LoginManagerStorage_json.prototype = {
    */
   searchLogins(count, matchData) {
     let realMatchData = {};
+    let options = {};
     // Convert nsIPropertyBag to normal JS object
     let propEnum = matchData.enumerator;
     while (propEnum.hasMoreElements()) {
       let prop = propEnum.getNext().QueryInterface(Ci.nsIProperty);
-      realMatchData[prop.name] = prop.value;
+      switch (prop.name) {
+        // Some property names aren't field names but are special options to affect the search.
+        case "schemeUpgrades": {
+          options[prop.name] = prop.value;
+          break;
+        }
+        default: {
+          realMatchData[prop.name] = prop.value;
+          break;
+        }
+      }
     }
 
-    let [logins, ids] = this._searchLogins(realMatchData);
+    let [logins, ids] = this._searchLogins(realMatchData, options);
 
     // Decrypt entries found for the caller.
     logins = this._decryptLogins(logins);
@@ -268,51 +279,36 @@ this.LoginManagerStorage_json.prototype = {
    * is an array of encrypted nsLoginInfo and ids is an array of associated
    * ids in the database.
    */
-  _searchLogins(matchData) {
+  _searchLogins(matchData, aOptions = {
+    schemeUpgrades: false,
+  }) {
     this._store.ensureDataReady();
 
-    let conditions = [];
-
     function match(aLogin) {
-      let returnValue = {
-        match: false,
-        strictMatch: true
-      };
-
       for (let field in matchData) {
-        let value = matchData[field];
+        let wantedValue = matchData[field];
         switch (field) {
-          // Historical compatibility requires this special case
           case "formSubmitURL":
-            if (value != null) {
-              if (aLogin.formSubmitURL != "" && aLogin.formSubmitURL != value) {
-                // Check for cases that don't have fallback matches.
-                if (value == "" || value == "javascript:" ||
-                    aLogin.formSubmitURL == "javascript:" ||
-                    aLogin.formSubmitURL == null) {
-                  return returnValue;
-                }
-
-                // Check if it matches with a different scheme.
-                let loginURI = Services.io.newURI(aLogin.formSubmitURL, null, null);
-                let matchURI = Services.io.newURI(value, null, null);
-
-                if (loginURI.hostPort != matchURI.hostPort) {
-                  return returnValue; // not a match at all
-                }
-
-                if ((loginURI.scheme != "http" && loginURI.scheme != "https") ||
-                    (matchURI.scheme != "http" && matchURI.scheme != "https")) {
-                  // Not a match at all since we only fallback HTTP <=> HTTPS.
-                  return returnValue;
-                }
-
-                returnValue.strictMatch = false; // not a strict match
+            if (wantedValue != null) {
+              // Historical compatibility requires this special case
+              if (aLogin.formSubmitURL == "") {
+                break;
+              }
+              if (!LoginHelper.isOriginMatching(aLogin[field], wantedValue, aOptions)) {
+                return false;
               }
               break;
             }
-          // Normal cases.
+            // fall through
           case "hostname":
+            if (wantedValue != null) { // needed for formSubmitURL fall through
+              if (!LoginHelper.isOriginMatching(aLogin[field], wantedValue, aOptions)) {
+                return false;
+              }
+              break;
+            }
+            // fall through
+          // Normal cases.
           case "httpRealm":
           case "id":
           case "usernameField":
@@ -325,10 +321,10 @@ this.LoginManagerStorage_json.prototype = {
           case "timeLastUsed":
           case "timePasswordChanged":
           case "timesUsed":
-            if (value == null && aLogin[field]) {
-              return returnValue;
-            } else if (aLogin[field] != value) {
-              return returnValue;
+            if (wantedValue == null && aLogin[field]) {
+              return false;
+            } else if (aLogin[field] != wantedValue) {
+              return false;
             }
             break;
           // Fail if caller requests an unknown property.
@@ -336,14 +332,12 @@ this.LoginManagerStorage_json.prototype = {
             throw new Error("Unexpected field: " + field);
         }
       }
-      returnValue.match = true;
-      return returnValue;
+      return true;
     }
 
-    let foundLogins = [], foundIds = [], fallbackLogins = [], fallbackIds = [];
+    let foundLogins = [], foundIds = [];
     for (let loginItem of this._store.data.logins) {
-      let result = match(loginItem);
-      if (result.match) {
+      if (match(loginItem)) {
         // Create the new nsLoginInfo object, push to array
         let login = Cc["@mozilla.org/login-manager/loginInfo;1"].
                     createInstance(Ci.nsILoginInfo);
@@ -358,29 +352,18 @@ this.LoginManagerStorage_json.prototype = {
         login.timeLastUsed = loginItem.timeLastUsed;
         login.timePasswordChanged = loginItem.timePasswordChanged;
         login.timesUsed = loginItem.timesUsed;
-        // If protocol does not match, use as a fallback login
-        if (result.strictMatch) {
-          foundLogins.push(login);
-          foundIds.push(loginItem.id);
-        } else {
-          fallbackLogins.push(login);
-          fallbackIds.push(loginItem.id);
-        }
+        foundLogins.push(login);
+        foundIds.push(loginItem.id);
       }
     }
 
-    if (!foundLogins.length && fallbackLogins.length) {
-      this.log("_searchLogins: returning", fallbackLogins.length, "fallback logins");
-      return [fallbackLogins, fallbackIds];
-    }
-    this.log("_searchLogins: returning", foundLogins.length, "logins");
+    this.log("_searchLogins: returning", foundLogins.length, "logins for", matchData,
+             "with options", aOptions);
     return [foundLogins, foundIds];
   },
 
   /**
    * Removes all logins from storage.
-   *
-   * Disabled hosts are kept, as one presumably doesn't want to erase those.
    */
   removeAllLogins() {
     this._store.ensureDataReady();
@@ -389,48 +372,7 @@ this.LoginManagerStorage_json.prototype = {
     this._store.data.logins = [];
     this._store.saveSoon();
 
-    this._sendNotification("removeAllLogins", null);
-  },
-
-  getAllDisabledHosts(count) {
-    this._store.ensureDataReady();
-
-    let disabledHosts = this._store.data.disabledHosts.slice(0);
-
-    this.log("_getAllDisabledHosts: returning", disabledHosts.length, "disabled hosts.");
-    if (count)
-      count.value = disabledHosts.length; // needed for XPCOM
-    return disabledHosts;
-  },
-
-  getLoginSavingEnabled(hostname) {
-    this._store.ensureDataReady();
-
-    this.log("Getting login saving is enabled for", hostname);
-    return this._store.data.disabledHosts.indexOf(hostname) == -1;
-  },
-
-  setLoginSavingEnabled(hostname, enabled) {
-    this._store.ensureDataReady();
-
-    // Throws if there are bogus values.
-    LoginHelper.checkHostnameValue(hostname);
-
-    this.log("Setting login saving enabled for", hostname, "to", enabled);
-    let foundIndex = this._store.data.disabledHosts.indexOf(hostname);
-    if (enabled) {
-      if (foundIndex != -1) {
-        this._store.data.disabledHosts.splice(foundIndex, 1);
-        this._store.saveSoon();
-      }
-    } else {
-      if (foundIndex == -1) {
-        this._store.data.disabledHosts.push(hostname);
-        this._store.saveSoon();
-      }
-    }
-
-    this._sendNotification(enabled ? "hostSavingEnabled" : "hostSavingDisabled", hostname);
+    LoginHelper.notifyStorageChanged("removeAllLogins", null);
   },
 
   findLogins(count, hostname, formSubmitURL, httpRealm) {
@@ -454,7 +396,6 @@ this.LoginManagerStorage_json.prototype = {
   },
 
   countLogins(hostname, formSubmitURL, httpRealm) {
-    let count = {};
     let loginData = {
       hostname: hostname,
       formSubmitURL: formSubmitURL,
@@ -476,25 +417,6 @@ this.LoginManagerStorage_json.prototype = {
 
   get isLoggedIn() {
     return this._crypto.isLoggedIn;
-  },
-
-  /**
-   * Send a notification when stored data is changed.
-   */
-  _sendNotification(changeType, data) {
-    let dataObject = data;
-    // Can't pass a raw JS string or array though notifyObservers(). :-(
-    if (data instanceof Array) {
-      dataObject = Cc["@mozilla.org/array;1"].
-                   createInstance(Ci.nsIMutableArray);
-      for (let i = 0; i < data.length; i++)
-        dataObject.appendElement(data[i], false);
-    } else if (typeof(data) == "string") {
-      dataObject = Cc["@mozilla.org/supports-string;1"].
-                   createInstance(Ci.nsISupportsString);
-      dataObject.data = data;
-    }
-    Services.obs.notifyObservers(dataObject, "passwordmgr-storage-changed", changeType);
   },
 
   /**

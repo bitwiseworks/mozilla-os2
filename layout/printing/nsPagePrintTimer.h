@@ -18,7 +18,7 @@ class nsPrintEngine;
 //---------------------------------------------------
 //-- Page Timer Class
 //---------------------------------------------------
-class nsPagePrintTimer final : public nsRunnable,
+class nsPagePrintTimer final : public mozilla::Runnable,
                                public nsITimerCallback
 {
 public:
@@ -47,6 +47,15 @@ public:
 
   void Stop();
 
+  void WaitForRemotePrint();
+  void RemotePrintFinished();
+
+  void Disconnect()
+  {
+    mPrintEngine = nullptr;
+    mPrintObj = nullptr;
+  }
+
 private:
   ~nsPagePrintTimer();
 
@@ -59,6 +68,7 @@ private:
   nsCOMPtr<nsIDocumentViewerPrint> mDocViewerPrint;
   nsCOMPtr<nsITimer>         mTimer;
   nsCOMPtr<nsITimer>         mWatchDogTimer;
+  nsCOMPtr<nsITimer>         mWaitingForRemotePrint;
   uint32_t                   mDelay;
   uint32_t                   mFiringCount;
   nsPrintObject *            mPrintObj;
@@ -66,7 +76,14 @@ private:
   bool                       mDone;
 
   static const uint32_t WATCH_DOG_INTERVAL  = 1000;
-  static const uint32_t WATCH_DOG_MAX_COUNT = 10;
+  static const uint32_t WATCH_DOG_MAX_COUNT =
+#ifdef DEBUG
+    // Debug builds are very slow (on Mac at least) and can need extra time
+                                              30
+#else
+                                              10
+#endif
+  ;
 };
 
 

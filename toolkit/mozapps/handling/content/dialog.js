@@ -37,8 +37,7 @@ Cu.import("resource://gre/modules/SharedPromptUtils.jsm");
 
 
 var dialog = {
-  //////////////////////////////////////////////////////////////////////////////
-  //// Member Variables
+  // Member Variables
 
   _handlerInfo: null,
   _URI: null,
@@ -46,9 +45,8 @@ var dialog = {
   _okButton: null,
   _windowCtxt: null,
   _buttonDisabled: true,
-  
-  //////////////////////////////////////////////////////////////////////////////
-  //// Methods
+
+  // Methods
 
  /**
   * This function initializes the content of the dialog.
@@ -137,8 +135,8 @@ var dialog = {
         }
         elm.setAttribute("description", uri.prePath);
       }
-      else if (app instanceof Ci.nsIDBusHandlerApp){
-	  elm.setAttribute("description", app.method);  
+      else if (app instanceof Ci.nsIDBusHandlerApp) {
+	  elm.setAttribute("description", app.method);
       }
       else
         throw "unknown handler type";
@@ -153,15 +151,15 @@ var dialog = {
       elm.setAttribute("type", "handler");
       elm.id = "os-default-handler";
       elm.setAttribute("name", this._handlerInfo.defaultDescription);
-    
+
       items.insertBefore(elm, items.firstChild);
-      if (this._handlerInfo.preferredAction == 
-          Ci.nsIHandlerInfo.useSystemDefault) 
+      if (this._handlerInfo.preferredAction ==
+          Ci.nsIHandlerInfo.useSystemDefault)
           this.selectedItem = elm;
     }
     items.ensureSelectedElementIsVisible();
   },
-  
+
  /**
   * Brings up a filepicker and allows a user to choose an application.
   */
@@ -263,8 +261,7 @@ var dialog = {
       document.documentElement.acceptDialog();
   },
 
-  /////////////////////////////////////////////////////////////////////////////
-  //// Getters / Setters
+  // Getters / Setters
 
  /**
   * Returns/sets the selected element in the richlistbox
@@ -277,5 +274,5 @@ var dialog = {
   {
     return document.getElementById("items").selectedItem = aItem;
   }
-  
+
 };

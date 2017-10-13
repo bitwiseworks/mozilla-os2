@@ -22,7 +22,7 @@
 static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 
 //
-// NSPR_LOG_MODULES=nsStreamPump:5
+// MOZ_LOG=nsStreamPump:5
 //
 static mozilla::LazyLogModule gStreamPumpLog("nsStreamPump");
 #undef LOG
@@ -66,8 +66,7 @@ nsInputStreamPump::Create(nsInputStreamPump  **result,
         rv = pump->Init(stream, streamPos, streamLen,
                         segsize, segcount, closeWhenDone);
         if (NS_SUCCEEDED(rv)) {
-            *result = nullptr;
-            pump.swap(*result);
+            pump.forget(result);
         }
     }
     return rv;
@@ -81,7 +80,7 @@ struct PeekData {
   void* mClosure;
 };
 
-static NS_METHOD
+static nsresult
 CallPeekFunc(nsIInputStream *aInStream, void *aClosure,
              const char *aFromSegment, uint32_t aToOffset, uint32_t aCount,
              uint32_t *aWriteCount)
@@ -362,7 +361,7 @@ nsInputStreamPump::AsyncRead(nsIStreamListener *listener, nsISupports *ctxt)
 
     // release our reference to the original stream.  from this point forward,
     // we only reference the "stream" via mAsyncStream.
-    mStream = 0;
+    mStream = nullptr;
 
     // mStreamOffset now holds the number of bytes currently read.  we use this
     // to enforce the mStreamLength restriction.
@@ -679,7 +678,7 @@ nsInputStreamPump::OnStateStop()
         MOZ_ASSERT(NS_IsMainThread(),
                    "OnStateStop should only be called on the main thread.");
         nsresult rv = NS_DispatchToMainThread(
-            NS_NewRunnableMethod(this, &nsInputStreamPump::CallOnStateStop));
+            NewRunnableMethod(this, &nsInputStreamPump::CallOnStateStop));
         NS_ENSURE_SUCCESS(rv, STATE_IDLE);
         return STATE_IDLE;
     }
@@ -704,8 +703,8 @@ nsInputStreamPump::OnStateStop()
     else if (mCloseWhenDone)
         mAsyncStream->Close();
 
-    mAsyncStream = 0;
-    mTargetThread = 0;
+    mAsyncStream = nullptr;
+    mTargetThread = nullptr;
     mIsPending = false;
     {
         // Note: Must exit monitor for call to OnStartRequest to avoid
@@ -715,8 +714,8 @@ nsInputStreamPump::OnStateStop()
         mListener->OnStopRequest(this, mListenerContext, mStatus);
         mMonitor.Enter();
     }
-    mListener = 0;
-    mListenerContext = 0;
+    mListener = nullptr;
+    mListenerContext = nullptr;
 
     if (mLoadGroup)
         mLoadGroup->RemoveRequest(this, nullptr, mStatus);

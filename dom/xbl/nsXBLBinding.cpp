@@ -58,6 +58,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/ServoStyleSet.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -86,15 +87,21 @@ XBLEnumerate(JSContext *cx, JS::Handle<JSObject*> obj)
   return protoBinding->ResolveAllFields(cx, obj);
 }
 
-static const JSClass gPrototypeJSClass = {
-    "XBL prototype JSClass",
-    JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS |
-    // Our one reserved slot holds the relevant nsXBLPrototypeBinding
-    JSCLASS_HAS_RESERVED_SLOTS(1),
+static const JSClassOps gPrototypeJSClassOps = {
     nullptr, nullptr, nullptr, nullptr,
     XBLEnumerate, nullptr,
     nullptr, XBLFinalize,
     nullptr, nullptr, nullptr, nullptr
+};
+
+static const JSClass gPrototypeJSClass = {
+    "XBL prototype JSClass",
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_PRIVATE_IS_NSISUPPORTS |
+    JSCLASS_FOREGROUND_FINALIZE |
+    // Our one reserved slot holds the relevant nsXBLPrototypeBinding
+    JSCLASS_HAS_RESERVED_SLOTS(1),
+    &gPrototypeJSClassOps
 };
 
 // Implementation /////////////////////////////////////////////////////////////////
@@ -198,7 +205,7 @@ nsXBLBinding::InstallAnonymousContent(nsIContent* aAnonParent, nsIContent* aElem
   // aElement.
   // (2) The children's parent back pointer should not be to this synthetic root
   // but should instead point to the enclosing parent element.
-  nsIDocument* doc = aElement->GetCurrentDoc();
+  nsIDocument* doc = aElement->GetUncomposedDoc();
   bool allowScripts = AllowScripts();
 
   nsAutoScriptBlocker scriptBlocker;
@@ -393,18 +400,18 @@ nsXBLBinding::GenerateAnonymousContent()
   // Always check the content element for potential attributes.
   // This shorthand hack always happens, even when we didn't
   // build anonymous content.
-  const nsAttrName* attrName;
-  for (uint32_t i = 0; (attrName = content->GetAttrNameAt(i)); ++i) {
-    int32_t namespaceID = attrName->NamespaceID();
+  BorrowedAttrInfo attrInfo;
+  for (uint32_t i = 0; (attrInfo = content->GetAttrInfoAt(i)); ++i) {
+    int32_t namespaceID = attrInfo.mName->NamespaceID();
     // Hold a strong reference here so that the atom doesn't go away during
     // UnsetAttr.
-    nsCOMPtr<nsIAtom> name = attrName->LocalName();
+    nsCOMPtr<nsIAtom> name = attrInfo.mName->LocalName();
 
     if (name != nsGkAtoms::includes) {
       if (!nsContentUtils::HasNonEmptyAttr(mBoundElement, namespaceID, name)) {
         nsAutoString value2;
-        content->GetAttr(namespaceID, name, value2);
-        mBoundElement->SetAttr(namespaceID, name, attrName->GetPrefix(),
+        attrInfo.mValue->ToString(value2);
+        mBoundElement->SetAttr(namespaceID, name, attrInfo.mName->GetPrefix(),
                                value2, false);
       }
     }
@@ -413,6 +420,27 @@ nsXBLBinding::GenerateAnonymousContent()
     if (mContent)
       mContent->UnsetAttr(namespaceID, name, false);
   }
+
+  // Now that we've finished shuffling the tree around, go ahead and restyle it
+  // since frame construction is about to happen.
+  nsIPresShell* presShell = mBoundElement->OwnerDoc()->GetShell();
+  ServoStyleSet* servoSet = presShell->StyleSet()->GetAsServo();
+  if (servoSet) {
+    mBoundElement->SetHasDirtyDescendantsForServo();
+    servoSet->StyleNewChildren(mBoundElement);
+  }
+}
+
+nsIURI*
+nsXBLBinding::GetSourceDocURI()
+{
+  nsIContent* targetContent =
+    mPrototypeBinding->GetImmediateChild(nsGkAtoms::content);
+  if (!targetContent) {
+    return nullptr;
+  }
+
+  return targetContent->OwnerDoc()->GetDocumentURI();
 }
 
 XBLChildrenElement*
@@ -872,7 +900,7 @@ GetOrCreateClassObjectMap(JSContext *cx, JS::Handle<JSObject*> scope, const char
   MOZ_ASSERT(scope == xpc::GetXBLScopeOrGlobal(cx, scope));
 
   // First, see if the map is already defined.
-  JS::Rooted<JSPropertyDescriptor> desc(cx);
+  JS::Rooted<JS::PropertyDescriptor> desc(cx);
   if (!JS_GetOwnPropertyDescriptor(cx, scope, mapName, &desc)) {
     return nullptr;
   }
@@ -953,6 +981,15 @@ GetOrCreateMapEntryForPrototype(JSContext *cx, JS::Handle<JSObject*> proto)
   return entry;
 }
 
+static
+nsXBLPrototypeBinding*
+GetProtoBindingFromClassObject(JSObject* obj)
+{
+  MOZ_ASSERT(JS_GetClass(obj) == &gPrototypeJSClass);
+  return static_cast<nsXBLPrototypeBinding*>(::JS_GetReservedSlot(obj, 0).toPrivate());
+}
+
+
 // static
 nsresult
 nsXBLBinding::DoInitJSClass(JSContext *cx,
@@ -1001,14 +1038,16 @@ nsXBLBinding::DoInitJSClass(JSContext *cx,
   // holder should be class objects. If we don't find the class object, we need
   // to create and define it.
   JS::Rooted<JSObject*> proto(cx);
-  JS::Rooted<JSPropertyDescriptor> desc(cx);
+  JS::Rooted<JS::PropertyDescriptor> desc(cx);
   if (!JS_GetOwnUCPropertyDescriptor(cx, holder, aClassName.get(), &desc)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   *aNew = !desc.object();
   if (desc.object()) {
     proto = &desc.value().toObject();
-    MOZ_ASSERT(JS_GetClass(js::UncheckedUnwrap(proto)) == &gPrototypeJSClass);
+    DebugOnly<nsXBLPrototypeBinding*> cachedBinding =
+      GetProtoBindingFromClassObject(js::UncheckedUnwrap(proto));
+    MOZ_ASSERT(cachedBinding == aProtoBinding);
   } else {
 
     // We need to create the prototype. First, enter the compartment where it's
@@ -1083,7 +1122,7 @@ nsXBLBinding::ResolveAllFields(JSContext *cx, JS::Handle<JSObject*> obj) const
 
 bool
 nsXBLBinding::LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
-                           JS::MutableHandle<JSPropertyDescriptor> aDesc)
+                           JS::MutableHandle<JS::PropertyDescriptor> aDesc)
 {
   // We should never enter this function with a pre-filled property descriptor.
   MOZ_ASSERT(!aDesc.object());
@@ -1138,7 +1177,7 @@ nsXBLBinding::LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
 bool
 nsXBLBinding::LookupMemberInternal(JSContext* aCx, nsString& aName,
                                    JS::Handle<jsid> aNameAsId,
-                                   JS::MutableHandle<JSPropertyDescriptor> aDesc,
+                                   JS::MutableHandle<JS::PropertyDescriptor> aDesc,
                                    JS::Handle<JSObject*> aXBLScope)
 {
   // First, see if we have an implementation. If we don't, it means that this

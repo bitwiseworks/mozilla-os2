@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_PresentationChild_h
 #define mozilla_dom_PresentationChild_h
 
+#include "mozilla/dom/PPresentationBuilderChild.h"
 #include "mozilla/dom/PPresentationChild.h"
 #include "mozilla/dom/PPresentationRequestChild.h"
 
@@ -31,25 +32,43 @@ public:
   virtual bool
   DeallocPPresentationRequestChild(PPresentationRequestChild* aActor) override;
 
+  bool RecvPPresentationBuilderConstructor(PPresentationBuilderChild* aActor,
+                                           const nsString& aSessionId,
+                                           const uint8_t& aRole) override;
+
+  virtual PPresentationBuilderChild*
+  AllocPPresentationBuilderChild(const nsString& aSessionId, const uint8_t& aRole) override;
+
   virtual bool
-  RecvNotifyAvailableChange(const bool& aAvailable) override;
+  DeallocPPresentationBuilderChild(PPresentationBuilderChild* aActor) override;
+
+  virtual bool
+  RecvNotifyAvailableChange(nsTArray<nsString>&& aAvailabilityUrls,
+                            const bool& aAvailable) override;
 
   virtual bool
   RecvNotifySessionStateChange(const nsString& aSessionId,
-                               const uint16_t& aState) override;
+                               const uint16_t& aState,
+                               const nsresult& aReason) override;
 
   virtual bool
   RecvNotifyMessage(const nsString& aSessionId,
-                    const nsCString& aData) override;
+                    const nsCString& aData,
+                    const bool& aIsBinary) override;
 
   virtual bool
   RecvNotifySessionConnect(const uint64_t& aWindowId,
                            const nsString& aSessionId) override;
 
+  virtual bool
+  RecvNotifyCloseSessionTransport(const nsString& aSessionId,
+                                  const uint8_t& aRole,
+                                  const nsresult& aReason) override;
+
 private:
   virtual ~PresentationChild();
 
-  bool mActorDestroyed;
+  bool mActorDestroyed = false;
   RefPtr<PresentationIPCService> mService;
 };
 
@@ -66,10 +85,13 @@ public:
   virtual bool
   Recv__delete__(const nsresult& aResult) override;
 
+  virtual bool
+  RecvNotifyRequestUrlSelected(const nsString& aUrl) override;
+
 private:
   virtual ~PresentationRequestChild();
 
-  bool mActorDestroyed;
+  bool mActorDestroyed = false;
   nsCOMPtr<nsIPresentationServiceCallback> mCallback;
 };
 

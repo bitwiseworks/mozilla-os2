@@ -19,6 +19,13 @@
           .some(sn => sn.track == t))) // that's being sent over |pc|.
   }
 
+  function allRemoteStreamsHaveReceiver(pc) {
+    return pc.getRemoteStreams()
+      .every(s => s.getTracks()        // Every remote stream,
+        .some(t => pc.getReceivers()   // should have some track,
+          .some(sn => sn.track == t))) // that's being received over |pc|.
+  }
+
   function replacetest(wrapper) {
     var pc = wrapper._pc;
     var oldSenderCount = pc.getSenders().length;
@@ -26,7 +33,9 @@
     var oldTrack = sender.track;
     ok(sender, "We have a sender for video");
     ok(allLocalStreamsHaveSender(pc),
-       "Shouldn't have any streams without a corresponding sender");
+       "Shouldn't have any local streams without a corresponding sender");
+    ok(allRemoteStreamsHaveReceiver(pc),
+       "Shouldn't have any remote streams without a corresponding receiver");
 
     var newTrack;
     var audiotrack;
@@ -158,17 +167,6 @@
           is(e.name, "InvalidParameterError",
              "addTrack existing track should fail");
         }
-        return navigator.mediaDevices.getUserMedia({video:true})
-          .then(differentStream => {
-            var track = differentStream.getVideoTracks()[0];
-            try {
-              test.pcLocal._pc.addTrack(track, stream);
-              ok(false, "addTrack w/wrong stream should fail");
-            } catch (e) {
-              is(e.name, "InvalidParameterError",
-                 "addTrack w/wrong stream should fail");
-            }
-          });
       }
     ]);
     test.run();

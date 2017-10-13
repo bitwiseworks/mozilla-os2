@@ -50,7 +50,7 @@ UDPSocket::Constructor(const GlobalObject& aGlobal,
                        const UDPOptions& aOptions,
                        ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindowInner> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
   if (!ownerWindow) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -112,12 +112,14 @@ UDPSocket::Constructor(const GlobalObject& aGlobal,
   return socket.forget();
 }
 
-UDPSocket::UDPSocket(nsPIDOMWindow* aOwner,
+UDPSocket::UDPSocket(nsPIDOMWindowInner* aOwner,
                      const nsCString& aRemoteAddress,
                      const Nullable<uint16_t>& aRemotePort)
   : DOMEventTargetHelper(aOwner)
   , mRemoteAddress(aRemoteAddress)
   , mRemotePort(aRemotePort)
+  , mAddressReuse(false)
+  , mLoopback(false)
   , mReadyState(SocketReadyState::Opening)
 {
   MOZ_ASSERT(aOwner);
@@ -196,7 +198,7 @@ UDPSocket::CloseWithReason(nsresult aReason)
 
   if (mClosed) {
     if (NS_SUCCEEDED(aReason)) {
-      mClosed->MaybeResolve(JS::UndefinedHandleValue);
+      mClosed->MaybeResolveWithUndefined();
     } else {
       mClosed->MaybeReject(aReason);
     }
@@ -228,7 +230,7 @@ UDPSocket::JoinMulticastGroup(const nsAString& aMulticastGroupAddress,
     MOZ_ASSERT(!mSocketChild);
 
     aRv = mSocket->JoinMulticast(address, EmptyCString());
-    NS_WARN_IF(aRv.Failed());
+    NS_WARNING_ASSERTION(!aRv.Failed(), "JoinMulticast failed");
 
     return;
   }
@@ -236,7 +238,7 @@ UDPSocket::JoinMulticastGroup(const nsAString& aMulticastGroupAddress,
   MOZ_ASSERT(mSocketChild);
 
   aRv = mSocketChild->JoinMulticast(address, EmptyCString());
-  NS_WARN_IF(aRv.Failed());
+  NS_WARNING_ASSERTION(!aRv.Failed(), "JoinMulticast failed");
 }
 
 void
@@ -261,14 +263,14 @@ UDPSocket::LeaveMulticastGroup(const nsAString& aMulticastGroupAddress,
     MOZ_ASSERT(!mSocketChild);
 
     aRv = mSocket->LeaveMulticast(address, EmptyCString());
-    NS_WARN_IF(aRv.Failed());
+    NS_WARNING_ASSERTION(!aRv.Failed(), "mSocket->LeaveMulticast failed");
     return;
   }
 
   MOZ_ASSERT(mSocketChild);
 
   aRv = mSocketChild->LeaveMulticast(address, EmptyCString());
-  NS_WARN_IF(aRv.Failed());
+  NS_WARNING_ASSERTION(!aRv.Failed(), "mSocketChild->LeaveMulticast failed");
 }
 
 nsresult
@@ -467,7 +469,7 @@ UDPSocket::InitLocal(const nsAString& aLocalAddress,
     return rv;
   }
 
-  mOpened->MaybeResolve(JS::UndefinedHandleValue);
+  mOpened->MaybeResolveWithUndefined();
 
   return NS_OK;
 }
@@ -501,7 +503,9 @@ UDPSocket::InitRemote(const nsAString& aLocalAddress,
                   NS_ConvertUTF16toUTF8(aLocalAddress),
                   aLocalPort,
                   mAddressReuse,
-                  mLoopback);
+                  mLoopback,
+                  0,
+                  0);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -538,7 +542,7 @@ UDPSocket::Init(const nsString& aLocalAddress,
     return rv.StealNSResult();
   }
 
-  class OpenSocketRunnable final : public nsRunnable
+  class OpenSocketRunnable final : public Runnable
   {
   public:
     explicit OpenSocketRunnable(UDPSocket* aSocket) : mSocket(aSocket)
@@ -732,7 +736,16 @@ UDPSocket::CallListenerOpened()
     return NS_OK;
   }
 
-  mOpened->MaybeResolve(JS::UndefinedHandleValue);
+  mOpened->MaybeResolveWithUndefined();
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+UDPSocket::CallListenerConnected()
+{
+  // This shouldn't be called here.
+  MOZ_CRASH();
 
   return NS_OK;
 }

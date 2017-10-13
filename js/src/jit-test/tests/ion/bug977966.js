@@ -1,5 +1,4 @@
-setJitCompilerOption("baseline.warmup.trigger", 10);
-setJitCompilerOption("ion.warmup.trigger", 20);
+// |jit-test| --ion-eager
 
 function join_check() {
     var lengthWasCalled = false;
@@ -72,6 +71,24 @@ function split_join_4(i) {
     return i;
 }
 
+function split_join_5(i) {
+    var s = "abca";
+    assertEq(s.split("a").join("") + i, "bc" + i);
+}
+
+function split_join_two_byte_char(i) {
+    var s1 = "ab";
+    assertEq(s1.split("").join("\u03c0"), "a\u03c0b");
+    var s2 = i + "\u03c0" + i;
+    assertEq(s2.split("\u03c0").join("-"), i + "-" + i);
+}
+
+function split_join_underflow(i)
+{
+    var s = "";
+    assertEq(s.split("").join("x" + i), "");
+}
+
 // Check that we do not consider the string argument of join as a replacement
 // pattern, as the string replace primitive is supposed to do.
 function split_join_pattern(i) {
@@ -86,17 +103,13 @@ function split_join_multiple(i) {
     var s1 = i + "-\n-" + i + "-\n-" + i;
     assertEq(s1.split("-\n-").join("-")  , i + "-" + i + "-" + i);
     assertEq(s1.replace("-\n-", "-")     , i + "-" + i + "-\n-" + i);
-    // SpiderMonkey extension
-    assertEq(s1.replace("-\n-", "-", "g"), i + "-" + i + "-" + i);
 
     var s2 = "abc";
     assertEq(s2.split("").join("" + i)   , "a" + i + "b" + i + "c");
     assertEq(s2.replace("", "" + i)      , i + "abc");
-    // SpiderMonkey extension
-    assertEq(s2.replace("", "" + i, "g") , i + "a" + i + "b" + i + "c" + i);
 }
 
-for (var i = 0; i < 100; ++i) {
+for (var i = 0; i < 1000; ++i) {
     join_check(i);
     split(i);
     join(i);
@@ -104,6 +117,9 @@ for (var i = 0; i < 100; ++i) {
     split_join_2(i);
     split_join_3(i);
     split_join_4(i);
+    split_join_5(i);
     split_join_pattern(i);
     split_join_multiple(i);
+    split_join_two_byte_char(i);
+    split_join_underflow(i);
 }

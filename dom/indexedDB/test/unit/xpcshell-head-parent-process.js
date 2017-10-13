@@ -18,11 +18,11 @@ function is(a, b, msg) {
 }
 
 function ok(cond, msg) {
-  do_check_true(!!cond, Components.stack.caller); 
+  do_check_true(!!cond, Components.stack.caller);
 }
 
 function isnot(a, b, msg) {
-  do_check_neq(a, b, Components.stack.caller); 
+  do_check_neq(a, b, Components.stack.caller);
 }
 
 function executeSoon(fun) {
@@ -50,6 +50,7 @@ if (!this.runTest) {
 
       enableTesting();
       enableExperimental();
+      enableWasm();
     }
 
     Cu.importGlobalProperties(["indexedDB", "Blob", "File", "FileReader"]);
@@ -62,12 +63,15 @@ if (!this.runTest) {
 function finishTest()
 {
   if (SpecialPowers.isMainProcess()) {
+    resetWasm();
     resetExperimental();
     resetTesting();
 
     SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
                                                  "free");
   }
+
+  SpecialPowers.removeFiles();
 
   do_execute_soon(function(){
     testGenerator.close();
@@ -114,16 +118,25 @@ function expectedErrorHandler(name)
   };
 }
 
-function ExpectError(name)
+function expectUncaughtException(expecting)
+{
+  // This is dummy for xpcshell test.
+}
+
+function ExpectError(name, preventDefault)
 {
   this._name = name;
+  this._preventDefault = preventDefault;
 }
 ExpectError.prototype = {
   handleEvent: function(event)
   {
     do_check_eq(event.type, "error");
     do_check_eq(this._name, event.target.error.name);
-    event.preventDefault();
+    if (this._preventDefault) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     grabEventAndContinueHandler(event);
   }
 };
@@ -150,12 +163,12 @@ function compareKeys(k1, k2) {
     if (!(k2 instanceof Array) ||
         k1.length != k2.length)
       return false;
-    
+
     for (let i = 0; i < k1.length; ++i) {
       if (!compareKeys(k1[i], k2[i]))
         return false;
     }
-    
+
     return true;
   }
 
@@ -202,6 +215,16 @@ function resetTesting()
   SpecialPowers.clearUserPref("dom.indexedDB.testing");
 }
 
+function enableWasm()
+{
+  SpecialPowers.setBoolPref("javascript.options.wasm", true);
+}
+
+function resetWasm()
+{
+  SpecialPowers.clearUserPref("javascript.options.wasm");
+}
+
 function gc()
 {
   Cu.forceGC();
@@ -210,7 +233,7 @@ function gc()
 
 function scheduleGC()
 {
-  SpecialPowers.exactGC(null, continueToNextStep);
+  SpecialPowers.exactGC(continueToNextStep);
 }
 
 function setTimeout(fun, timeout) {
@@ -329,6 +352,48 @@ function installPackagedProfile(packageName)
   zipReader.close();
 }
 
+function getChromeFilesDir()
+{
+  let dirService = Cc["@mozilla.org/file/directory_service;1"]
+                   .getService(Ci.nsIProperties);
+
+  let profileDir = dirService.get("ProfD", Ci.nsIFile);
+
+  let idbDir = profileDir.clone();
+  idbDir.append("storage");
+  idbDir.append("permanent");
+  idbDir.append("chrome");
+  idbDir.append("idb");
+
+  let idbEntries = idbDir.directoryEntries;
+  while (idbEntries.hasMoreElements()) {
+    let entry = idbEntries.getNext();
+    let file = entry.QueryInterface(Ci.nsIFile);
+    if (file.isDirectory()) {
+      return file;
+    }
+  }
+
+  throw new Error("files directory doesn't exist!");
+}
+
+function getView(size)
+{
+  let buffer = new ArrayBuffer(size);
+  let view = new Uint8Array(buffer);
+  is(buffer.byteLength, size, "Correct byte length");
+  return view;
+}
+
+function getRandomView(size)
+{
+  let view = getView(size);
+  for (let i = 0; i < size; i++) {
+    view[i] = parseInt(Math.random() * 255)
+  }
+  return view;
+}
+
 function getBlob(str)
 {
   return new Blob([str], {type: "type/text"});
@@ -339,13 +404,41 @@ function getFile(name, type, str)
   return new File([str], name, {type: type});
 }
 
+function isWasmSupported()
+{
+  let testingFunctions = Cu.getJSTestingFunctions();
+  return testingFunctions.wasmIsSupported();
+}
+
+function getWasmBinarySync(text)
+{
+  let testingFunctions = Cu.getJSTestingFunctions();
+  let binary = testingFunctions.wasmTextToBinary(text);
+  return binary;
+}
+
+function getWasmBinary(text)
+{
+  let binary = getWasmBinarySync(text);
+  executeSoon(function() {
+    testGenerator.send(binary);
+  });
+}
+
+function getWasmModule(binary)
+{
+  let module = new WebAssembly.Module(binary);
+  return module;
+}
+
 function compareBuffers(buffer1, buffer2)
 {
   if (buffer1.byteLength != buffer2.byteLength) {
     return false;
   }
-  let view1 = new Uint8Array(buffer1);
-  let view2 = new Uint8Array(buffer2);
+
+  let view1 = buffer1 instanceof Uint8Array ? buffer1 : new Uint8Array(buffer1);
+  let view2 = buffer2 instanceof Uint8Array ? buffer2 : new Uint8Array(buffer2);
   for (let i = 0; i < buffer1.byteLength; i++) {
     if (view1[i] != view2[i]) {
       return false;
@@ -356,7 +449,7 @@ function compareBuffers(buffer1, buffer2)
 
 function verifyBuffers(buffer1, buffer2)
 {
-  ok(compareBuffers(buffer1, buffer2), "Correct blob data");
+  ok(compareBuffers(buffer1, buffer2), "Correct buffer data");
 }
 
 function verifyBlob(blob1, blob2)
@@ -411,9 +504,75 @@ function verifyMutableFile(mutableFile1, file2)
      "Instance of IDBMutableFile");
   is(mutableFile1.name, file2.name, "Correct name");
   is(mutableFile1.type, file2.type, "Correct type");
-  executeSoon(function() {
-    testGenerator.next();
-  });
+  continueToNextStep();
+}
+
+function verifyView(view1, view2)
+{
+  is(view1.byteLength, view2.byteLength, "Correct byteLength");
+  verifyBuffers(view1, view2);
+  continueToNextStep();
+}
+
+function verifyWasmModule(module1, module2)
+{
+  let testingFunctions = Cu.getJSTestingFunctions();
+  let exp1 = testingFunctions.wasmExtractCode(module1);
+  let exp2 = testingFunctions.wasmExtractCode(module2);
+  let code1 = exp1.code;
+  let code2 = exp2.code;
+  ok(code1 instanceof Uint8Array, "Instance of Uint8Array");
+  ok(code1.length == code2.length, "Correct length");
+  verifyBuffers(code1, code2);
+  continueToNextStep();
+}
+
+function grabFileUsageAndContinueHandler(request)
+{
+  testGenerator.send(request.fileUsage);
+}
+
+function getUsage(usageHandler)
+{
+  let qms = Cc["@mozilla.org/dom/quota-manager-service;1"]
+              .getService(Ci.nsIQuotaManagerService);
+  let principal = Cc["@mozilla.org/systemprincipal;1"]
+                    .createInstance(Ci.nsIPrincipal);
+  qms.getUsageForPrincipal(principal, usageHandler);
+}
+
+function setTemporaryStorageLimit(limit)
+{
+  const pref = "dom.quotaManager.temporaryStorage.fixedLimit";
+  if (limit) {
+    info("Setting temporary storage limit to " + limit);
+    SpecialPowers.setIntPref(pref, limit);
+  } else {
+    info("Removing temporary storage limit");
+    SpecialPowers.clearUserPref(pref);
+  }
+}
+
+function setDataThreshold(threshold)
+{
+  info("Setting data threshold to " + threshold);
+  SpecialPowers.setIntPref("dom.indexedDB.dataThreshold", threshold);
+}
+
+function setMaxSerializedMsgSize(aSize)
+{
+  info("Setting maximal size of a serialized message to " + aSize);
+  SpecialPowers.setIntPref("dom.indexedDB.maxSerializedMsgSize", aSize);
+}
+
+function getPrincipal(url)
+{
+  let uri = Cc["@mozilla.org/network/io-service;1"]
+              .getService(Ci.nsIIOService)
+              .newURI(url, null, null);
+  let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
+              .getService(Ci.nsIScriptSecurityManager);
+  return ssm.createCodebasePrincipal(uri, {});
 }
 
 var SpecialPowers = {
@@ -446,7 +605,7 @@ var SpecialPowers = {
     this._getPrefs().clearUserPref(prefName);
   },
   // Copied (and slightly adjusted) from specialpowersAPI.js
-  exactGC: function(win, callback) {
+  exactGC: function(callback) {
     let count = 0;
 
     function doPreciseGCandCC() {
@@ -484,7 +643,46 @@ var SpecialPowers = {
     return Cu;
   },
 
-  createDOMFile: function(file, options) {
-    return new File(file, options);
+  // Based on SpecialPowersObserver.prototype.receiveMessage
+  createFiles: function(requests, callback) {
+    let dirSvc = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
+    let filePaths = new Array;
+    if (!this._createdFiles) {
+      this._createdFiles = new Array;
+    }
+    let createdFiles = this._createdFiles;
+    requests.forEach(function(request) {
+      const filePerms = 0o666;
+      let testFile = dirSvc.get("ProfD", Ci.nsIFile);
+      if (request.name) {
+        testFile.append(request.name);
+      } else {
+        testFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, filePerms);
+      }
+        let outStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
+        outStream.init(testFile, 0x02 | 0x08 | 0x20, // PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
+                       filePerms, 0);
+        if (request.data) {
+          outStream.write(request.data, request.data.length);
+          outStream.close();
+        }
+        filePaths.push(File.createFromFileName(testFile.path, request.options));
+        createdFiles.push(testFile);
+    });
+
+    setTimeout(function () {
+      callback(filePaths);
+    }, 0);
+  },
+
+  removeFiles: function() {
+    if (this._createdFiles) {
+      this._createdFiles.forEach(function (testFile) {
+        try {
+          testFile.remove(false);
+        } catch (e) {}
+      });
+      this._createdFiles = null;
+    }
   },
 };

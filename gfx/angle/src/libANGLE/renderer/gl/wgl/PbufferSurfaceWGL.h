@@ -21,7 +21,8 @@ class FunctionsWGL;
 class PbufferSurfaceWGL : public SurfaceGL
 {
   public:
-    PbufferSurfaceWGL(RendererGL *renderer,
+    PbufferSurfaceWGL(const egl::SurfaceState &state,
+                      RendererGL *renderer,
                       EGLint width,
                       EGLint height,
                       EGLenum textureFormat,
@@ -39,7 +40,7 @@ class PbufferSurfaceWGL : public SurfaceGL
     egl::Error swap() override;
     egl::Error postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height) override;
     egl::Error querySurfacePointerANGLE(EGLint attribute, void **value) override;
-    egl::Error bindTexImage(EGLint buffer) override;
+    egl::Error bindTexImage(gl::Texture *texture, EGLint buffer) override;
     egl::Error releaseTexImage(EGLint buffer) override;
     void setSwapInterval(EGLint interval) override;
 

@@ -258,14 +258,16 @@ protected:
   void TraceWrapper(JSTracer* aTrc, const char* name)
   {
     if (mWrapper) {
-      JS_CallObjectTracer(aTrc, &mWrapper, name);
+      js::UnsafeTraceManuallyBarrieredEdge(aTrc, &mWrapper, name);
     }
   }
 
   void PoisonWrapper()
   {
     if (mWrapper) {
-      mWrapper.setToCrashOnTouch();
+      // Set the pointer to a value that will cause a crash if it is
+      // dereferenced.
+      mWrapper = reinterpret_cast<JSObject*>(1);
     }
   }
 
@@ -287,13 +289,7 @@ private:
     return mWrapper;
   }
 
-  void SetWrapperJSObject(JSObject* aWrapper)
-  {
-    mWrapper = aWrapper;
-    UnsetWrapperFlags(kWrapperFlagsMask & ~WRAPPER_IS_NOT_DOM_BINDING);
-  }
-
-  void TraceWrapperJSObject(JSTracer* aTrc, const char* aName);
+  void SetWrapperJSObject(JSObject* aWrapper);
 
   FlagsType GetWrapperFlags() const
   {
@@ -318,8 +314,8 @@ private:
     mFlags &= ~aFlagsToUnset;
   }
 
-  static void HoldJSObjects(void* aScriptObjectHolder,
-                            nsScriptObjectTracer* aTracer);
+  void HoldJSObjects(void* aScriptObjectHolder,
+                     nsScriptObjectTracer* aTracer);
 
 #ifdef DEBUG
 public:
@@ -349,8 +345,8 @@ private:
 
   enum { kWrapperFlagsMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_NOT_DOM_BINDING) };
 
-  JS::Heap<JSObject*> mWrapper;
-  FlagsType           mFlags;
+  JSObject* mWrapper;
+  FlagsType mFlags;
 };
 
 enum { WRAPPER_CACHE_FLAGS_BITS_USED = 2 };

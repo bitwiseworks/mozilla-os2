@@ -22,7 +22,7 @@ SharedSurface_IOSurface::Create(const RefPtr<MacIOSurface>& ioSurf,
     MOZ_ASSERT(ioSurf);
     MOZ_ASSERT(gl);
 
-    gfx::IntSize size(ioSurf->GetWidth(), ioSurf->GetHeight());
+    auto size = gfx::IntSize::Truncate(ioSurf->GetWidth(), ioSurf->GetHeight());
 
     typedef SharedSurface_IOSurface ptrT;
     UniquePtr<ptrT> ret( new ptrT(ioSurf, gl, size, hasAlpha) );
@@ -30,7 +30,7 @@ SharedSurface_IOSurface::Create(const RefPtr<MacIOSurface>& ioSurf,
 }
 
 void
-SharedSurface_IOSurface::Fence()
+SharedSurface_IOSurface::ProducerReleaseImpl()
 {
     mGL->MakeCurrent();
     mGL->fFlush();
@@ -165,7 +165,7 @@ SharedSurface_IOSurface::SharedSurface_IOSurface(const RefPtr<MacIOSurface>& ioS
 
 SharedSurface_IOSurface::~SharedSurface_IOSurface()
 {
-    if (!mGL->MakeCurrent())
+    if (!mGL || !mGL->MakeCurrent())
         return;
 
     mGL->fDeleteTextures(1, &mProdTex);
@@ -211,11 +211,11 @@ SharedSurface_IOSurface::ReadbackBySharedHandle(gfx::DataSourceSurface* out_surf
 
 /*static*/ UniquePtr<SurfaceFactory_IOSurface>
 SurfaceFactory_IOSurface::Create(GLContext* gl, const SurfaceCaps& caps,
-                                 const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                 const RefPtr<layers::LayersIPCChannel>& allocator,
                                  const layers::TextureFlags& flags)
 {
-    gfx::IntSize maxDims(MacIOSurface::GetMaxWidth(),
-                         MacIOSurface::GetMaxHeight());
+    auto maxDims = gfx::IntSize::Truncate(MacIOSurface::GetMaxWidth(),
+                                          MacIOSurface::GetMaxHeight());
 
     typedef SurfaceFactory_IOSurface ptrT;
     UniquePtr<ptrT> ret( new ptrT(gl, caps, allocator, flags, maxDims) );

@@ -8,14 +8,15 @@
 #define TraceLogging_h
 
 #include "mozilla/GuardObjects.h"
-#include "mozilla/UniquePtr.h"
+#include "mozilla/LinkedList.h"
 
 #include "jsalloc.h"
-#include "jslock.h"
 
 #include "js/HashTable.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
+#include "threading/Thread.h"
+#include "vm/MutexIDs.h"
 #include "vm/TraceLoggingGraph.h"
 #include "vm/TraceLoggingTypes.h"
 
@@ -35,10 +36,9 @@ namespace jit {
 /*
  * Tracelogging overview.
  *
- * Tracelogging makes it possible to trace the occurrence of a single event and/or
- * the start and stop of an event. This is implemented to give an as low overhead as
- * possible so it doesn't interfere with running.
- *
+ * Tracelogging makes it possible to trace the occurrence of a single event
+ * and/or the start and stop of an event. This is implemented with as low
+ * overhead as possible to not interfere with running.
  *
  * Logging something is done in 3 stages.
  * 1) Get the tracelogger of the current thread.
@@ -54,6 +54,7 @@ namespace jit {
  *    There are also some predefined events. They are located in
  *    TraceLoggerTextId. They don't require to create an TraceLoggerEvent and
  *    can also be used as an argument to these functions.
+ *
  * 3) Log the occurrence of a single event:
  *    - TraceLogTimestamp(logger, TraceLoggerTextId);
  *      Note: it is temporarily not supported to provide an TraceLoggerEvent as
@@ -66,8 +67,8 @@ namespace jit {
  *    - TraceLogStopEvent(logger, TraceLoggerEvent);
  *
  *    or the start/stop of an event with a RAII class:
- *    - AutoTraceLog logger(logger, TraceLoggerTextId);
- *    - AutoTraceLog logger(logger, TraceLoggerEvent);
+ *    - AutoTraceLog atl(logger, TraceLoggerTextId);
+ *    - AutoTraceLog atl(logger, TraceLoggerEvent);
  */
 
 class AutoTraceLog;
@@ -75,11 +76,10 @@ class TraceLoggerEventPayload;
 class TraceLoggerThread;
 
 /**
- * An event that can be used to report start/stop events to TraceLogger.
- * It prepares the given info, by requesting a TraceLoggerEventPayload for the
- * given info. (Which contains the string that needs to get reported and an
- * unique id). It also increases the useCount of this payload, so it cannot
- * get removed.
+ * An event that can be used to report start/stop events to TraceLogger. It
+ * prepares the given info by requesting a TraceLoggerEventPayload containing
+ * the string to report and an unique id. It also increases the useCount of
+ * this payload, so it cannot get removed.
  */
 class TraceLoggerEvent {
   private:
@@ -93,6 +93,8 @@ class TraceLoggerEvent {
     TraceLoggerEvent(TraceLoggerThread* logger, TraceLoggerTextId type,
                      const JS::ReadOnlyCompileOptions& compileOptions);
     TraceLoggerEvent(TraceLoggerThread* logger, const char* text);
+    TraceLoggerEvent(const TraceLoggerEvent& event);
+    TraceLoggerEvent& operator=(const TraceLoggerEvent& other);
     ~TraceLoggerEvent();
 #else
     TraceLoggerEvent (TraceLoggerThread* logger, TraceLoggerTextId textId) {}
@@ -100,6 +102,8 @@ class TraceLoggerEvent {
     TraceLoggerEvent (TraceLoggerThread* logger, TraceLoggerTextId type,
                       const JS::ReadOnlyCompileOptions& compileOptions) {}
     TraceLoggerEvent (TraceLoggerThread* logger, const char* text) {}
+    TraceLoggerEvent(const TraceLoggerEvent& event) {}
+    TraceLoggerEvent& operator=(const TraceLoggerEvent& other) {};
     ~TraceLoggerEvent() {}
 #endif
 
@@ -110,20 +114,17 @@ class TraceLoggerEvent {
     bool hasPayload() const {
         return !!payload_;
     }
-
-    TraceLoggerEvent& operator=(const TraceLoggerEvent& other);
-    TraceLoggerEvent(const TraceLoggerEvent& event) = delete;
 };
 
 /**
- * An internal class holding the to-report string information, together with an
+ * An internal class holding the string information to report, together with an
  * unique id and a useCount. Whenever this useCount reaches 0, this event
- * cannot get started/stopped anymore. Though consumers might still request the
- * to-report string information.
+ * cannot get started/stopped anymore. Consumers may still request the
+ * string information.
  */
 class TraceLoggerEventPayload {
     uint32_t textId_;
-    mozilla::UniquePtr<char, JS::FreePolicy> string_;
+    UniqueChars string_;
     uint32_t uses_;
 
   public:
@@ -167,10 +168,10 @@ class TraceLoggerThread
                     DefaultHasher<uint32_t>,
                     SystemAllocPolicy> TextIdHashMap;
 
-    uint32_t enabled;
+    uint32_t enabled_;
     bool failed;
 
-    mozilla::UniquePtr<TraceLoggerGraph> graph;
+    UniquePtr<TraceLoggerGraph> graph;
 
     PointerHashMap pointerMap;
     TextIdHashMap textIdPayloads;
@@ -179,14 +180,20 @@ class TraceLoggerThread
     ContinuousSpace<EventEntry> events;
 
     // Every time the events get flushed, this count is increased by one.
-    // This together with events.lastEntryId(), gives an unique position.
+    // Together with events.lastEntryId(), this gives an unique id for every
+    // event.
     uint32_t iteration_;
+
+#ifdef DEBUG
+    typedef Vector<uint32_t, 1, js::SystemAllocPolicy > GraphStack;
+    GraphStack graphStack;
+#endif
 
   public:
     AutoTraceLog* top;
 
     TraceLoggerThread()
-      : enabled(0),
+      : enabled_(0),
         failed(false),
         graph(),
         nextTextId(TraceLogger_Last),
@@ -202,7 +209,8 @@ class TraceLoggerThread
 
     bool enable();
     bool enable(JSContext* cx);
-    bool disable();
+    bool disable(bool force = false, const char* = "");
+    bool enabled() { return enabled_ > 0; }
 
   private:
     bool fail(JSContext* cx, const char* error);
@@ -222,9 +230,13 @@ class TraceLoggerThread
             start = events.data();
         }
 
-        *lastIteration = iteration_;
-        *lastSize = events.size();
+        getIterationAndSize(lastIteration, lastSize);
         return start;
+    }
+
+    void getIterationAndSize(uint32_t* iteration, uint32_t* size) const {
+        *iteration = iteration_;
+        *size = events.size();
     }
 
     // Extract the details filename, lineNumber and columnNumber out of a event
@@ -240,9 +252,10 @@ class TraceLoggerThread
             return false;
         }
 
-        // If we are in a consecutive iteration we are only sure we didn't lose any events,
-        // when the lastSize equals the maximum size 'events' can get.
-        if (lastIteration == iteration_ - 1 && lastSize == CONTINUOUSSPACE_LIMIT)
+        // If we are in the next consecutive iteration we are only sure we
+        // didn't lose any events when the lastSize equals the maximum size
+        // 'events' can get.
+        if (lastIteration == iteration_ - 1 && lastSize == events.maxSize())
             return false;
 
         return true;
@@ -275,7 +288,7 @@ class TraceLoggerThread
     void stopEvent(const TraceLoggerEvent& event);
 
     // These functions are actually private and shouldn't be used in normal
-    // code. They are made public so they can get used in assembly.
+    // code. They are made public so they can be used in assembly.
     void logTimestamp(uint32_t id);
     void startEvent(uint32_t id);
     void stopEvent(uint32_t id);
@@ -285,19 +298,27 @@ class TraceLoggerThread
 
   public:
     static unsigned offsetOfEnabled() {
-        return offsetof(TraceLoggerThread, enabled);
+        return offsetof(TraceLoggerThread, enabled_);
     }
 #endif
 };
 
+#ifdef JS_TRACE_LOGGING
+class TraceLoggerMainThread
+  : public TraceLoggerThread,
+    public mozilla::LinkedListElement<TraceLoggerMainThread>
+{
+
+};
+#endif
+
 class TraceLoggerThreadState
 {
 #ifdef JS_TRACE_LOGGING
-    typedef HashMap<PRThread*,
+    typedef HashMap<Thread::Id,
                     TraceLoggerThread*,
-                    PointerHasher<PRThread*, 3>,
+                    Thread::Hasher,
                     SystemAllocPolicy> ThreadLoggerHashMap;
-    typedef Vector<TraceLoggerThread*, 1, js::SystemAllocPolicy > MainThreadLoggers;
 
 #ifdef DEBUG
     bool initialized;
@@ -307,12 +328,13 @@ class TraceLoggerThreadState
     bool mainThreadEnabled;
     bool offThreadEnabled;
     bool graphSpewingEnabled;
+    bool spewErrors;
     ThreadLoggerHashMap threadLoggers;
-    MainThreadLoggers mainThreadLoggers;
+    mozilla::LinkedList<TraceLoggerMainThread> traceLoggerMainThreadList;
 
   public:
     uint64_t startupTime;
-    PRLock* lock;
+    Mutex lock;
 
     TraceLoggerThreadState()
       :
@@ -322,7 +344,8 @@ class TraceLoggerThreadState
         mainThreadEnabled(false),
         offThreadEnabled(false),
         graphSpewingEnabled(false),
-        lock(nullptr)
+        spewErrors(false),
+        lock(js::mutexid::TraceLoggerThreadState)
     { }
 
     bool init();
@@ -330,7 +353,8 @@ class TraceLoggerThreadState
 
     TraceLoggerThread* forMainThread(JSRuntime* runtime);
     TraceLoggerThread* forMainThread(jit::CompileRuntime* runtime);
-    TraceLoggerThread* forThread(PRThread* thread);
+    TraceLoggerThread* forThread(const Thread::Id& thread);
+    void destroyMainThread(JSRuntime* runtime);
 
     bool isTextIdEnabled(uint32_t textId) {
         if (textId < TraceLogger_Last)
@@ -339,15 +363,19 @@ class TraceLoggerThreadState
     }
     void enableTextId(JSContext* cx, uint32_t textId);
     void disableTextId(JSContext* cx, uint32_t textId);
+    void maybeSpewError(const char* text) {
+        if (spewErrors)
+            fprintf(stderr, "%s\n", text);
+    }
 
   private:
     TraceLoggerThread* forMainThread(PerThreadData* mainThread);
-    TraceLoggerThread* create();
 #endif
 };
 
 #ifdef JS_TRACE_LOGGING
 void DestroyTraceLoggerThreadState();
+void DestroyTraceLoggerMainThread(JSRuntime* runtime);
 
 TraceLoggerThread* TraceLoggerForMainThread(JSRuntime* runtime);
 TraceLoggerThread* TraceLoggerForMainThread(jit::CompileRuntime* runtime);

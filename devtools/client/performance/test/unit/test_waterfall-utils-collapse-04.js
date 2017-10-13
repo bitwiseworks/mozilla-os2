@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests if the waterfall collapsing logic works properly
@@ -29,7 +30,7 @@ add_task(function test() {
     compare(rootMarkerNode, expected);
   });
 
-  function compare (marker, expected) {
+  function compare(marker, expected) {
     for (let prop in expected) {
       if (prop === "submarkers") {
         for (let i = 0; i < expected.submarkers.length; i++) {
@@ -71,7 +72,7 @@ const gExpectedOutputNoJS = {
       { start: 14, end: 15, name: "GarbageCollection" },
     ]},
     { start: 26, end: 27, name: "Paint" },
-]};
+  ]};
 
 const gExpectedOutputNoDOMEvent = {
   name: "(root)", submarkers: [
@@ -87,7 +88,7 @@ const gExpectedOutputNoDOMEvent = {
     { start: 25, end: 30, name: "Javascript", submarkers: [
       { start: 26, end: 27, name: "Paint" },
     ]}
-]};
+  ]};
 
 const gExpectedOutputNoDOMEventOrJS = {
   name: "(root)", submarkers: [
@@ -99,4 +100,4 @@ const gExpectedOutputNoDOMEventOrJS = {
     { start: 12, end: 13, name: "Parse XML" },
     { start: 14, end: 15, name: "GarbageCollection" },
     { start: 26, end: 27, name: "Paint" },
-]};
+  ]};

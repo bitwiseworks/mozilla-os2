@@ -2,7 +2,6 @@
 
     <panel id="notification-popup"
            type="arrow"
-           footertype="promobox"
            position="after_start"
            hidden="true"
            orient="vertical"
@@ -23,10 +22,18 @@
         <label id="webRTC-selectWindow-label"
                control="webRTC-selectWindow-menulist"/>
         <menulist id="webRTC-selectWindow-menulist"
-                  oncommand="gWebRTCUI.updateMainActionLabel(this);">
+                  oncommand="webrtcUI.updateMainActionLabel(this);">
           <menupopup id="webRTC-selectWindow-menupopup"/>
         </menulist>
         <description id="webRTC-all-windows-shared" hidden="true">&getUserMedia.allWindowsShared.message;</description>
+      </popupnotificationcontent>
+
+      <popupnotificationcontent id="webRTC-preview" hidden="true">
+        <html:video id="webRTC-previewVideo"/>
+        <vbox id="webRTC-previewWarningBox">
+          <spacer flex="1"/>
+          <description id="webRTC-previewWarning"/>
+        </vbox>
       </popupnotificationcontent>
 
       <popupnotificationcontent id="webRTC-selectMicrophone" orient="vertical">
@@ -39,19 +46,9 @@
       </popupnotificationcontent>
     </popupnotification>
 
-    <popupnotification id="webapps-install-progress-notification" hidden="true">
-      <popupnotificationcontent id="webapps-install-progress-content" orient="vertical" align="start"/>
-    </popupnotification>
-
     <popupnotification id="servicesInstall-notification" hidden="true">
       <popupnotificationcontent orient="vertical" align="start">
         <!-- XXX bug 974146, tests are looking for this, can't remove yet. -->
-      </popupnotificationcontent>
-    </popupnotification>
-
-    <popupnotification id="pointerLock-notification" hidden="true">
-      <popupnotificationcontent orient="vertical" align="start">
-        <label id="pointerLock-cancel">&pointerLock.notification.message;</label>
       </popupnotificationcontent>
     </popupnotification>
 
@@ -59,31 +56,10 @@
       <popupnotificationcontent orient="vertical">
         <textbox id="password-notification-username"/>
         <textbox id="password-notification-password" type="password" show-content=""/>
+        <checkbox id="password-notification-visibilityToggle" hidden="true"/>
       </popupnotificationcontent>
     </popupnotification>
 
-    <stack id="login-fill-doorhanger" hidden="true">
-      <vbox id="login-fill-mainview">
-        <description id="login-fill-testing"
-                     value="Thanks for testing the login fill doorhanger!"/>
-        <textbox id="login-fill-filter"/>
-        <richlistbox id="login-fill-list"/>
-      </vbox>
-      <vbox id="login-fill-clickcapturer"/>
-      <vbox id="login-fill-details">
-        <textbox id="login-fill-username" readonly="true"/>
-        <textbox id="login-fill-password" type="password" disabled="true"/>
-        <hbox>
-          <button id="login-fill-use" label="Use in form"/>
-        </hbox>
-      </vbox>
-    </stack>
-
-#ifdef E10S_TESTING_ONLY
-    <popupnotification id="enable-e10s-notification" hidden="true">
-      <popupnotificationcontent orient="vertical"/>
-    </popupnotification>
-#endif
 
     <popupnotification id="addon-progress-notification" hidden="true">
       <popupnotificationcontent orient="vertical">

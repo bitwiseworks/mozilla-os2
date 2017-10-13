@@ -8,7 +8,6 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/net/PNeckoParent.h"
 #include "mozilla/net/NeckoCommon.h"
-#include "mozilla/net/OfflineObserver.h"
 #include "nsIAuthPrompt2.h"
 #include "nsINetworkPredictor.h"
 #include "nsNetUtil.h"
@@ -29,17 +28,17 @@ enum PBOverrideStatus {
 // Header file contents
 class NeckoParent
   : public PNeckoParent
-  , public DisconnectableParent
 {
 public:
   NeckoParent();
   virtual ~NeckoParent();
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   static const char *
-  GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
-                      PContentParent* aBrowser,
-                      mozilla::DocShellOriginAttributes& aAttrs);
+  GetValidatedOriginAttributes(const SerializedLoadContext& aSerialized,
+                               PContentParent* aBrowser,
+                               nsIPrincipal* aRequestingPrincipal,
+                               mozilla::DocShellOriginAttributes& aAttrs);
 
   /*
    * Creates LoadContext for parent-side of an e10s channel.
@@ -48,19 +47,15 @@ public:
    *
    * Returns null if successful, or an error string if failed.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   static const char*
   CreateChannelLoadContext(const PBrowserOrId& aBrowser,
                            PContentParent* aContent,
                            const SerializedLoadContext& aSerialized,
+                           nsIPrincipal* aRequestingPrincipal,
                            nsCOMPtr<nsILoadContext> &aResult);
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-  virtual nsresult OfflineNotification(nsISupports *) override;
-  virtual uint32_t GetAppId() override { return NECKO_UNKNOWN_APP_ID; }
-  virtual void
-  CloneManagees(ProtocolBase* aSource,
-              mozilla::ipc::ProtocolCloneContext* aCtx) override;
   virtual PCookieServiceParent* AllocPCookieServiceParent() override;
   virtual bool
   RecvPCookieServiceConstructor(PCookieServiceParent* aActor) override
@@ -108,6 +103,12 @@ protected:
                       const SerializedLoadContext& aSerialized,
                       const HttpChannelCreationArgs& aOpenArgs) override;
   virtual bool DeallocPHttpChannelParent(PHttpChannelParent*) override;
+
+  virtual PAltDataOutputStreamParent* AllocPAltDataOutputStreamParent(
+    const nsCString& type, PHttpChannelParent* channel) override;
+  virtual bool DeallocPAltDataOutputStreamParent(
+    PAltDataOutputStreamParent* aActor) override;
+
   virtual bool DeallocPCookieServiceParent(PCookieServiceParent*) override;
   virtual PWyciwygChannelParent* AllocPWyciwygChannelParent() override;
   virtual bool DeallocPWyciwygChannelParent(PWyciwygChannelParent*) override;
@@ -129,19 +130,6 @@ protected:
   virtual bool DeallocPWebSocketParent(PWebSocketParent*) override;
   virtual PTCPSocketParent* AllocPTCPSocketParent(const nsString& host,
                                                   const uint16_t& port) override;
-
-  virtual PRemoteOpenFileParent*
-    AllocPRemoteOpenFileParent(const SerializedLoadContext& aSerialized,
-                               const URIParams& aFileURI,
-                               const OptionalURIParams& aAppURI) override;
-  virtual bool
-    RecvPRemoteOpenFileConstructor(PRemoteOpenFileParent* aActor,
-                                   const SerializedLoadContext& aSerialized,
-                                   const URIParams& aFileURI,
-                                   const OptionalURIParams& aAppURI)
-                                   override;
-  virtual bool DeallocPRemoteOpenFileParent(PRemoteOpenFileParent* aActor)
-                                            override;
 
   virtual bool DeallocPTCPSocketParent(PTCPSocketParent*) override;
   virtual PTCPServerSocketParent*
@@ -167,7 +155,9 @@ protected:
                                           const uint32_t& flags,
                                           const nsCString& aNetworkInterface) override;
   virtual bool DeallocPDNSRequestParent(PDNSRequestParent*) override;
-  virtual bool RecvSpeculativeConnect(const URIParams& aURI, const bool& aAnonymous) override;
+  virtual bool RecvSpeculativeConnect(const URIParams& aURI,
+                                      const Principal& aPrincipal,
+                                      const bool& aAnonymous) override;
   virtual bool RecvHTMLDNSPrefetch(const nsString& hostname,
                                    const uint16_t& flags) override;
   virtual bool RecvCancelHTMLDNSPrefetch(const nsString& hostname,
@@ -176,10 +166,6 @@ protected:
   virtual PWebSocketEventListenerParent*
     AllocPWebSocketEventListenerParent(const uint64_t& aInnerWindowID) override;
   virtual bool DeallocPWebSocketEventListenerParent(PWebSocketEventListenerParent*) override;
-
-  virtual mozilla::ipc::IProtocol*
-  CloneProtocol(Channel* aChannel,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override;
 
   virtual PDataChannelParent*
     AllocPDataChannelParent(const uint32_t& channelId) override;
@@ -207,6 +193,10 @@ protected:
                                   const ChannelDiverterArgs& channel) override;
   virtual bool DeallocPChannelDiverterParent(PChannelDiverterParent* actor)
                                                                 override;
+  virtual PTransportProviderParent*
+  AllocPTransportProviderParent() override;
+  virtual bool
+  DeallocPTransportProviderParent(PTransportProviderParent* aActor) override;
 
   virtual bool RecvOnAuthAvailable(const uint64_t& aCallbackId,
                                    const nsString& aUser,
@@ -228,18 +218,8 @@ protected:
                              const IPC::SerializedLoadContext& aLoadContext) override;
   virtual bool RecvPredReset() override;
 
-  virtual bool RecvRemoveSchedulingContext(const nsCString& scid) override;
-
-private:
-  nsCString mCoreAppsBasePath;
-  nsCString mWebAppsBasePath;
-  RefPtr<OfflineObserver> mObserver;
+  virtual bool RecvRemoveRequestContext(const nsCString& rcid) override;
 };
-
-/**
- * Reference to the PNecko Parent protocol.
- */
-extern PNeckoParent *gNeckoParent;
 
 } // namespace net
 } // namespace mozilla

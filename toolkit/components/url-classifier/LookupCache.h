@@ -14,6 +14,7 @@
 #include "nsIFileStreams.h"
 #include "mozilla/RefPtr.h"
 #include "nsUrlClassifierPrefixSet.h"
+#include "VariableLengthPrefixSet.h"
 #include "mozilla/Logging.h"
 
 namespace mozilla {
@@ -67,6 +68,13 @@ typedef nsTArray<LookupResult> LookupResultArray;
 struct CacheResult {
   AddComplete entry;
   nsCString table;
+
+  bool operator==(const CacheResult& aOther) const {
+    if (entry != aOther.entry) {
+      return false;
+    }
+    return table == aOther.table;
+  }
 };
 typedef nsTArray<CacheResult> CacheResultArray;
 
@@ -88,53 +96,113 @@ public:
   static nsresult GetHostKeys(const nsACString& aSpec,
                               nsTArray<nsCString>* aHostKeys);
 
-  LookupCache(const nsACString& aTableName, nsIFile* aStoreFile);
-  ~LookupCache();
+  LookupCache(const nsACString& aTableName,
+              const nsACString& aProvider,
+              nsIFile* aStoreFile);
+  virtual ~LookupCache() {}
 
   const nsCString &TableName() const { return mTableName; }
 
-  nsresult Init();
-  nsresult Open();
   // The directory handle where we operate will
   // be moved away when a backup is made.
-  nsresult UpdateDirHandle(nsIFile* aStoreDirectory);
+  nsresult UpdateRootDirHandle(nsIFile* aRootStoreDirectory);
+
   // This will Clear() the passed arrays when done.
-  nsresult Build(AddPrefixArray& aAddPrefixes,
-                 AddCompleteArray& aAddCompletes);
-  nsresult GetPrefixes(FallibleTArray<uint32_t>& aAddPrefixes);
-  void ClearCompleteCache();
+  nsresult AddCompletionsToCache(AddCompleteArray& aAddCompletes);
+
+  // Write data stored in lookup cache to disk.
+  nsresult WriteFile();
+
+  // Clear completions retrieved from gethash request.
+  void ClearCache();
+
+  bool IsPrimed() const { return mPrimed; };
 
 #if DEBUG
-  void Dump();
+  void DumpCache();
 #endif
-  nsresult WriteFile();
-  nsresult Has(const Completion& aCompletion,
-               bool* aHas, bool* aComplete);
-  bool IsPrimed();
+
+  virtual nsresult Open();
+  virtual nsresult Init() = 0;
+  virtual nsresult ClearPrefixes() = 0;
+  virtual nsresult Has(const Completion& aCompletion,
+                       bool* aHas, bool* aComplete) = 0;
+
+  virtual void ClearAll();
+
+  template<typename T>
+  static T* Cast(LookupCache* aThat) {
+    return ((aThat && T::VER == aThat->Ver()) ? reinterpret_cast<T*>(aThat) : nullptr);
+  }
 
 private:
-  void ClearAll();
   nsresult Reset();
-  void UpdateHeader();
-  nsresult ReadHeader(nsIInputStream* aInputStream);
-  nsresult ReadCompletions(nsIInputStream* aInputStream);
-  nsresult EnsureSizeConsistent();
   nsresult LoadPrefixSet();
+
+  virtual nsresult StoreToFile(nsIFile* aFile) = 0;
+  virtual nsresult LoadFromFile(nsIFile* aFile) = 0;
+  virtual size_t SizeOfPrefixSet() = 0;
+
+  virtual int Ver() const = 0;
+
+protected:
+  bool mPrimed;
+  nsCString mTableName;
+  nsCString mProvider;
+  nsCOMPtr<nsIFile> mRootStoreDirectory;
+  nsCOMPtr<nsIFile> mStoreDirectory;
+
+  // Full length hashes obtained in gethash request
+  CompletionArray mGetHashCache;
+
+  // For gtest to inspect private members.
+  friend class PerProviderDirectoryTestUtils;
+};
+
+class LookupCacheV2 final : public LookupCache
+{
+public:
+  explicit LookupCacheV2(const nsACString& aTableName,
+                         const nsACString& aProvider,
+                         nsIFile* aStoreFile)
+    : LookupCache(aTableName, aProvider, aStoreFile) {}
+  ~LookupCacheV2() {}
+
+  virtual nsresult Init() override;
+  virtual nsresult Open() override;
+  virtual void ClearAll() override;
+  virtual nsresult Has(const Completion& aCompletion,
+                       bool* aHas, bool* aComplete) override;
+
+  nsresult Build(AddPrefixArray& aAddPrefixes,
+                 AddCompleteArray& aAddCompletes);
+
+  nsresult GetPrefixes(FallibleTArray<uint32_t>& aAddPrefixes);
+
+#if DEBUG
+  void DumpCompletions();
+#endif
+
+  static const int VER;
+
+protected:
+  nsresult ReadCompletions();
+
+  virtual nsresult ClearPrefixes() override;
+  virtual nsresult StoreToFile(nsIFile* aFile) override;
+  virtual nsresult LoadFromFile(nsIFile* aFile) override;
+  virtual size_t SizeOfPrefixSet() override;
+
+private:
+  virtual int Ver() const override { return VER; }
+
   // Construct a Prefix Set with known prefixes.
   // This will Clear() aAddPrefixes when done.
   nsresult ConstructPrefixSet(AddPrefixArray& aAddPrefixes);
 
-  struct Header {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t numCompletions;
-  };
-  Header mHeader;
+  // Full length hashes obtained in update request
+  CompletionArray mUpdateCompletions;
 
-  bool mPrimed;
-  nsCString mTableName;
-  nsCOMPtr<nsIFile> mStoreDirectory;
-  CompletionArray mCompletions;
   // Set of prefixes known to be in the database
   RefPtr<nsUrlClassifierPrefixSet> mPrefixSet;
 };

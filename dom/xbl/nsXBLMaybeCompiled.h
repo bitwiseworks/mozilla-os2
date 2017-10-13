@@ -79,18 +79,26 @@ private:
     JSObject* mCompiled;
   };
 
-  friend struct js::GCMethods<nsXBLMaybeCompiled<UncompiledT>>;
+  friend struct js::BarrierMethods<nsXBLMaybeCompiled<UncompiledT>>;
 };
 
 /* Add support for JS::Heap<nsXBLMaybeCompiled>. */
+namespace JS {
+
+template <class UncompiledT>
+struct GCPolicy<nsXBLMaybeCompiled<UncompiledT>>
+{
+  static nsXBLMaybeCompiled<UncompiledT> initial() { return nsXBLMaybeCompiled<UncompiledT>(); }
+};
+
+} // namespace JS
+
 namespace js {
 
 template <class UncompiledT>
-struct GCMethods<nsXBLMaybeCompiled<UncompiledT> >
+struct BarrierMethods<nsXBLMaybeCompiled<UncompiledT>>
 {
-  typedef struct GCMethods<JSObject *> Base;
-
-  static nsXBLMaybeCompiled<UncompiledT> initial() { return nsXBLMaybeCompiled<UncompiledT>(); }
+  typedef struct BarrierMethods<JSObject *> Base;
 
   static void postBarrier(nsXBLMaybeCompiled<UncompiledT>* functionp,
                           nsXBLMaybeCompiled<UncompiledT> prev,
@@ -106,17 +114,28 @@ struct GCMethods<nsXBLMaybeCompiled<UncompiledT> >
                         nullptr);
     }
   }
+  static void exposeToJS(nsXBLMaybeCompiled<UncompiledT> fun) {
+    if (fun.IsCompiled()) {
+      JS::ExposeObjectToActiveJS(fun.UnsafeGetJSFunction());
+    }
+  }
+};
+
+template <class T>
+struct IsHeapConstructibleType<nsXBLMaybeCompiled<T>>
+{ // Yes, this is the exception to the rule. Sorry.
+  static constexpr bool value = true;
 };
 
 template <class UncompiledT>
-class HeapBase<nsXBLMaybeCompiled<UncompiledT> >
+class HeapBase<nsXBLMaybeCompiled<UncompiledT>>
 {
-  const JS::Heap<nsXBLMaybeCompiled<UncompiledT> >& wrapper() const {
-    return *static_cast<const JS::Heap<nsXBLMaybeCompiled<UncompiledT> >*>(this);
+  const JS::Heap<nsXBLMaybeCompiled<UncompiledT>>& wrapper() const {
+    return *static_cast<const JS::Heap<nsXBLMaybeCompiled<UncompiledT>>*>(this);
   }
 
-  JS::Heap<nsXBLMaybeCompiled<UncompiledT> >& wrapper() {
-    return *static_cast<JS::Heap<nsXBLMaybeCompiled<UncompiledT> >*>(this);
+  JS::Heap<nsXBLMaybeCompiled<UncompiledT>>& wrapper() {
+    return *static_cast<JS::Heap<nsXBLMaybeCompiled<UncompiledT>>*>(this);
   }
 
   const nsXBLMaybeCompiled<UncompiledT>* extract() const {

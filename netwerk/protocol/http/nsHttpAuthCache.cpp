@@ -60,7 +60,7 @@ nsHttpAuthCache::nsHttpAuthCache()
 {
     nsCOMPtr<nsIObserverService> obsSvc = services::GetObserverService();
     if (obsSvc) {
-        obsSvc->AddObserver(mObserver, "clear-origin-data", false);
+        obsSvc->AddObserver(mObserver, "clear-origin-attributes-data", false);
     }
 }
 
@@ -70,7 +70,7 @@ nsHttpAuthCache::~nsHttpAuthCache()
         ClearAll();
     nsCOMPtr<nsIObserverService> obsSvc = services::GetObserverService();
     if (obsSvc) {
-        obsSvc->RemoveObserver(mObserver, "clear-origin-data");
+        obsSvc->RemoveObserver(mObserver, "clear-origin-attributes-data");
         mObserver->mOwner = nullptr;
     }
 }
@@ -580,7 +580,11 @@ nsHttpAuthNode::SetAuthEntry(const char *path,
         entry = new nsHttpAuthEntry(path, realm, creds, challenge, ident, metadata);
         if (!entry)
             return NS_ERROR_OUT_OF_MEMORY;
-        mList.AppendElement(entry);
+
+        // We want the latest identity be at the begining of the list so that
+        // the newest working credentials are sent first on new requests.
+        // Changing a realm is sometimes used to "timeout" authrozization.
+        mList.InsertElementAt(0, entry);
     }
     else {
         // update the entry...

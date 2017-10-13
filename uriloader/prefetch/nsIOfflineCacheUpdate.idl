@@ -5,8 +5,8 @@
 
 #include "nsISupports.idl"
 
+interface mozIDOMWindow;
 interface nsIURI;
-interface nsIDOMWindow;
 interface nsIDOMNode;
 interface nsIDOMDocument;
 interface nsIOfflineCacheUpdate;
@@ -58,7 +58,7 @@ interface nsIOfflineCacheUpdateObserver : nsISupports {
  * load its items one by one, sending itemCompleted() to any registered
  * observers.
  */
-[scriptable, uuid(e9029838-3553-4192-a00b-f0f11073a6eb)]
+[scriptable, uuid(6e3e26ea-45b2-4db7-9e4a-93b965679298)]
 interface nsIOfflineCacheUpdate : nsISupports {
   /**
    * Fetch the status of the running update.  This will return a value
@@ -108,9 +108,7 @@ interface nsIOfflineCacheUpdate : nsISupports {
             in nsIURI aDocumentURI,
             in nsIPrincipal aLoadingPrincipal,
             in nsIDOMDocument aDocument,
-            [optional] in nsIFile aCustomProfileDir,
-            [optional] in unsigned long aAppId,
-            [optional] in boolean aInBrowser);
+            [optional] in nsIFile aCustomProfileDir);
 
   /**
    * Initialize the update for partial processing. 
@@ -134,10 +132,6 @@ interface nsIOfflineCacheUpdate : nsISupports {
    *
    * @param aManifestURI
    *        The manifest URI of the related cache.
-   * @param aAppID
-   *        Local ID of an app (optional) to check the cache update for.
-   * @param aInBrowser
-   *        Whether to check for a cache populated from browser element.
    * @param aObserver
    *        nsIObserver implementation that receives the result.
    *        When aTopic == "offline-cache-update-available" there is an update to
@@ -148,8 +142,6 @@ interface nsIOfflineCacheUpdate : nsISupports {
    */
   void initForUpdateCheck(in nsIURI aManifestURI,
                           in nsIPrincipal aLoadingPrincipal,
-                          in unsigned long aAppID,
-                          in boolean aInBrowser,
                           in nsIObserver aObserver);
 
   /**
@@ -199,7 +191,7 @@ interface nsIOfflineCacheUpdate : nsISupports {
   readonly attribute uint64_t byteProgress;
 };
 
-[scriptable, uuid(a297a334-bcae-4779-a564-555593edc96b)]
+[scriptable, uuid(44971e74-37e4-4140-8677-a4cf213a3f4b)]
 interface nsIOfflineCacheUpdateService : nsISupports {
     /**
      * Constants for the offline-app permission.
@@ -228,19 +220,17 @@ interface nsIOfflineCacheUpdateService : nsISupports {
     nsIOfflineCacheUpdate scheduleUpdate(in nsIURI aManifestURI,
                                          in nsIURI aDocumentURI,
                                          in nsIPrincipal aLoadingPrincipal,
-                                         in nsIDOMWindow aWindow);
+                                         in mozIDOMWindow aWindow);
 
     /**
      * Schedule a cache update for a given offline manifest using app cache
-     * bound to the given appID+inBrowser flag.  If an existing update is
-     * scheduled or running, that update will be returned. Otherwise a new
+     * bound to the given appID+inIsolatedMozBrowser flag.  If an existing update
+     * is scheduled or running, that update will be returned. Otherwise a new
      * update will be scheduled.
      */
     nsIOfflineCacheUpdate scheduleAppUpdate(in nsIURI aManifestURI,
                                             in nsIURI aDocumentURI,
                                             in nsIPrincipal aLoadingPrincipal,
-                                            in unsigned long aAppID,
-                                            in boolean aInBrowser,
                                             in nsIFile aProfileDir);
 
     /**
@@ -265,8 +255,6 @@ interface nsIOfflineCacheUpdateService : nsISupports {
      */
     void checkForUpdate(in nsIURI aManifestURI,
                         in nsIPrincipal aLoadingPrincipal,
-                        in unsigned long aAppID,
-                        in boolean aInBrowser,
                         in nsIObserver aObserver);
 
     /**
@@ -300,5 +288,5 @@ interface nsIOfflineCacheUpdateService : nsISupports {
      * In the single process model calls directly on permission manager.
      * In the multi process model dispatches to the parent process.
      */
-    void allowOfflineApp(in nsIDOMWindow aWindow, in nsIPrincipal aPrincipal);
+    void allowOfflineApp(in nsIPrincipal aPrincipal);
 };

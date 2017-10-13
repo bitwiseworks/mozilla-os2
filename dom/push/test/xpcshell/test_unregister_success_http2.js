@@ -15,9 +15,7 @@ var pushConnectionEnabled;
 var serverPort = -1;
 
 function run_test() {
-  var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-  serverPort = env.get("MOZHTTP2_PORT");
-  do_check_neq(serverPort, null);
+  serverPort = getTestServerPort();
 
   do_get_profile();
   prefs = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
@@ -40,10 +38,6 @@ function run_test() {
 
   prefs.setIntPref("network.http.speculative-parallel-limit", oldPref);
 
-  disableServiceWorkerEvents(
-    'https://example.com/page/unregister-success'
-  );
-
   run_next_test();
 }
 
@@ -60,7 +54,8 @@ add_task(function* test_pushUnsubscriptionSuccess() {
     pushEndpoint: serverURL + '/pushEndpointUnsubscriptionSuccess',
     pushReceiptEndpoint: serverURL + '/receiptPushEndpointUnsubscriptionSuccess',
     scope: 'https://example.com/page/unregister-success',
-    originAttributes: ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false }),
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
     quota: Infinity,
   });
 
@@ -69,9 +64,11 @@ add_task(function* test_pushUnsubscriptionSuccess() {
     db
   });
 
-  yield PushNotificationService.unregister(
-    'https://example.com/page/unregister-success',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false }));
+  yield PushService.unregister({
+    scope: 'https://example.com/page/unregister-success',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
   let record = yield db.getByKeyID(serverURL + '/subscriptionUnsubscriptionSuccess');
   ok(!record, 'Unregister did not remove record');
 

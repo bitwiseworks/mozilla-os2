@@ -24,6 +24,7 @@ LeafAccessible::
   LeafAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
+  mStateFlags |= eNoKidsFromDOM;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(LeafAccessible, Accessible)
@@ -53,13 +54,11 @@ LeafAccessible::RemoveChild(Accessible* aChild)
   return false;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// LeafAccessible: Accessible private
-
-void
-LeafAccessible::CacheChildren()
+bool
+LeafAccessible::IsAcceptableChild(nsIContent* aEl) const
 {
   // No children for leaf accessible.
+  return false;
 }
 
 
@@ -115,19 +114,23 @@ LinkableAccessible::Value(nsString& aValue)
 uint8_t
 LinkableAccessible::ActionCount()
 {
-  bool isLink, isOnclick;
-  ActionWalk(&isLink, &isOnclick);
-  return (isLink || isOnclick) ? 1 : 0;
+  bool isLink, isOnclick, isLabelWithControl;
+  ActionWalk(&isLink, &isOnclick, &isLabelWithControl);
+  return (isLink || isOnclick || isLabelWithControl) ? 1 : 0;
 }
 
 Accessible*
-LinkableAccessible::ActionWalk(bool* aIsLink, bool* aIsOnclick)
+LinkableAccessible::ActionWalk(bool* aIsLink, bool* aIsOnclick,
+                               bool* aIsLabelWithControl)
 {
   if (aIsOnclick) {
     *aIsOnclick = false;
   }
   if (aIsLink) {
     *aIsLink = false;
+  }
+  if (aIsLabelWithControl) {
+    *aIsLabelWithControl = false;
   }
 
   if (nsCoreUtils::HasClickListener(mContent)) {
@@ -155,6 +158,13 @@ LinkableAccessible::ActionWalk(bool* aIsLink, bool* aIsOnclick)
       }
       return walkUpAcc;
     }
+
+    if (nsCoreUtils::IsLabelWithControl(walkUpAcc->GetContent())) {
+      if (aIsLabelWithControl) {
+        *aIsLabelWithControl = true;
+      }
+      return walkUpAcc;
+    }
   }
   return nullptr;
 }
@@ -166,11 +176,11 @@ LinkableAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 
   // Action 0 (default action): Jump to link
   if (aIndex == eAction_Jump) {
-    bool isOnclick, isLink;
-    ActionWalk(&isLink, &isOnclick);
+    bool isOnclick, isLink, isLabelWithControl;
+    ActionWalk(&isLink, &isOnclick, &isLabelWithControl);
     if (isLink) {
       aName.AssignLiteral("jump");
-    } else if (isOnclick) {
+    } else if (isOnclick || isLabelWithControl) {
       aName.AssignLiteral("click");
     }
   }

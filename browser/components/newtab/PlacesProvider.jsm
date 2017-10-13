@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global XPCOMUtils, Services, BinarySearch, PlacesUtils, gPrincipal, EventEmitter */
+/* global XPCOMUtils, Services, PlacesUtils, EventEmitter */
 /* global gLinks */
 /* exported PlacesProvider */
 
@@ -14,9 +14,6 @@ const {interfaces: Ci, utils: Cu} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "BinarySearch",
-  "resource://gre/modules/BinarySearch.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
@@ -25,88 +22,13 @@ XPCOMUtils.defineLazyGetter(this, "EventEmitter", function() {
   return EventEmitter;
 });
 
-XPCOMUtils.defineLazyGetter(this, "gPrincipal", function() {
-  let uri = Services.io.newURI("about:newtab", null, null);
-  return Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NewTabUtils",
+                                  "resource://gre/modules/NewTabUtils.jsm");
 
 // The maximum number of results PlacesProvider retrieves from history.
 const HISTORY_RESULTS_LIMIT = 100;
-
-/**
- * Singleton that checks if a given link should be displayed on about:newtab
- * or if we should rather not do it for security reasons. URIs that inherit
- * their caller's principal will be filtered.
- */
-let LinkChecker = {
-  _cache: new Map(),
-
-  get flags() {
-    return Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL |
-           Ci.nsIScriptSecurityManager.DONT_REPORT_ERRORS;
-  },
-
-  checkLoadURI: function LinkChecker_checkLoadURI(aURI) {
-    if (!this._cache.has(aURI)) {
-      this._cache.set(aURI, this._doCheckLoadURI(aURI));
-    }
-
-    return this._cache.get(aURI);
-  },
-
-  _doCheckLoadURI: function LinkChecker_doCheckLoadURI(aURI) {
-    let result = false;
-    try {
-      Services.scriptSecurityManager.
-        checkLoadURIStrWithPrincipal(gPrincipal, aURI, this.flags);
-      result = true;
-    } catch (e) {
-      // We got a weird URI or one that would inherit the caller's principal.
-      Cu.reportError(e);
-    }
-    return result;
-  }
-};
-
-/**
- * Singleton that provides utility functions for links.
- * A link is a plain object that looks like this:
- *
- * {
- *   url: "http://www.mozilla.org/",
- *   title: "Mozilla",
- *   frecency: 1337,
- *   lastVisitDate: 1394678824766431,
- * }
- */
-const LinkUtils = {
-  _sortProperties: [
-    "frecency",
-    "lastVisitDate",
-    "url",
-  ],
-
-  /**
-   * Compares two links.
-   *
-   * @param {String} aLink1 The first link.
-   * @param {String} aLink2 The second link.
-   * @return {Number} A negative number if aLink1 is ordered before aLink2, zero if
-   *         aLink1 and aLink2 have the same ordering, or a positive number if
-   *         aLink1 is ordered after aLink2.
-   *         Order is ascending.
-   */
-  compareLinks: function LinkUtils_compareLinks(aLink1, aLink2) {
-    for (let prop of LinkUtils._sortProperties) {
-      if (!aLink1.hasOwnProperty(prop) || !aLink2.hasOwnProperty(prop)) {
-        throw new Error("Comparable link missing required property: " + prop);
-      }
-    }
-    return aLink2.frecency - aLink1.frecency ||
-           aLink2.lastVisitDate - aLink1.lastVisitDate ||
-           aLink1.url.localeCompare(aLink2.url);
-  },
-};
 
 /* Queries history to retrieve the most visited sites. Emits events when the
  * history changes.
@@ -145,7 +67,8 @@ Links.prototype = {
                            aNewFrecency, aGUID, aHidden, aLastVisitDate) { // jshint ignore:line
       // The implementation of the query in getLinks excludes hidden and
       // unvisited pages, so it's important to exclude them here, too.
-      if (!aHidden && aLastVisitDate) {
+      if (!aHidden && aLastVisitDate &&
+          NewTabUtils.linkChecker.checkLoadURI(aURI.spec)) {
         gLinks.emit("linkChanged", {
           url: aURI.spec,
           frecency: aNewFrecency,
@@ -162,14 +85,16 @@ Links.prototype = {
     },
 
     onTitleChanged: function historyObserver_onTitleChanged(aURI, aNewTitle) {
-      gLinks.emit("linkChanged", {
-        url: aURI.spec,
-        title: aNewTitle
-      });
+      if (NewTabUtils.linkChecker.checkLoadURI(aURI.spec)) {
+        gLinks.emit("linkChanged", {
+          url: aURI.spec,
+          title: aNewTitle
+        });
+      }
     },
 
     QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver,
-                        Ci.nsISupportsWeakReference])
+                                           Ci.nsISupportsWeakReference])
   },
 
   /**
@@ -177,14 +102,11 @@ Links.prototype = {
    * Makes it easy to disable under pref
    */
   init: function PlacesProvider_init() {
-    PlacesUtils.history.addObserver(this.historyObserver, true);
-  },
-
-  /**
-   * Must be called before the provider is unloaded.
-   */
-  destroy: function PlacesProvider_destroy() {
-    PlacesUtils.history.removeObserver(this.historyObserver);
+    try {
+      PlacesUtils.history.addObserver(this.historyObserver, true);
+    } catch (e) {
+      Cu.reportError(e);
+    }
   },
 
   /**
@@ -192,71 +114,86 @@ Links.prototype = {
    *
    * @returns {Promise} Returns a promise with the array of links as payload.
    */
-  getLinks: function PlacesProvider_getLinks() {
-    let getLinksPromise = new Promise((resolve, reject) => {
-      let options = PlacesUtils.history.getNewQueryOptions();
-      options.maxResults = this.maxNumLinks;
+  getLinks: Task.async(function*() {
+    // Select a single page per host with highest frecency, highest recency.
+    // Choose N top such pages. Note +rev_host, to turn off optimizer per :mak
+    // suggestion.
+    let sqlQuery = `SELECT url, title, frecency,
+                          last_visit_date as lastVisitDate,
+                          "history" as type
+                   FROM moz_places
+                   WHERE frecency in (
+                     SELECT MAX(frecency) as frecency
+                     FROM moz_places
+                     WHERE hidden = 0 AND last_visit_date NOTNULL
+                     GROUP BY +rev_host
+                     ORDER BY frecency DESC
+                     LIMIT :limit
+                   )
+                   GROUP BY rev_host HAVING MAX(lastVisitDate)
+                   ORDER BY frecency DESC, lastVisitDate DESC, url`;
 
-      // Sort by frecency, descending.
-      options.sortingMode = Ci.nsINavHistoryQueryOptions
-        .SORT_BY_FRECENCY_DESCENDING;
+    let links = yield this.executePlacesQuery(sqlQuery, {
+                  columns: ["url", "title", "lastVisitDate", "frecency", "type"],
+                  params: {limit: this.maxNumLinks}
+                });
 
-      let links = [];
+    return links.filter(link => NewTabUtils.linkChecker.checkLoadURI(link.url));
+  }),
 
-      let queryHandlers = {
-        handleResult: function(aResultSet) {
-          for (let row = aResultSet.getNextRow(); row; row = aResultSet.getNextRow()) {
-            let url = row.getResultByIndex(1);
-            if (LinkChecker.checkLoadURI(url)) {
-              let link = {
-                url: url,
-                title: row.getResultByIndex(2),
-                frecency: row.getResultByIndex(12),
-                lastVisitDate: row.getResultByIndex(5),
-                type: "history",
-              };
-              links.push(link);
-            }
-          }
-        },
-
-        handleError: function(aError) {
-          reject(aError);
-        },
-
-        handleCompletion: function(aReason) { // jshint ignore:line
-          // The Places query breaks ties in frecency by place ID descending, but
-          // that's different from how Links.compareLinks breaks ties, because
-          // compareLinks doesn't have access to place IDs.  It's very important
-          // that the initial list of links is sorted in the same order imposed by
-          // compareLinks, because Links uses compareLinks to perform binary
-          // searches on the list.  So, ensure the list is so ordered.
-          let i = 1;
-          let outOfOrder = [];
-          while (i < links.length) {
-            if (LinkUtils.compareLinks(links[i - 1], links[i]) > 0) {
-              outOfOrder.push(links.splice(i, 1)[0]);
-            } else {
-              i++;
-            }
-          }
-          for (let link of outOfOrder) {
-            i = BinarySearch.insertionIndexOf(LinkUtils.compareLinks, links, link);
-            links.splice(i, 0, link);
-          }
-
-          resolve(links);
+  /**
+   * Executes arbitrary query against places database
+   *
+   * @param {String} aSql
+   *        SQL query to execute
+   * @param {Object} [optional] aOptions
+   *        aOptions.columns - an array of column names. if supplied the returned
+   *        items will consist of objects keyed on column names. Otherwise
+   *        an array of raw values is returned in the select order
+   *        aOptions.param - an object of SQL binding parameters
+   *        aOptions.callback - a callback to handle query rows
+   *
+   * @returns {Promise} Returns a promise with the array of retrieved items
+   */
+  executePlacesQuery: Task.async(function*(aSql, aOptions={}) {
+    let {columns, params, callback} = aOptions;
+    let items = [];
+    let queryError = null;
+    let conn = yield PlacesUtils.promiseDBConnection();
+    yield conn.executeCached(aSql, params, aRow => {
+      try {
+        // check if caller wants to handle query raws
+        if (callback) {
+          callback(aRow);
         }
-      };
-
-      // Execute the query.
-      let query = PlacesUtils.history.getNewQuery();
-      let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase);
-      db.asyncExecuteLegacyQueries([query], 1, options, queryHandlers);
+        // otherwise fill in the item and add items array
+        else {
+          let item = null;
+          // if columns array is given construct an object
+          if (columns && Array.isArray(columns)) {
+            item = {};
+            columns.forEach(column => {
+              item[column] = aRow.getResultByName(column);
+            });
+          } else {
+            // if no columns - make an array of raw values
+            item = [];
+            for (let i = 0; i < aRow.numEntries; i++) {
+              item.push(aRow.getResultByIndex(i));
+            }
+          }
+          items.push(item);
+        }
+      } catch (e) {
+        queryError = e;
+        throw StopIteration;
+      }
     });
-
-    return getLinksPromise;
-  }
+    if (queryError) {
+      throw new Error(queryError);
+    }
+    return items;
+  }),
 };
 
 /**
@@ -265,7 +202,10 @@ Links.prototype = {
 const gLinks = new Links(); // jshint ignore:line
 
 let PlacesProvider = {
-  LinkChecker: LinkChecker,
-  LinkUtils: LinkUtils,
   links: gLinks,
 };
+
+// Kept only for backwards-compatibility
+XPCOMUtils.defineLazyGetter(PlacesProvider, "LinkChecker",
+  () => NewTabUtils.linkChecker);
+

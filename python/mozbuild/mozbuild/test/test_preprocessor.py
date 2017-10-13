@@ -155,12 +155,12 @@ class TestPreprocessor(unittest.TestCase):
     def test_conditional_not_emptyval(self):
         self.do_include_compare([
             '#define EMPTYVAL',
-            '#if !EMPTYVAL',
+            '#ifndef EMPTYVAL',
             'FAIL',
             '#else',
             'PASS',
             '#endif',
-            '#if EMPTYVAL',
+            '#ifdef EMPTYVAL',
             'PASS',
             '#else',
             'FAIL',
@@ -458,6 +458,15 @@ class TestPreprocessor(unittest.TestCase):
             '#endif',
         ])
 
+    def test_default_defines(self):
+        self.pp.handleCommandLine(["-DFOO"])
+        self.do_include_pass([
+            '#if FOO == 1',
+            'PASS',
+            '#else',
+            'FAIL',
+        ])
+
     def test_number_value_equals_defines(self):
         self.pp.handleCommandLine(["-DFOO=1000"])
         self.do_include_pass([
@@ -610,13 +619,13 @@ class TestPreprocessor(unittest.TestCase):
         with MockedOpen({'f': '#include foo\n'}):
             with self.assertRaises(Preprocessor.Error) as e:
                 self.pp.do_include('f')
-                self.assertEqual(e.key, 'FILE_NOT_FOUND')
+            self.assertEqual(e.exception.key, 'FILE_NOT_FOUND')
 
     def test_include_undefined_variable(self):
         with MockedOpen({'f': '#filter substitution\n#include @foo@\n'}):
             with self.assertRaises(Preprocessor.Error) as e:
                 self.pp.do_include('f')
-                self.assertEqual(e.key, 'UNDEFINED_VAR')
+            self.assertEqual(e.exception.key, 'UNDEFINED_VAR')
 
     def test_include_literal_at(self):
         files = {

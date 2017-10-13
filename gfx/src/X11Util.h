@@ -13,13 +13,10 @@
 #if defined(MOZ_WIDGET_GTK)
 #  include <gdk/gdk.h>
 #  include <gdk/gdkx.h>
-#elif defined(MOZ_WIDGET_QT)
-#include "gfxQtPlatform.h"
-#undef CursorShape
-#  include <X11/Xlib.h>
+#  include "X11UndefineNone.h"
 #else
 #  error Unknown toolkit
-#endif 
+#endif
 
 #include <string.h>                     // for memset
 #include "mozilla/Scoped.h"             // for SCOPED_TEMPLATE
@@ -34,8 +31,6 @@ DefaultXDisplay()
 {
 #if defined(MOZ_WIDGET_GTK)
   return GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-#elif defined(MOZ_WIDGET_QT)
-  return gfxQtPlatform::GetXDisplay();
 #endif
 }
 
@@ -123,7 +118,10 @@ public:
     static int
     ErrorHandler(Display *, XErrorEvent *ev);
 
-    ScopedXErrorHandler();
+    /**
+     * @param aAllowOffMainThread whether to warn if used off main thread
+     */
+    explicit ScopedXErrorHandler(bool aAllowOffMainThread = false);
 
     ~ScopedXErrorHandler();
 
@@ -134,6 +132,15 @@ public:
      *           the first one will be returned.
      */
     bool SyncAndGetError(Display *dpy, XErrorEvent *ev = nullptr);
+};
+
+class OffMainThreadScopedXErrorHandler : public ScopedXErrorHandler
+{
+public:
+  OffMainThreadScopedXErrorHandler()
+    : ScopedXErrorHandler(true)
+  {
+  }
 };
 
 } // namespace mozilla

@@ -79,19 +79,21 @@ function plotsCanvas() {
 
   let hasDrawnCurve = false;
   let b = new BezierCanvas(getCanvasMock(), getCubicBezier(), [.25, 0]);
-  b.ctx.bezierCurveTo = () => hasDrawnCurve = true;
+  b.ctx.bezierCurveTo = () => {
+    hasDrawnCurve = true;
+  };
   b.plot();
 
   do_check_true(hasDrawnCurve);
 }
 
 function getCubicBezier() {
-  return new CubicBezier([0,0,1,1]);
+  return new CubicBezier([0, 0, 1, 1]);
 }
 
-function getCanvasMock(w=200, h=400) {
+function getCanvasMock(w = 200, h = 400) {
   return {
-    getContext: function() {
+    getContext: function () {
       return {
         scale: () => {},
         translate: () => {},

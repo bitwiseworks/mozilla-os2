@@ -11,6 +11,8 @@
 
 #include "vm/TypeInference.h"
 
+#include "mozilla/BinarySearch.h"
+#include "mozilla/Casting.h"
 #include "mozilla/PodOperations.h"
 
 #include "builtin/SymbolObject.h"
@@ -138,6 +140,15 @@ TypeSet::ObjectKey::singleton()
     JSObject* res = singletonNoBarrier();
     JSObject::readBarrier(res);
     return res;
+}
+
+inline JSCompartment*
+TypeSet::ObjectKey::maybeCompartment()
+{
+    if (isSingleton())
+        return singleton()->compartment();
+
+    return group()->compartment();
 }
 
 /* static */ inline TypeSet::Type
@@ -276,7 +287,7 @@ struct AutoEnterAnalysis
 {
     // For use when initializing an UnboxedLayout.  The UniquePtr's destructor
     // must run when GC is not suppressed.
-    mozilla::UniquePtr<UnboxedLayout, JS::DeletePolicy<UnboxedLayout>> unboxedLayoutToCleanUp;
+    UniquePtr<UnboxedLayout> unboxedLayoutToCleanUp;
 
     // Prevent GC activity in the middle of analysis.
     gc::AutoSuppressGC suppressGC;
@@ -287,17 +298,21 @@ struct AutoEnterAnalysis
     // Pending recompilations to perform before execution of JIT code can resume.
     RecompileInfoVector pendingRecompiles;
 
+    // Prevent us from calling the objectMetadataCallback.
+    js::AutoSuppressAllocationMetadataBuilder suppressMetadata;
+
     FreeOp* freeOp;
     Zone* zone;
 
     explicit AutoEnterAnalysis(ExclusiveContext* cx)
-      : suppressGC(cx), oom(cx->zone())
+      : suppressGC(cx), oom(cx->zone()), suppressMetadata(cx)
     {
         init(cx->defaultFreeOp(), cx->zone());
     }
 
     AutoEnterAnalysis(FreeOp* fop, Zone* zone)
-      : suppressGC(zone->runtimeFromMainThread()), oom(zone)
+      : suppressGC(zone->runtimeFromMainThread()->contextFromMainThread()),
+        oom(zone), suppressMetadata(zone)
     {
         init(fop, zone);
     }
@@ -519,26 +534,17 @@ TypeScript::BytecodeTypes(JSScript* script, jsbytecode* pc, uint32_t* bytecodeMa
     if (bytecodeMap[*hint] == offset)
         return typeArray + *hint;
 
-    // Fall back to a binary search.
-    size_t bottom = 0;
-    size_t top = script->nTypeSets() - 1;
-    size_t mid = bottom + (top - bottom) / 2;
-    while (mid < top) {
-        if (bytecodeMap[mid] < offset)
-            bottom = mid + 1;
-        else if (bytecodeMap[mid] > offset)
-            top = mid;
-        else
-            break;
-        mid = bottom + (top - bottom) / 2;
-    }
+    // Fall back to a binary search.  We'll either find the exact offset, or
+    // there are more JOF_TYPESET opcodes than nTypeSets in the script (as can
+    // happen if the script is very long) and we'll use the last location.
+    size_t loc;
+#ifdef DEBUG
+    bool found =
+#endif
+        mozilla::BinarySearch(bytecodeMap, 0, script->nTypeSets() - 1, offset, &loc);
 
-    // We should have have zeroed in on either the exact offset, unless there
-    // are more JOF_TYPESET opcodes than nTypeSets in the script (as can happen
-    // if the script is very long).
-    MOZ_ASSERT(bytecodeMap[mid] == offset || mid == top);
-
-    *hint = mid;
+    MOZ_ASSERT_IF(found, bytecodeMap[loc] == offset);
+    *hint = mozilla::AssertedCast<uint32_t>(loc);
     return typeArray + *hint;
 }
 
@@ -603,6 +609,8 @@ TypeScript::MonitorAssign(JSContext* cx, HandleObject obj, jsid id)
 /* static */ inline void
 TypeScript::SetThis(JSContext* cx, JSScript* script, TypeSet::Type type)
 {
+    assertSameCompartment(cx, script, type);
+
     StackTypeSet* types = ThisTypes(script);
     if (!types)
         return;
@@ -625,6 +633,8 @@ TypeScript::SetThis(JSContext* cx, JSScript* script, const js::Value& value)
 /* static */ inline void
 TypeScript::SetArgument(JSContext* cx, JSScript* script, unsigned arg, TypeSet::Type type)
 {
+    assertSameCompartment(cx, script, type);
+
     StackTypeSet* types = ArgTypes(script, arg);
     if (!types)
         return;
@@ -848,6 +858,32 @@ inline ObjectGroup*
 TypeSet::Type::groupNoBarrier() const
 {
     return objectKey()->groupNoBarrier();
+}
+
+inline void
+TypeSet::Type::trace(JSTracer* trc)
+{
+    if (isSingletonUnchecked()) {
+        JSObject* obj = singletonNoBarrier();
+        TraceManuallyBarrieredEdge(trc, &obj, "TypeSet::Object");
+        *this = TypeSet::ObjectType(obj);
+    } else if (isGroupUnchecked()) {
+        ObjectGroup* group = groupNoBarrier();
+        TraceManuallyBarrieredEdge(trc, &group, "TypeSet::Group");
+        *this = TypeSet::ObjectType(group);
+    }
+}
+
+inline JSCompartment*
+TypeSet::Type::maybeCompartment()
+{
+    if (isSingletonUnchecked())
+        return singletonNoBarrier()->compartment();
+
+    if (isGroupUnchecked())
+        return groupNoBarrier()->compartment();
+
+    return nullptr;
 }
 
 inline bool

@@ -8,6 +8,8 @@ SimpleTest.waitForExplicitFinish();
 browserElementTestHelpers.setEnabledPref(true);
 browserElementTestHelpers.addPermission();
 
+const { NetUtil } = SpecialPowers.Cu.import('resource://gre/modules/NetUtil.jsm');
+
 function testFail(msg) {
   ok(false, JSON.stringify(msg));
 }
@@ -49,6 +51,9 @@ function testHttpAuthCancel(e) {
 
   is(e.detail.realm, 'http_realm', 'expected realm matches');
   is(e.detail.host, 'http://test', 'expected host matches');
+  is(e.detail.path,
+     '/tests/dom/browser-element/mochitest/file_http_401_response.sjs',
+     'expected path matches');
   e.preventDefault();
 
   SimpleTest.executeSoon(function() {
@@ -71,6 +76,9 @@ function testHttpAuth(e) {
 
   is(e.detail.realm, 'http_realm', 'expected realm matches');
   is(e.detail.host, 'http://test', 'expected host matches');
+  is(e.detail.path,
+     '/tests/dom/browser-element/mochitest/file_http_401_response.sjs',
+     'expected path matches');
   is(e.detail.isProxy, false, 'expected isProxy is false');
   e.preventDefault();
 
@@ -98,6 +106,9 @@ function testProxyAuth(e) {
 
     is(e.detail.realm, 'http_realm', 'expected realm matches');
     is(e.detail.host, mozproxy, 'expected host matches');
+    is(e.detail.path,
+       '/tests/dom/browser-element/mochitest/file_http_407_response.sjs',
+       'expected path matches');
     is(e.detail.isProxy, true, 'expected isProxy is true');
     e.preventDefault();
 
@@ -130,20 +141,14 @@ function testProxyAuth(e) {
     }
   });
 
-  var ioService = SpecialPowers.Cc["@mozilla.org/network/io-service;1"]
-                  .getService(SpecialPowers.Ci.nsIIOService);
+  var channel = NetUtil.newChannel({
+    uri: testingSJS,
+    loadUsingSystemPrincipal: true
+  });
+
   var pps = SpecialPowers.Cc["@mozilla.org/network/protocol-proxy-service;1"]
             .getService();
-  var systemPrincipal = SpecialPowers.Services.scriptSecurityManager
-                                     .getSystemPrincipal();
-  var channel = ioService.newChannel2(testingSJS,
-                                      null,
-                                      null,
-                                      null,
-                                      systemPrincipal,
-                                      null,
-                                      SpecialPowers.Ci.nsILoadInfo.SEC_NORMAL,
-                                      SpecialPowers.Ci.nsIContentPolicy.TYPE_OTHER);
+
   pps.asyncResolve(channel, 0, resolveCallback);
 }
 
@@ -163,7 +168,7 @@ function testAuthJarNoInterfere(e) {
   authMgr.setAuthIdentity('http', 'test', -1, 'basic', 'http_realm',
                           'tests/dom/browser-element/mochitest/file_http_401_response.sjs',
                           '', 'httpuser', 'wrongpass', false, principal);
-  attrs = {appId: 1, inBrowser: true};
+  attrs = {appId: 1, inIsolatedMozBrowser: true};
   principal = secMan.createCodebasePrincipal(uri, attrs);
   authMgr.setAuthIdentity('http', 'test', -1, 'basic', 'http_realm',
                           'tests/dom/browser-element/mochitest/file_http_401_response.sjs',
@@ -198,7 +203,7 @@ function testAuthJarInterfere(e) {
   var uri = ioService.newURI("http://test/tests/dom/browser-element/mochitest/file_http_401_response.sjs", null, null);
 
   // Set some auth data that should overwrite the successful stored details.
-  var principal = secMan.createCodebasePrincipal(uri, {inBrowser: true});
+  var principal = secMan.createCodebasePrincipal(uri, {inIsolatedMozBrowser: true});
   authMgr.setAuthIdentity('http', 'test', -1, 'basic', 'http_realm',
                           'tests/dom/browser-element/mochitest/file_http_401_response.sjs',
                           '', 'httpuser', 'wrongpass', false, principal);

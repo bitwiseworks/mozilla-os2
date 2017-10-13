@@ -4,17 +4,17 @@
 
 package org.mozilla.gecko.fxa.sync;
 
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import android.accounts.Account;
+import android.content.AbstractThreadedSyncAdapter;
+import android.content.ContentProviderClient;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SyncResult;
+import android.os.Bundle;
+import android.os.SystemClock;
+import android.text.TextUtils;
 
-import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.common.telemetry.TelemetryWrapper;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
@@ -22,6 +22,7 @@ import org.mozilla.gecko.background.fxa.SkewHandler;
 import org.mozilla.gecko.browserid.JSONWebTokenUtils;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.fxa.FxAccountConstants;
+import org.mozilla.gecko.fxa.FxAccountDeviceRegistrator;
 import org.mozilla.gecko.fxa.authenticator.AccountPickler;
 import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 import org.mozilla.gecko.fxa.authenticator.FxADefaultLoginStateMachineDelegate;
@@ -39,7 +40,7 @@ import org.mozilla.gecko.sync.SyncConfiguration;
 import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
-import org.mozilla.gecko.sync.delegates.BaseGlobalSessionCallback;
+import org.mozilla.gecko.sync.delegates.GlobalSessionCallback;
 import org.mozilla.gecko.sync.delegates.ClientsDataDelegate;
 import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.net.HawkAuthHeaderProvider;
@@ -50,21 +51,18 @@ import org.mozilla.gecko.tokenserver.TokenServerClientDelegate;
 import org.mozilla.gecko.tokenserver.TokenServerException;
 import org.mozilla.gecko.tokenserver.TokenServerToken;
 
-import android.accounts.Account;
-import android.content.AbstractThreadedSyncAdapter;
-import android.content.ContentProviderClient;
-import android.content.ContentResolver;
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.content.SyncResult;
-import android.os.Bundle;
-import android.os.SystemClock;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 
 public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
   private static final String LOG_TAG = FxAccountSyncAdapter.class.getSimpleName();
-
-  public static final String SYNC_EXTRAS_RESPECT_LOCAL_RATE_LIMIT = "respect_local_rate_limit";
-  public static final String SYNC_EXTRAS_RESPECT_REMOTE_SERVER_BACKOFF = "respect_remote_server_backoff";
 
   public static final int NOTIFICATION_ID = LOG_TAG.hashCode();
 
@@ -131,7 +129,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
     }
   }
 
-  protected static class SessionCallback implements BaseGlobalSessionCallback {
+  protected static class SessionCallback implements GlobalSessionCallback {
     protected final SyncDelegate syncDelegate;
     protected final SchedulePolicy schedulePolicy;
     protected volatile BackoffHandler storageBackoffHandler;
@@ -224,7 +222,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
       return false;
     }
 
-    final boolean forced = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false);
+    final boolean forced = extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_BACKOFF, false);
     if (forced) {
       Logger.info(LOG_TAG, "Forced sync (" + kind + "): overruling remaining backoff of " + delay + "ms.");
     } else {
@@ -294,7 +292,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
         // or we never had one at all, or we're OK to sync.
         storageBackoffHandler.setEarliestNextRequest(0L);
 
-        FxAccountGlobalSession globalSession = null;
+        GlobalSession globalSession = null;
         try {
           final ClientsDataDelegate clientsDataDelegate = new SharedPreferencesClientsDataDelegate(sharedPrefs, getContext());
           if (FxAccountUtils.LOG_PERSONAL_INFORMATION) {
@@ -322,7 +320,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
           syncConfig.stagesToSync = Utils.getStagesToSyncFromBundle(knownStageNames, extras);
           syncConfig.setClusterURL(storageServerURI);
 
-          globalSession = new FxAccountGlobalSession(syncConfig, callback, context, clientsDataDelegate);
+          globalSession = new GlobalSession(syncConfig, callback, context, clientsDataDelegate);
           globalSession.start();
         } catch (Exception e) {
           callback.handleError(globalSession, e);
@@ -399,12 +397,11 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
       fxAccount.dump();
     }
 
-    final EnumSet<FirefoxAccounts.SyncHint> syncHints = FirefoxAccounts.getHintsToSyncFromBundle(extras);
-    FirefoxAccounts.logSyncHints(syncHints);
+    FirefoxAccounts.logSyncOptions(extras);
 
-    // This applies even to forced syncs, but only on success.
     if (this.lastSyncRealtimeMillis > 0L &&
-        (this.lastSyncRealtimeMillis + MINIMUM_SYNC_DELAY_MILLIS) > SystemClock.elapsedRealtime()) {
+        (this.lastSyncRealtimeMillis + MINIMUM_SYNC_DELAY_MILLIS) > SystemClock.elapsedRealtime() &&
+            !extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_BACKOFF, false)) {
       Logger.info(LOG_TAG, "Not syncing FxAccount " + Utils.obfuscateEmail(account.name) +
                            ": minimum interval not met.");
       TelemetryWrapper.addToHistogram(TelemetryContract.SYNC_FAILED_BACKOFF, 1);
@@ -441,7 +438,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
       // If this sync was triggered by user action, this will be true.
       final boolean isImmediate = (extras != null) &&
                                   (extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false) ||
-                                   extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false));
+                                   extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_BACKOFF, false));
 
       // If it's not an immediate sync, it must be either periodic or tickled.
       // Check our background rate limiter.
@@ -541,7 +538,13 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
             final String clientState = married.getClientState();
             syncWithAssertion(audience, assertion, tokenServerEndpointURI, tokenBackoffHandler, sharedPrefs, syncKeyBundle, clientState, sessionCallback, extras, fxAccount);
 
-            // Force fetch the profile avatar information.
+            // Register the device if necessary (asynchronous, in another thread)
+            if (fxAccount.getDeviceRegistrationVersion() != FxAccountDeviceRegistrator.DEVICE_REGISTRATION_VERSION
+                || TextUtils.isEmpty(fxAccount.getDeviceId())) {
+              FxAccountDeviceRegistrator.register(context);
+            }
+
+            // Force fetch the profile avatar information. (asynchronous, in another thread)
             Logger.info(LOG_TAG, "Fetching profile avatar information.");
             fxAccount.fetchProfileJSON();
           } catch (Exception e) {

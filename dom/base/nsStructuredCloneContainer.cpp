@@ -58,8 +58,7 @@ nsStructuredCloneContainer::InitFromJSVal(JS::Handle<JS::Value> aData,
 
 NS_IMETHODIMP
 nsStructuredCloneContainer::InitFromBase64(const nsAString &aData,
-                                           uint32_t aFormatVersion,
-                                           JSContext* aCx)
+                                           uint32_t aFormatVersion)
 {
   if (DataLength()) {
     return NS_ERROR_FAILURE;
@@ -138,7 +137,11 @@ nsStructuredCloneContainer::GetDataAsBase64(nsAString &aOut)
     return NS_ERROR_FAILURE;
   }
 
-  nsAutoCString binaryData(reinterpret_cast<char*>(Data()), DataLength());
+  auto iter = Data().Iter();
+  size_t size = Data().Size();
+  nsAutoCString binaryData;
+  binaryData.SetLength(size);
+  Data().ReadBytes(iter, binaryData.BeginWriting(), size);
   nsAutoCString base64Data;
   nsresult rv = Base64Encode(binaryData, base64Data);
   if (NS_WARN_IF(NS_FAILED(rv))) {

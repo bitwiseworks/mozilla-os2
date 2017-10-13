@@ -96,7 +96,10 @@ NS_IMETHODIMP
 nsNullPrincipalURI::GetAsciiSpec(nsACString &_spec)
 {
   nsAutoCString buffer;
-  (void)GetSpec(buffer);
+  // Ignore the return value -- nsNullPrincipalURI::GetSpec() is infallible.
+  Unused << GetSpec(buffer);
+  // This uses the infallible version of |NS_EscapeURL| as |GetSpec| is
+  // already infallible.
   NS_EscapeURL(buffer, esc_OnlyNonASCII | esc_AlwaysCopy, _spec);
   return NS_OK;
 }
@@ -122,6 +125,12 @@ nsNullPrincipalURI::GetHostPort(nsACString &_host)
 
 NS_IMETHODIMP
 nsNullPrincipalURI::SetHostPort(const nsACString &aHost)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsNullPrincipalURI::SetHostAndPort(const nsACString &aHost)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -267,6 +276,14 @@ nsNullPrincipalURI::CloneIgnoringRef(nsIURI **_newURI)
 {
   // GetRef/SetRef not supported by nsNullPrincipalURI, so
   // CloneIgnoringRef() is the same as Clone().
+  return Clone(_newURI);
+}
+
+NS_IMETHODIMP
+nsNullPrincipalURI::CloneWithNewRef(const nsACString& newRef, nsIURI **_newURI)
+{
+  // GetRef/SetRef not supported by nsNullPrincipalURI, so
+  // CloneWithNewRef() is the same as Clone().
   return Clone(_newURI);
 }
 

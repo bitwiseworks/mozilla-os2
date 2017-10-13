@@ -16,9 +16,11 @@
 #include <unistd.h>
 #endif
 
+#include "MainThreadIdlePeriod.h"
+
 using namespace mozilla;
 
-static mozilla::ThreadLocal<bool> sTLSIsMainThread;
+static MOZ_THREAD_LOCAL(bool) sTLSIsMainThread;
 
 bool
 NS_IsMainThread()
@@ -29,16 +31,14 @@ NS_IsMainThread()
 void
 NS_SetMainThread()
 {
-  if (!sTLSIsMainThread.initialized()) {
-    if (!sTLSIsMainThread.init()) {
-      MOZ_CRASH();
-    }
-    sTLSIsMainThread.set(true);
+  if (!sTLSIsMainThread.init()) {
+    MOZ_CRASH();
   }
+  sTLSIsMainThread.set(true);
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-typedef nsTArray<RefPtr<nsThread>> nsThreadArray;
+typedef nsTArray<NotNull<RefPtr<nsThread>>> nsThreadArray;
 
 //-----------------------------------------------------------------------------
 
@@ -101,6 +101,11 @@ nsThreadManager::Init()
     return rv;
   }
 
+  {
+    nsCOMPtr<nsIIdlePeriod> idlePeriod = new MainThreadIdlePeriod();
+    mMainThread->RegisterIdlePeriod(idlePeriod.forget());
+  }
+
   // We need to keep a pointer to the current thread, so we can satisfy
   // GetIsMainThread calls that occur post-Shutdown.
   mMainThread->GetPRThread(&mMainPRThread);
@@ -133,7 +138,7 @@ nsThreadManager::Shutdown()
     OffTheBooksMutexAutoLock lock(mLock);
     for (auto iter = mThreadsByPRThread.Iter(); !iter.Done(); iter.Next()) {
       RefPtr<nsThread>& thread = iter.Data();
-      threads.AppendElement(thread);
+      threads.AppendElement(WrapNotNull(thread));
       iter.Remove();
     }
   }
@@ -149,7 +154,7 @@ nsThreadManager::Shutdown()
 
   // Shutdown all threads that require it (join with threads that we created).
   for (uint32_t i = 0; i < threads.Length(); ++i) {
-    nsThread* thread = threads[i];
+    NotNull<nsThread*> thread = threads[i];
     if (thread->ShutdownRequired()) {
       thread->Shutdown();
     }
@@ -186,9 +191,9 @@ nsThreadManager::Shutdown()
 }
 
 void
-nsThreadManager::RegisterCurrentThread(nsThread* aThread)
+nsThreadManager::RegisterCurrentThread(nsThread& aThread)
 {
-  MOZ_ASSERT(aThread->GetPRThread() == PR_GetCurrentThread(), "bad aThread");
+  MOZ_ASSERT(aThread.GetPRThread() == PR_GetCurrentThread(), "bad aThread");
 
   OffTheBooksMutexAutoLock lock(mLock);
 
@@ -197,21 +202,21 @@ nsThreadManager::RegisterCurrentThread(nsThread* aThread)
     mHighestNumberOfThreads = mCurrentNumberOfThreads;
   }
 
-  mThreadsByPRThread.Put(aThread->GetPRThread(), aThread);  // XXX check OOM?
+  mThreadsByPRThread.Put(aThread.GetPRThread(), &aThread);  // XXX check OOM?
 
-  NS_ADDREF(aThread);  // for TLS entry
-  PR_SetThreadPrivate(mCurThreadIndex, aThread);
+  aThread.AddRef();  // for TLS entry
+  PR_SetThreadPrivate(mCurThreadIndex, &aThread);
 }
 
 void
-nsThreadManager::UnregisterCurrentThread(nsThread* aThread)
+nsThreadManager::UnregisterCurrentThread(nsThread& aThread)
 {
-  MOZ_ASSERT(aThread->GetPRThread() == PR_GetCurrentThread(), "bad aThread");
+  MOZ_ASSERT(aThread.GetPRThread() == PR_GetCurrentThread(), "bad aThread");
 
   OffTheBooksMutexAutoLock lock(mLock);
 
   --mCurrentNumberOfThreads;
-  mThreadsByPRThread.Remove(aThread->GetPRThread());
+  mThreadsByPRThread.Remove(aThread.GetPRThread());
 
   PR_SetThreadPrivate(mCurThreadIndex, nullptr);
   // Ref-count balanced via ReleaseObject

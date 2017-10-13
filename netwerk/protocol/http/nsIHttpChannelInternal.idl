@@ -6,13 +6,15 @@
 #include "nsISupports.idl"
 
 %{C++
-template<class T> class nsTArray;
+#include "nsTArrayForwardDeclare.h"
 template<class T> class nsCOMArray;
 class nsCString;
+namespace mozilla { namespace net { class nsHttpChannel; } }
 %}
 [ptr] native StringArray(nsTArray<nsCString>);
 [ref] native StringArrayRef(const nsTArray<nsCString>);
 [ref] native securityMessagesArray(nsCOMArray<nsISecurityConsoleMessage>);
+[ptr] native nsHttpChannelPtr(mozilla::net::nsHttpChannel);
 
 interface nsIAsyncInputStream;
 interface nsIAsyncOutputStream;
@@ -39,7 +41,7 @@ interface nsIHttpUpgradeListener : nsISupports
  * using any feature exposed by this interface, be aware that this interface
  * will change and you will be broken.  You have been warned.
  */
-[scriptable, uuid(332d5f9c-991c-45e3-922f-99e6fe0deb60)]
+[builtinclass, scriptable, uuid(4e28263d-1e03-46f4-aa5c-9512f91957f9)]
 interface nsIHttpChannelInternal : nsISupports
 {
     /**
@@ -205,6 +207,13 @@ interface nsIHttpChannelInternal : nsISupports
      */
     attribute boolean allowAltSvc;
 
+    /**
+     * If true, do not use newer protocol features that might have interop problems
+     * on the Internet. Intended only for use with critical infra like the updater.
+     * default is false.
+     */
+    attribute boolean beConservative;
+
     readonly attribute PRTime lastModifiedTime;
 
     /**
@@ -226,6 +235,7 @@ interface nsIHttpChannelInternal : nsISupports
     const unsigned long CORS_MODE_SAME_ORIGIN = 0;
     const unsigned long CORS_MODE_NO_CORS = 1;
     const unsigned long CORS_MODE_CORS = 2;
+    const unsigned long CORS_MODE_NAVIGATE = 3;
     /**
      * Set by nsCORSListenerProxy to indicate CORS load type. Defaults to CORS_MODE_NO_CORS.
      */
@@ -240,6 +250,19 @@ interface nsIHttpChannelInternal : nsISupports
      * value.
      */
     attribute unsigned long redirectMode;
+
+    const unsigned long FETCH_CACHE_MODE_DEFAULT = 0;
+    const unsigned long FETCH_CACHE_MODE_NO_STORE = 1;
+    const unsigned long FETCH_CACHE_MODE_RELOAD = 2;
+    const unsigned long FETCH_CACHE_MODE_NO_CACHE = 3;
+    const unsigned long FETCH_CACHE_MODE_FORCE_CACHE = 4;
+    const unsigned long FETCH_CACHE_MODE_ONLY_IF_CACHED = 5;
+    /**
+     * Set to indicate Request.cache mode, which simulates the fetch API
+     * semantics, and is also used for exposing this value to the Web page
+     * during service worker interception.
+     */
+    attribute unsigned long fetchCacheMode;
 
     /**
      * The URI of the top-level window that's associated with this channel.
@@ -263,4 +286,29 @@ interface nsIHttpChannelInternal : nsISupports
      */
     [noscript, notxpcom, nostdcall]
     void setCorsPreflightParameters(in StringArrayRef unsafeHeaders);
+
+    /**
+     * When set to true, the channel will not pop any authentication prompts up
+     * to the user.  When provided or cached credentials lead to an
+     * authentication failure, that failure will be propagated to the channel
+     * listener.  Must be called before opening the channel, otherwise throws.
+     */
+    [infallible]
+    attribute boolean blockAuthPrompt;
+
+    /**
+     * Set to indicate Request.integrity.
+     */
+    attribute AString integrityMetadata;
+
+    /**
+     * The connection info's hash key. We use it to test connection separation.
+     */
+    readonly attribute ACString connectionInfoHashKey;
+
+    /**
+     * Returns nsHttpChannel (self) when this actually is implementing nsHttpChannel.
+     */
+    [noscript, notxpcom, nostdcall]
+    nsHttpChannelPtr queryHttpChannelImpl();
 };

@@ -13,17 +13,15 @@ Cu.import("resource://gre/modules/Services.jsm");
 const kEntities = {
   "contacts": "contacts",
   "desktop-notification": "desktopNotification2",
-  "device-storage:music": "deviceStorageMusic",
-  "device-storage:pictures": "deviceStoragePictures",
-  "device-storage:sdcard": "deviceStorageSdcard",
-  "device-storage:videos": "deviceStorageVideos",
   "geolocation": "geolocation",
+  "flyweb-publish-server": "flyWebPublishServer",
 };
 
 // For these types, prompt for permission if action is unknown.
 const PROMPT_FOR_UNKNOWN = [
   "desktop-notification",
   "geolocation",
+  "flyweb-publish-server",
 ];
 
 function ContentPermissionPrompt() {}

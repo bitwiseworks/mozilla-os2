@@ -7,7 +7,7 @@
 
 #include "mozilla/css/ErrorReporter.h"
 
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -26,7 +26,7 @@
 using namespace mozilla;
 
 namespace {
-class ShortTermURISpecCache : public nsRunnable {
+class ShortTermURISpecCache : public Runnable {
 public:
   ShortTermURISpecCache() : mPending(false) {}
 
@@ -35,7 +35,10 @@ public:
       mURI = aURI;
 
       nsAutoCString cSpec;
-      mURI->GetSpec(cSpec);
+      nsresult rv = mURI->GetSpec(cSpec);
+      if (NS_FAILED(rv)) {
+        cSpec.AssignLiteral("[nsIURI::GetSpec failed]");
+      }
       CopyUTF8toUTF16(cSpec, mSpec);
     }
     return mSpec;
@@ -46,7 +49,7 @@ public:
   void SetPending() { mPending = true; }
 
   // When invoked as a runnable, zap the cache.
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mURI = nullptr;
     mSpec.Truncate();
     mPending = false;
@@ -350,7 +353,7 @@ ErrorReporter::ReportUnexpectedEOF(const char *aMessage)
   const char16_t *params[1] = { innerStr.get() };
 
   nsAutoString str;
-  sStringBundle->FormatStringFromName(MOZ_UTF16("PEUnexpEOF2"),
+  sStringBundle->FormatStringFromName(u"PEUnexpEOF2",
                                       params, ArrayLength(params),
                                       getter_Copies(str));
   AddToError(str);
@@ -367,7 +370,7 @@ ErrorReporter::ReportUnexpectedEOF(char16_t aExpected)
   const char16_t *params[1] = { expectedStr };
 
   nsAutoString str;
-  sStringBundle->FormatStringFromName(MOZ_UTF16("PEUnexpEOF2"),
+  sStringBundle->FormatStringFromName(u"PEUnexpEOF2",
                                       params, ArrayLength(params),
                                       getter_Copies(str));
   AddToError(str);

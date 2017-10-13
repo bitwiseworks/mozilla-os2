@@ -23,6 +23,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 Cu.import("resource://testing-common/TestUtils.jsm");
+Cu.import("resource://testing-common/ContentTask.jsm");
 
 Cc["@mozilla.org/globalmessagemanager;1"]
   .getService(Ci.nsIMessageListenerManager)
@@ -32,12 +33,27 @@ Cc["@mozilla.org/globalmessagemanager;1"]
 XPCOMUtils.defineLazyModuleGetter(this, "E10SUtils",
   "resource:///modules/E10SUtils.jsm");
 
+// For now, we'll allow tests to use CPOWs in this module for
+// some cases.
+Cu.permitCPOWsInScope(this);
+
+var gSendCharCount = 0;
+var gSynthesizeKeyCount = 0;
+var gSynthesizeCompositionCount = 0;
+var gSynthesizeCompositionChangeCount = 0;
+
+const kAboutPageRegistrationContentScript =
+  "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
+
 this.BrowserTestUtils = {
   /**
    * Loads a page in a new tab, executes a Task and closes the tab.
    *
    * @param options
-   *        An object with the following properties:
+   *        An object  or string.
+   *        If this is a string it is the url to open and will be opened in the
+   *        currently active browser window.
+   *        If an object it should have the following properties:
    *        {
    *          gBrowser:
    *            Reference to the "tabbrowser" element where the new tab should
@@ -55,9 +71,23 @@ this.BrowserTestUtils = {
    * @rejects Any exception from taskFn is propagated.
    */
   withNewTab: Task.async(function* (options, taskFn) {
+    if (typeof(options) == "string") {
+      options = {
+        gBrowser: Services.wm.getMostRecentWindow("navigator:browser").gBrowser,
+        url: options
+      }
+    }
     let tab = yield BrowserTestUtils.openNewForegroundTab(options.gBrowser, options.url);
+    let originalWindow = tab.ownerDocument.defaultView;
     let result = yield taskFn(tab.linkedBrowser);
-    options.gBrowser.removeTab(tab);
+    let finalWindow = tab.ownerDocument.defaultView;
+    if (originalWindow == finalWindow && !tab.closing && tab.linkedBrowser) {
+      yield BrowserTestUtils.removeTab(tab);
+    } else {
+      Services.console.logStringMessage(
+        "BrowserTestUtils.withNewTab: Tab was already closed before " +
+        "removeTab would have been called");
+    }
     return Promise.resolve(result);
   }),
 
@@ -71,12 +101,15 @@ this.BrowserTestUtils = {
    *        will be called to open a foreground tab. Defaults to "about:blank".
    * @param {boolean} waitForLoad
    *        True to wait for the page in the new tab to load. Defaults to true.
+   * @param {boolean} waitForStateStop
+   *        True to wait for the web progress listener to send STATE_STOP for the
+   *        document in the tab. Defaults to false.
    *
    * @return {Promise}
    *         Resolves when the tab is ready and loaded as necessary.
    * @resolves The new tab.
    */
-  openNewForegroundTab(tabbrowser, opening = "about:blank", aWaitForLoad = true) {
+  openNewForegroundTab(tabbrowser, opening = "about:blank", aWaitForLoad = true, aWaitForStateStop = false) {
     let tab;
     let promises = [
       BrowserTestUtils.switchTab(tabbrowser, function () {
@@ -92,6 +125,9 @@ this.BrowserTestUtils = {
 
     if (aWaitForLoad) {
       promises.push(BrowserTestUtils.browserLoaded(tab.linkedBrowser));
+    }
+    if (aWaitForStateStop) {
+      promises.push(BrowserTestUtils.browserStopped(tab.linkedBrowser));
     }
 
     return Promise.all(promises).then(() => tab);
@@ -172,6 +208,64 @@ this.BrowserTestUtils = {
   },
 
   /**
+   * Waits for the selected browser to load in a new window. This
+   * is most useful when you've got a window that might not have
+   * loaded its DOM yet, and where you can't easily use browserLoaded
+   * on gBrowser.selectedBrowser since gBrowser doesn't yet exist.
+   *
+   * @param {win}
+   *        A newly opened window for which we're waiting for the
+   *        first browser load.
+   *
+   * @return {Promise}
+   * @resolves Once the selected browser fires its load event.
+   */
+  firstBrowserLoaded(win, aboutBlank = true) {
+    let mm = win.messageManager;
+    return this.waitForMessage(mm, "browser-test-utils:loadEvent", (msg) => {
+      let selectedBrowser = win.gBrowser.selectedBrowser;
+      return msg.target == selectedBrowser &&
+             (aboutBlank || selectedBrowser.currentURI.spec != "about:blank")
+    });
+  },
+
+  /**
+   * Waits for the web progress listener associated with this tab to fire a
+   * STATE_STOP for the toplevel document.
+   *
+   * @param {xul:browser} browser
+   *        A xul:browser.
+   *
+   * @return {Promise}
+   * @resolves When STATE_STOP reaches the tab's progress listener
+   */
+  browserStopped(browser) {
+    return new Promise(resolve => {
+      let wpl = {
+        onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
+          if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
+              aWebProgress.isTopLevel) {
+            browser.webProgress.removeProgressListener(filter);
+            filter.removeProgressListener(wpl);
+            resolve();
+          };
+        },
+        onSecurityChange() {},
+        onStatusChange() {},
+        onLocationChange() {},
+        QueryInterface: XPCOMUtils.generateQI([
+          Ci.nsIWebProgressListener,
+          Ci.nsIWebProgressListener2,
+        ]),
+      };
+      const filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"]
+                       .createInstance(Ci.nsIWebProgress);
+      filter.addProgressListener(wpl, Ci.nsIWebProgress.NOTIFY_ALL);
+      browser.webProgress.addProgressListener(filter, Ci.nsIWebProgress.NOTIFY_ALL);
+    });
+  },
+
+  /**
    * Waits for the next tab to open and load a given URL.
    *
    * The method doesn't wait for the tab contents to load.
@@ -183,6 +277,9 @@ this.BrowserTestUtils = {
    *
    * @return {Promise}
    * @resolves With the {xul:tab} when a tab is opened and its location changes to the given URL.
+   *
+   * NB: this method will not work if you open a new tab with e.g. BrowserOpenTab
+   * and the tab does not load a URL, because no onLocationChange will fire.
    */
   waitForNewTab(tabbrowser, url) {
     return new Promise((resolve, reject) => {
@@ -208,17 +305,77 @@ this.BrowserTestUtils = {
   },
 
   /**
+   * Waits for onLocationChange.
+   *
+   * @param {tabbrowser} tabbrowser
+   *        The tabbrowser to wait for the location change on.
+   * @param {string} url
+   *        The string URL to look for. The URL must match the URL in the
+   *        location bar exactly.
+   * @return {Promise}
+   * @resolves When onLocationChange fires.
+   */
+  waitForLocationChange(tabbrowser, url) {
+    return new Promise((resolve, reject) => {
+      let progressListener = {
+        onLocationChange(aBrowser) {
+          if ((url && aBrowser.currentURI.spec != url) ||
+              (!url && aBrowser.currentURI.spec == "about:blank")) {
+            return;
+          }
+
+          tabbrowser.removeTabsProgressListener(progressListener);
+          resolve();
+        },
+      };
+      tabbrowser.addTabsProgressListener(progressListener);
+    });
+  },
+
+  /**
    * Waits for the next browser window to open and be fully loaded.
    *
+   * @param {bool} delayedStartup (optional)
+   *        Whether or not to wait for the browser-delayed-startup-finished
+   *        observer notification before resolving. Defaults to true.
+   * @param {string} initialBrowserLoaded (optional)
+   *        If set, we will wait until the initial browser in the new
+   *        window has loaded a particular page. If unset, the initial
+   *        browser may or may not have finished loading its first page
+   *        when the resulting Promise resolves.
    * @return {Promise}
    *         A Promise which resolves the next time that a DOM window
    *         opens and the delayed startup observer notification fires.
    */
-  waitForNewWindow: Task.async(function* (delayedStartup=true) {
+  waitForNewWindow: Task.async(function* (delayedStartup=true,
+                                          initialBrowserLoaded=null) {
     let win = yield this.domWindowOpened();
 
-    yield TestUtils.topicObserved("browser-delayed-startup-finished",
-                                   subject => subject == win);
+    let promises = [
+      TestUtils.topicObserved("browser-delayed-startup-finished",
+                              subject => subject == win),
+    ];
+
+    if (initialBrowserLoaded) {
+      yield this.waitForEvent(win, "DOMContentLoaded");
+
+      let browser = win.gBrowser.selectedBrowser;
+
+      // Retrieve the given browser's current process type.
+      let process =
+        browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
+                                : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+      if (win.gMultiProcessBrowser &&
+          !E10SUtils.canLoadURIInProcess(initialBrowserLoaded, process)) {
+        yield this.waitForEvent(browser, "XULFrameLoaderCreated");
+      }
+
+      let loadPromise = this.browserLoaded(browser, false, initialBrowserLoaded);
+      promises.push(loadPromise);
+    }
+
+    yield Promise.all(promises);
+
     return win;
   }),
 
@@ -261,16 +418,25 @@ this.BrowserTestUtils = {
    *        The window we should wait to have "domwindowopened" sent through
    *        the observer service for. If this is not supplied, we'll just
    *        resolve when the first "domwindowopened" notification is seen.
+   * @param {function} checkFn [optional]
+   *        Called with the nsIDOMWindow object as argument, should return true
+   *        if the event is the expected one, or false if it should be ignored
+   *        and observing should continue. If not specified, the first window
+   *        resolves the returned promise.
    * @return {Promise}
    *         A Promise which resolves when a "domwindowopened" notification
    *         has been fired by the window watcher.
    */
-  domWindowOpened(win) {
+  domWindowOpened(win, checkFn) {
     return new Promise(resolve => {
       function observer(subject, topic, data) {
         if (topic == "domwindowopened" && (!win || subject === win)) {
+          let observedWindow = subject.QueryInterface(Ci.nsIDOMWindow);
+          if (checkFn && !checkFn(observedWindow)) {
+            return;
+          }
           Services.ww.unregisterNotification(observer);
-          resolve(subject.QueryInterface(Ci.nsIDOMWindow));
+          resolve(observedWindow);
         }
       }
       Services.ww.registerNotification(observer);
@@ -306,11 +472,13 @@ this.BrowserTestUtils = {
    *          remote:  A boolean indicating if the window should run
    *                   remote browser tabs or not. If omitted, the window
    *                   will choose the profile default state.
+   *          width: Desired width of window
+   *          height: Desired height of window
    *        }
    * @return {Promise}
    *         Resolves with the new window once it is loaded.
    */
-  openNewBrowserWindow(options={}) {
+  openNewBrowserWindow: Task.async(function*(options={}) {
     let argString = Cc["@mozilla.org/supports-string;1"].
                     createInstance(Ci.nsISupportsString);
     argString.data = "";
@@ -318,6 +486,13 @@ this.BrowserTestUtils = {
 
     if (options.private) {
       features += ",private";
+    }
+
+    if (options.width) {
+      features += ",width=" + options.width;
+    }
+    if (options.height) {
+      features += ",height=" + options.height;
     }
 
     if (options.hasOwnProperty("remote")) {
@@ -332,9 +507,17 @@ this.BrowserTestUtils = {
     // Wait for browser-delayed-startup-finished notification, it indicates
     // that the window has loaded completely and is ready to be used for
     // testing.
-    return TestUtils.topicObserved("browser-delayed-startup-finished",
-                                   subject => subject == win).then(() => win);
-  },
+    let startupPromise =
+      TestUtils.topicObserved("browser-delayed-startup-finished",
+                              subject => subject == win).then(() => win);
+
+    let loadPromise = this.firstBrowserLoaded(win);
+
+    yield startupPromise;
+    yield loadPromise;
+
+    return win;
+  }),
 
   /**
    * Closes a window.
@@ -415,6 +598,8 @@ this.BrowserTestUtils = {
    *        event is the expected one, or false if it should be ignored and
    *        listening should continue. If not specified, the first event with
    *        the specified name resolves the returned promise.
+   * @param {bool} wantsUntrusted [optional]
+   *        True to receive synthetic events dispatched by web content.
    *
    * @note Because this function is intended for testing, any error in checkFn
    *       will cause the returned promise to be rejected instead of waiting for
@@ -423,7 +608,7 @@ this.BrowserTestUtils = {
    * @returns {Promise}
    * @resolves The Event object.
    */
-  waitForEvent(subject, eventName, capture, checkFn) {
+  waitForEvent(subject, eventName, capture, checkFn, wantsUntrusted) {
     return new Promise((resolve, reject) => {
       subject.addEventListener(eventName, function listener(event) {
         try {
@@ -440,7 +625,92 @@ this.BrowserTestUtils = {
           }
           reject(ex);
         }
-      }, capture);
+      }, capture, wantsUntrusted);
+    });
+  },
+
+  /**
+   * Like waitForEvent, but adds the event listener to the message manager
+   * global for browser.
+   *
+   * @param {string} eventName
+   *        Name of the event to listen to.
+   * @param {bool} capture [optional]
+   *        Whether to use a capturing listener.
+   * @param {function} checkFn [optional]
+   *        Called with the Event object as argument, should return true if the
+   *        event is the expected one, or false if it should be ignored and
+   *        listening should continue. If not specified, the first event with
+   *        the specified name resolves the returned promise.
+   * @param {bool} wantsUntrusted [optional]
+   *        Whether to accept untrusted events
+   *
+   * @note Because this function is intended for testing, any error in checkFn
+   *       will cause the returned promise to be rejected instead of waiting for
+   *       the next event, since this is probably a bug in the test.
+   *
+   * @returns {Promise}
+   */
+  waitForContentEvent(browser, eventName, capture = false, checkFn, wantsUntrusted = false) {
+    let parameters = {
+      eventName,
+      capture,
+      checkFnSource: checkFn ? checkFn.toSource() : null,
+      wantsUntrusted,
+    };
+    return ContentTask.spawn(browser, parameters,
+        function({ eventName, capture, checkFnSource, wantsUntrusted }) {
+          let checkFn;
+          if (checkFnSource) {
+            checkFn = eval(`(() => (${checkFnSource}))()`);
+          }
+          return new Promise((resolve, reject) => {
+            addEventListener(eventName, function listener(event) {
+              let completion = resolve;
+              try {
+                if (checkFn && !checkFn(event)) {
+                  return;
+                }
+              } catch (e) {
+                completion = () => reject(e);
+              }
+              removeEventListener(eventName, listener, capture);
+              completion();
+            }, capture, wantsUntrusted);
+          });
+        });
+  },
+
+  /**
+   * Like browserLoaded, but waits for an error page to appear.
+   * This explicitly deals with cases where the browser is not currently remote and a
+   * remoteness switch will occur before the error page is loaded, which is tricky
+   * because error pages don't fire 'regular' load events that we can rely on.
+   *
+   * @param {xul:browser} browser
+   *        A xul:browser.
+   *
+   * @return {Promise}
+   * @resolves When an error page has been loaded in the browser.
+   */
+  waitForErrorPage(browser) {
+    let waitForLoad = () =>
+      this.waitForContentEvent(browser, "AboutNetErrorLoad", false, null, true);
+
+    let win = browser.ownerDocument.defaultView;
+    let tab = win.gBrowser.getTabForBrowser(browser);
+    if (!tab || browser.isRemoteBrowser || !win.gMultiProcessBrowser) {
+      return waitForLoad();
+    }
+
+    // We're going to switch remoteness when loading an error page. We need to be
+    // quite careful in order to make sure we're adding the listener in time to
+    // get this event:
+    return new Promise((resolve, reject) => {
+      tab.addEventListener("TabRemotenessChange", function onTRC() {
+        tab.removeEventListener("TabRemotenessChange", onTRC);
+        waitForLoad().then(resolve, reject);
+      });
     });
   },
 
@@ -472,11 +742,15 @@ this.BrowserTestUtils = {
    */
   synthesizeMouse(target, offsetX, offsetY, event, browser)
   {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       let mm = browser.messageManager;
       mm.addMessageListener("Test:SynthesizeMouseDone", function mouseMsg(message) {
         mm.removeMessageListener("Test:SynthesizeMouseDone", mouseMsg);
-        resolve(message.data.defaultPrevented);
+        if (message.data.hasOwnProperty("defaultPrevented")) {
+          resolve(message.data.defaultPrevented);
+        } else {
+          reject(new Error(message.data.error));
+        }
       });
 
       let cpowObject = null;
@@ -492,6 +766,27 @@ this.BrowserTestUtils = {
       mm.sendAsyncMessage("Test:SynthesizeMouse",
                           {target, targetFn, x: offsetX, y: offsetY, event: event},
                           {object: cpowObject});
+    });
+  },
+
+  /**
+   * Wait for a message to be fired from a particular message manager
+   *
+   * @param {nsIMessageManager} messageManager
+   *                            The message manager that should be used.
+   * @param {String}            message
+   *                            The message we're waiting for.
+   * @param {Function}          checkFn (optional)
+   *                            Optional function to invoke to check the message.
+   */
+  waitForMessage(messageManager, message, checkFn) {
+    return new Promise(resolve => {
+      messageManager.addMessageListener(message, function onMessage(msg) {
+        if (!checkFn || checkFn(msg)) {
+          messageManager.removeMessageListener(message, onMessage);
+          resolve();
+        }
+      });
     });
   },
 
@@ -544,12 +839,16 @@ this.BrowserTestUtils = {
    *
    * @param (Browser) browser
    *        A remote <xul:browser> element. Must not be null.
+   * @param (bool) shouldShowTabCrashPage
+   *        True if it is expected that the tab crashed page will be shown
+   *        for this browser. If so, the Promise will only resolve once the
+   *        tab crash page has loaded.
    *
    * @returns (Promise)
    * @resolves An Object with key-value pairs representing the data from the
    *           crash report's extra file (if applicable).
    */
-  crashBrowser: Task.async(function*(browser) {
+  crashBrowser: Task.async(function*(browser, shouldShowTabCrashPage=true) {
     let extra = {};
     let KeyValueParser = {};
     if (AppConstants.MOZ_CRASHREPORTER) {
@@ -607,6 +906,8 @@ this.BrowserTestUtils = {
       dies();
     }
 
+    let expectedPromises = [];
+
     let crashCleanupPromise = new Promise((resolve, reject) => {
       let observer = (subject, topic, data) => {
         if (topic != "ipc:content-shutdown") {
@@ -650,31 +951,39 @@ this.BrowserTestUtils = {
 
         Services.obs.removeObserver(observer, 'ipc:content-shutdown');
         dump("\nCrash cleaned up\n");
-        resolve();
+        // There might be other ipc:content-shutdown handlers that need to run before
+        // we want to continue, so we'll resolve on the next tick of the event loop.
+        TestUtils.executeSoon(() => resolve());
       };
 
       Services.obs.addObserver(observer, 'ipc:content-shutdown', false);
     });
 
-    let aboutTabCrashedLoadPromise = new Promise((resolve, reject) => {
-      browser.addEventListener("AboutTabCrashedReady", function onCrash() {
-        browser.removeEventListener("AboutTabCrashedReady", onCrash, false);
-        dump("\nabout:tabcrashed loaded and ready\n");
-        resolve();
-      }, false, true);
-    });
+    expectedPromises.push(crashCleanupPromise);
+
+    if (shouldShowTabCrashPage) {
+      expectedPromises.push(new Promise((resolve, reject) => {
+        browser.addEventListener("AboutTabCrashedReady", function onCrash() {
+          browser.removeEventListener("AboutTabCrashedReady", onCrash, false);
+          dump("\nabout:tabcrashed loaded and ready\n");
+          resolve();
+        }, false, true);
+      }));
+    }
 
     // This frame script will crash the remote browser as soon as it is
     // evaluated.
     let mm = browser.messageManager;
     mm.loadFrameScript("data:,(" + frame_script.toString() + ")();", false);
 
-    yield Promise.all([crashCleanupPromise, aboutTabCrashedLoadPromise]);
+    yield Promise.all(expectedPromises);
 
-    let gBrowser = browser.ownerDocument.defaultView.gBrowser;
-    let tab = gBrowser.getTabForBrowser(browser);
-    if (tab.getAttribute("crashed") != "true") {
-      throw new Error("Tab should be marked as crashed");
+    if (shouldShowTabCrashPage) {
+      let gBrowser = browser.ownerDocument.defaultView.gBrowser;
+      let tab = gBrowser.getTabForBrowser(browser);
+      if (tab.getAttribute("crashed") != "true") {
+        throw new Error("Tab should be marked as crashed");
+      }
     }
 
     return extra;
@@ -710,7 +1019,7 @@ this.BrowserTestUtils = {
 
   /**
    * Version of EventUtils' `sendChar` function; it will synthesize a keypress
-   * event in a child process and returns a Promise that will result when the
+   * event in a child process and returns a Promise that will resolve when the
    * event was fired. Instead of a Window, a Browser object is required to be
    * passed to this function.
    *
@@ -724,12 +1033,297 @@ this.BrowserTestUtils = {
    */
   sendChar(char, browser) {
     return new Promise(resolve => {
+      let seq = ++gSendCharCount;
       let mm = browser.messageManager;
+
       mm.addMessageListener("Test:SendCharDone", function charMsg(message) {
+        if (message.data.seq != seq)
+          return;
+
         mm.removeMessageListener("Test:SendCharDone", charMsg);
-        resolve(message.data.sendCharResult);
+        resolve(message.data.result);
       });
-      mm.sendAsyncMessage("Test:SendChar", { char: char });
+
+      mm.sendAsyncMessage("Test:SendChar", {
+        char: char,
+        seq: seq
+      });
     });
-  }
+  },
+
+  /**
+   * Version of EventUtils' `synthesizeKey` function; it will synthesize a key
+   * event in a child process and returns a Promise that will resolve when the
+   * event was fired. Instead of a Window, a Browser object is required to be
+   * passed to this function.
+   *
+   * @param {String} key
+   *        See the documentation available for EventUtils#synthesizeKey.
+   * @param {Object} event
+   *        See the documentation available for EventUtils#synthesizeKey.
+   * @param {Browser} browser
+   *        Browser element, must not be null.
+   *
+   * @returns {Promise}
+   */
+  synthesizeKey(key, event, browser) {
+    return new Promise(resolve => {
+      let seq = ++gSynthesizeKeyCount;
+      let mm = browser.messageManager;
+
+      mm.addMessageListener("Test:SynthesizeKeyDone", function keyMsg(message) {
+        if (message.data.seq != seq)
+          return;
+
+        mm.removeMessageListener("Test:SynthesizeKeyDone", keyMsg);
+        resolve();
+      });
+
+      mm.sendAsyncMessage("Test:SynthesizeKey", { key, event, seq });
+    });
+  },
+
+  /**
+   * Version of EventUtils' `synthesizeComposition` function; it will synthesize
+   * a composition event in a child process and returns a Promise that will
+   * resolve when the event was fired. Instead of a Window, a Browser object is
+   * required to be passed to this function.
+   *
+   * @param {Object} event
+   *        See the documentation available for EventUtils#synthesizeComposition.
+   * @param {Browser} browser
+   *        Browser element, must not be null.
+   *
+   * @returns {Promise}
+   * @resolves False if the composition event could not be synthesized.
+   */
+  synthesizeComposition(event, browser) {
+    return new Promise(resolve => {
+      let seq = ++gSynthesizeCompositionCount;
+      let mm = browser.messageManager;
+
+      mm.addMessageListener("Test:SynthesizeCompositionDone", function compMsg(message) {
+        if (message.data.seq != seq)
+          return;
+
+        mm.removeMessageListener("Test:SynthesizeCompositionDone", compMsg);
+        resolve(message.data.result);
+      });
+
+      mm.sendAsyncMessage("Test:SynthesizeComposition", { event, seq });
+    });
+  },
+
+  /**
+   * Version of EventUtils' `synthesizeCompositionChange` function; it will
+   * synthesize a compositionchange event in a child process and returns a
+   * Promise that will resolve when the event was fired. Instead of a Window, a
+   * Browser object is required to be passed to this function.
+   *
+   * @param {Object} event
+   *        See the documentation available for EventUtils#synthesizeCompositionChange.
+   * @param {Browser} browser
+   *        Browser element, must not be null.
+   *
+   * @returns {Promise}
+   */
+  synthesizeCompositionChange(event, browser) {
+    return new Promise(resolve => {
+      let seq = ++gSynthesizeCompositionChangeCount;
+      let mm = browser.messageManager;
+
+      mm.addMessageListener("Test:SynthesizeCompositionChangeDone", function compMsg(message) {
+        if (message.data.seq != seq)
+          return;
+
+        mm.removeMessageListener("Test:SynthesizeCompositionChangeDone", compMsg);
+        resolve();
+      });
+
+      mm.sendAsyncMessage("Test:SynthesizeCompositionChange", { event, seq });
+    });
+  },
+
+  /**
+   * Will poll a condition function until it returns true.
+   *
+   * @param condition
+   *        A condition function that must return true or false. If the
+   *        condition ever throws, this is also treated as a false. The
+   *        function can be a generator.
+   * @param interval
+   *        The time interval to poll the condition function. Defaults
+   *        to 100ms.
+   * @param attempts
+   *        The number of times to poll before giving up and rejecting
+   *        if the condition has not yet returned true. Defaults to 50
+   *        (~5 seconds for 100ms intervals)
+   * @return Promise
+   *        Resolves when condition is true.
+   *        Rejects if timeout is exceeded or condition ever throws.
+   */
+  waitForCondition(condition, msg, interval=100, maxTries=50) {
+    return new Promise((resolve, reject) => {
+      let tries = 0;
+      let intervalID = setInterval(Task.async(function* () {
+        if (tries >= maxTries) {
+          clearInterval(intervalID);
+          msg += ` - timed out after ${maxTries} tries.`;
+          reject(msg);
+          return;
+        }
+
+        let conditionPassed = false;
+        try {
+          conditionPassed = yield condition();
+        } catch(e) {
+          msg += ` - threw exception: ${e}`;
+          clearInterval(intervalID);
+          reject(msg);
+          return;
+        }
+
+        if (conditionPassed) {
+          clearInterval(intervalID);
+          resolve();
+        }
+        tries++;
+      }), interval);
+    });
+  },
+
+  /**
+   * Waits for a <xul:notification> with a particular value to appear
+   * for the <xul:notificationbox> of the passed in browser.
+   *
+   * @param tabbrowser (<xul:tabbrowser>)
+   *        The gBrowser that hosts the browser that should show
+   *        the notification. For most tests, this will probably be
+   *        gBrowser.
+   * @param browser (<xul:browser>)
+   *        The browser that should be showing the notification.
+   * @param notificationValue (string)
+   *        The "value" of the notification, which is often used as
+   *        a unique identifier. Example: "plugin-crashed".
+   * @return Promise
+   *        Resolves to the <xul:notification> that is being shown.
+   */
+  waitForNotificationBar(tabbrowser, browser, notificationValue) {
+    let notificationBox = tabbrowser.getNotificationBox(browser);
+    return this.waitForNotificationInNotificationBox(notificationBox,
+                                                     notificationValue);
+  },
+
+  /**
+   * Waits for a <xul:notification> with a particular value to appear
+   * in the global <xul:notificationbox> of the given browser window.
+   *
+   * @param win (<xul:window>)
+   *        The browser window in whose global notificationbox the
+   *        notification is expected to appear.
+   * @param notificationValue (string)
+   *        The "value" of the notification, which is often used as
+   *        a unique identifier. Example: "captive-portal-detected".
+   * @return Promise
+   *        Resolves to the <xul:notification> that is being shown.
+   */
+  waitForGlobalNotificationBar(win, notificationValue) {
+    let notificationBox =
+      win.document.getElementById("high-priority-global-notificationbox");
+    return this.waitForNotificationInNotificationBox(notificationBox,
+                                                     notificationValue);
+  },
+
+  waitForNotificationInNotificationBox(notificationBox, notificationValue) {
+    return new Promise((resolve) => {
+      let check = (event) => {
+        return event.target.value == notificationValue;
+      };
+
+      BrowserTestUtils.waitForEvent(notificationBox, "AlertActive",
+                                    false, check).then((event) => {
+        // The originalTarget of the AlertActive on a notificationbox
+        // will be the notification itself.
+        resolve(event.originalTarget);
+      });
+    });
+  },
+
+  /**
+   * Returns a Promise that will resolve once MozAfterPaint
+   * has been fired in the content of a browser.
+   *
+   * @param browser (<xul:browser>)
+   *        The browser for which we're waiting for the MozAfterPaint
+   *        event to occur in.
+   * @returns Promise
+   */
+  contentPainted(browser) {
+    return ContentTask.spawn(browser, null, function*() {
+      return new Promise((resolve) => {
+        addEventListener("MozAfterPaint", function onPaint() {
+          removeEventListener("MozAfterPaint", onPaint);
+          resolve();
+        })
+      });
+    });
+  },
+
+  _knownAboutPages: new Set(),
+  _loadedAboutContentScript: false,
+  /**
+   * Registers an about: page with particular flags in both the parent
+   * and any content processes. Returns a promise that resolves when
+   * registration is complete.
+   *
+   * @param registerCleanupFunction (Function)
+   *        The test framework doesn't keep its cleanup stuff anywhere accessible,
+   *        so the first argument is a reference to your cleanup registration
+   *        function, allowing us to clean up after you if necessary.
+   * @param aboutModule (String)
+   *        The name of the about page.
+   * @param pageURI (String)
+   *        The URI the about: page should point to.
+   * @param flags (Number)
+   *        The nsIAboutModule flags to use for registration.
+   * @returns Promise that resolves when registration has finished.
+   */
+  registerAboutPage(registerCleanupFunction, aboutModule, pageURI, flags) {
+    // Return a promise that resolves when registration finished.
+    const kRegistrationMsgId = "browser-test-utils:about-registration:registered";
+    let rv = this.waitForMessage(Services.ppmm, kRegistrationMsgId, msg => {
+      return msg.data == aboutModule;
+    });
+    // Load a script that registers our page, then send it a message to execute the registration.
+    if (!this._loadedAboutContentScript) {
+      Services.ppmm.loadProcessScript(kAboutPageRegistrationContentScript, true);
+      this._loadedAboutContentScript = true;
+      registerCleanupFunction(this._removeAboutPageRegistrations.bind(this));
+    }
+    Services.ppmm.broadcastAsyncMessage("browser-test-utils:about-registration:register",
+                                        {aboutModule, pageURI, flags});
+    return rv.then(() => {
+      this._knownAboutPages.add(aboutModule);
+    });
+  },
+
+  unregisterAboutPage(aboutModule) {
+    if (!this._knownAboutPages.has(aboutModule)) {
+      return Promise.reject(new Error("We don't think this about page exists!"));
+    }
+    const kUnregistrationMsgId = "browser-test-utils:about-registration:unregistered";
+    let rv = this.waitForMessage(Services.ppmm, kUnregistrationMsgId, msg => {
+      return msg.data == aboutModule;
+    });
+    Services.ppmm.broadcastAsyncMessage("browser-test-utils:about-registration:unregister",
+                                        aboutModule);
+    return rv.then(() => this._knownAboutPages.delete(aboutModule));
+  },
+
+  *_removeAboutPageRegistrations() {
+    for (let aboutModule of this._knownAboutPages) {
+      yield this.unregisterAboutPage(aboutModule);
+    }
+    Services.ppmm.removeDelayedProcessScript(kAboutPageRegistrationContentScript);
+  },
 };

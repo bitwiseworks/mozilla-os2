@@ -11,8 +11,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const kDeleteTempFileOnExit = "browser.helperApps.deleteTempFileOnExit";
 
@@ -32,7 +31,7 @@ function promiseStartDownload(aSourceUrl) {
   }
 
   return promiseNewDownload(aSourceUrl).then(download => {
-    download.start();
+    download.start().catch(() => {});
     return download;
   });
 }
@@ -64,7 +63,7 @@ function promiseStartDownload_tryToKeepPartialData() {
                   partFilePath: targetFilePath + ".part" },
       });
       download.tryToKeepPartialData = true;
-      download.start();
+      download.start().catch(() => {});
     } else {
       // Start a download using nsIExternalHelperAppService, that is configured
       // to keep partially downloaded data by default.
@@ -130,8 +129,46 @@ var promiseVerifyTarget = Task.async(function* (downloadTarget,
   do_check_eq(downloadTarget.size, expectedContents.length);
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+/**
+ * Waits for an attempt to launch a file, and returns the nsIMIMEInfo used for
+ * the launch, or null if the file was launched with the default handler.
+ */
+function waitForFileLaunched() {
+  return new Promise(resolve => {
+    let waitFn = base => ({
+      launchFile(file, mimeInfo) {
+        Integration.downloads.unregister(waitFn);
+        if (!mimeInfo ||
+            mimeInfo.preferredAction == Ci.nsIMIMEInfo.useSystemDefault) {
+          resolve(null);
+        } else {
+          resolve(mimeInfo);
+        }
+        return Promise.resolve();
+      },
+    });
+    Integration.downloads.register(waitFn);
+  });
+}
+
+/**
+ * Waits for an attempt to show the directory where a file is located, and
+ * returns the path of the file.
+ */
+function waitForDirectoryShown() {
+  return new Promise(resolve => {
+    let waitFn = base => ({
+      showContainingDirectory(path) {
+        Integration.downloads.unregister(waitFn);
+        resolve(path);
+        return Promise.resolve();
+      },
+    });
+    Integration.downloads.register(waitFn);
+  });
+}
+
+// Tests
 
 /**
  * Executes a download and checks its basic properties after construction.
@@ -302,6 +339,58 @@ add_task(function* test_referrer()
 });
 
 /**
+ * Checks the adjustChannel callback for downloads.
+ */
+add_task(function* test_adjustChannel()
+{
+  const sourcePath = "/test_post.txt";
+  const sourceUrl = httpUrl("test_post.txt");
+  const targetPath = getTempFile(TEST_TARGET_FILE_NAME).path;
+  const customHeader = { name: "X-Answer", value: "42" };
+  const postData = "Don't Panic";
+
+  function cleanup() {
+    gHttpServer.registerPathHandler(sourcePath, null);
+  }
+  do_register_cleanup(cleanup);
+
+  gHttpServer.registerPathHandler(sourcePath, aRequest => {
+    do_check_eq(aRequest.method, "POST");
+
+    do_check_true(aRequest.hasHeader(customHeader.name));
+    do_check_eq(aRequest.getHeader(customHeader.name), customHeader.value);
+
+    const stream = aRequest.bodyInputStream;
+    const body = NetUtil.readInputStreamToString(stream, stream.available());
+    do_check_eq(body, postData);
+  });
+
+  function adjustChannel(channel) {
+    channel.QueryInterface(Ci.nsIHttpChannel);
+    channel.setRequestHeader(customHeader.name, customHeader.value, false);
+
+    const stream = Cc["@mozilla.org/io/string-input-stream;1"]
+                   .createInstance(Ci.nsIStringInputStream);
+    stream.setData(postData, postData.length);
+
+    channel.QueryInterface(Ci.nsIUploadChannel2);
+    channel.explicitSetUploadStream(stream, null, -1, "POST", false);
+
+    return Promise.resolve();
+  }
+
+  const download = yield Downloads.createDownload({
+    source: { url: sourceUrl, adjustChannel },
+    target: targetPath,
+  });
+  do_check_eq(download.source.adjustChannel, adjustChannel);
+  do_check_eq(download.toSerializable(), null);
+  yield download.start();
+
+  cleanup();
+});
+
+/**
  * Checks initial and final state and progress for a successful download.
  */
 add_task(function* test_initial_final_state()
@@ -435,7 +524,7 @@ add_task(function* test_empty_progress_tryToKeepPartialData()
                 partFilePath: targetFilePath + ".part" },
     });
     download.tryToKeepPartialData = true;
-    download.start();
+    download.start().catch(() => {});
   } else {
     // Start a download using nsIExternalHelperAppService, that is configured
     // to keep partially downloaded data by default.
@@ -491,7 +580,7 @@ add_task(function* test_empty_noprogress()
       }
     };
 
-    download.start();
+    download.start().catch(() => {});
   } else {
     // When testing DownloadLegacySaver, the download is already started when it
     // is created, and it may have already made all needed property change
@@ -856,7 +945,7 @@ add_task(function* test_cancel_midway_restart_tryToKeepPartialData_false()
 
   // Restart the download from the beginning.
   mustInterruptResponses();
-  download.start();
+  download.start().catch(() => {});
 
   yield promiseDownloadMidway(download);
   yield promisePartFileReady(download);
@@ -1143,7 +1232,7 @@ add_task(function* test_whenSucceeded_after_restart()
     // we can verify getting a reference before the first download attempt.
     download = yield promiseNewDownload(httpUrl("interruptible.txt"));
     promiseSucceeded = download.whenSucceeded();
-    download.start();
+    download.start().catch(() => {});
   } else {
     // When testing DownloadLegacySaver, the download is already started when it
     // is created, thus we cannot get the reference before the first attempt.
@@ -1156,7 +1245,7 @@ add_task(function* test_whenSucceeded_after_restart()
 
   // The second request is allowed to complete.
   continueResponses();
-  download.start();
+  download.start().catch(() => {});
 
   // Wait for the download to finish by waiting on the whenSucceeded promise.
   yield promiseSucceeded;
@@ -1343,7 +1432,7 @@ add_task(function* test_error_restart()
         source: httpUrl("source.txt"),
         target: targetFile,
       });
-      download.start();
+      download.start().catch(() => {});
     } else {
       download = yield promiseStartLegacyDownload(null,
                                                   { targetFile: targetFile });
@@ -1575,11 +1664,15 @@ add_task(function* test_cancel_midway_restart_with_content_encoding()
  */
 add_task(function* test_blocked_parental_controls()
 {
+  let blockFn = base => ({
+    shouldBlockForParentalControls: () => Promise.resolve(true),
+  });
+
+  Integration.downloads.register(blockFn);
   function cleanup() {
-    DownloadIntegration.shouldBlockInTest = false;
+    Integration.downloads.unregister(blockFn);
   }
   do_register_cleanup(cleanup);
-  DownloadIntegration.shouldBlockInTest = true;
 
   let download;
   try {
@@ -1641,6 +1734,51 @@ add_task(function* test_blocked_parental_controls_httpstatus450()
 });
 
 /**
+ * Download with runtime permissions
+ */
+add_task(function* test_blocked_runtime_permissions()
+{
+  let blockFn = base => ({
+    shouldBlockForRuntimePermissions: () => Promise.resolve(true),
+  });
+
+  Integration.downloads.register(blockFn);
+  function cleanup() {
+    Integration.downloads.unregister(blockFn);
+  }
+  do_register_cleanup(cleanup);
+
+  let download;
+  try {
+    if (!gUseLegacySaver) {
+      // When testing DownloadCopySaver, we want to check that the promise
+      // returned by the "start" method is rejected.
+      download = yield promiseNewDownload();
+      yield download.start();
+    } else {
+      // When testing DownloadLegacySaver, we cannot be sure whether we are
+      // testing the promise returned by the "start" method or we are testing
+      // the "error" property checked by promiseDownloadStopped.  This happens
+      // because we don't have control over when the download is started.
+      download = yield promiseStartLegacyDownload();
+      yield promiseDownloadStopped(download);
+    }
+    do_throw("The download should have blocked.");
+  } catch (ex) {
+    if (!(ex instanceof Downloads.Error) || !ex.becauseBlocked) {
+      throw ex;
+    }
+    do_check_true(ex.becauseBlockedByRuntimePermissions);
+    do_check_true(download.error.becauseBlockedByRuntimePermissions);
+  }
+
+  // Now that the download stopped, the target file should not exist.
+  do_check_false(yield OS.File.exists(download.target.path));
+
+  cleanup();
+});
+
+/**
  * Check that DownloadCopySaver can always retrieve the hash.
  * DownloadLegacySaver can only retrieve the hash when
  * nsIExternalHelperAppService is invoked.
@@ -1668,20 +1806,24 @@ add_task(function* test_getSha256Hash()
  * @rejects JavaScript exception.
  */
 var promiseBlockedDownload = Task.async(function* (options) {
+  let blockFn = base => ({
+    shouldBlockForReputationCheck: () => Promise.resolve({
+      shouldBlock: true,
+      verdict: Downloads.Error.BLOCK_VERDICT_UNCOMMON,
+    }),
+    shouldKeepBlockedData: () => Promise.resolve(options.keepBlockedData),
+  });
+
+  Integration.downloads.register(blockFn);
   function cleanup() {
-    DownloadIntegration.shouldBlockInTestForApplicationReputation = false;
-    DownloadIntegration.shouldKeepBlockedDataInTest = false;
+    Integration.downloads.unregister(blockFn);
   }
   do_register_cleanup(cleanup);
-
-  let {keepPartialData, keepBlockedData} = options;
-  DownloadIntegration.shouldBlockInTestForApplicationReputation = true;
-  DownloadIntegration.shouldKeepBlockedDataInTest = keepBlockedData;
 
   let download;
 
   try {
-    if (keepPartialData) {
+    if (options.keepPartialData) {
       download = yield promiseStartDownload_tryToKeepPartialData();
       continueResponses();
     } else if (gUseLegacySaver) {
@@ -1699,7 +1841,11 @@ var promiseBlockedDownload = Task.async(function* (options) {
       throw ex;
     }
     do_check_true(ex.becauseBlockedByReputationCheck);
+    do_check_eq(ex.reputationCheckVerdict,
+                Downloads.Error.BLOCK_VERDICT_UNCOMMON);
     do_check_true(download.error.becauseBlockedByReputationCheck);
+    do_check_eq(download.error.reputationCheckVerdict,
+                Downloads.Error.BLOCK_VERDICT_UNCOMMON);
   }
 
   do_check_true(download.stopped);
@@ -1728,6 +1874,79 @@ add_task(function* test_blocked_applicationReputation()
 
   // There should also be no blocked data in this case
   do_check_false(download.hasBlockedData);
+});
+
+/**
+ * Checks that if a download restarts while processing an application reputation
+ * request, the status is handled correctly.
+ */
+add_task(function* test_blocked_applicationReputation_race()
+{
+  let isFirstShouldBlockCall = true;
+
+  let blockFn = base => ({
+    shouldBlockForReputationCheck(download) {
+      if (isFirstShouldBlockCall) {
+        isFirstShouldBlockCall = false;
+
+        // 2. Cancel and restart the download before the first attempt has a
+        //    chance to finish.
+        download.cancel();
+        download.removePartialData();
+        download.start();
+
+        // 3. Allow the first attempt to finish with a blocked response.
+        return Promise.resolve({
+          shouldBlock: true,
+          verdict: Downloads.Error.BLOCK_VERDICT_UNCOMMON,
+        });
+      }
+
+      // 4/5. Don't block the download the second time. The race condition would
+      //      occur with the first attempt regardless of whether the second one
+      //      is blocked, but not blocking here makes the test simpler.
+      return Promise.resolve({
+        shouldBlock: false,
+        verdict: "",
+      });
+    },
+    shouldKeepBlockedData: () => Promise.resolve(true),
+  });
+
+  Integration.downloads.register(blockFn);
+  function cleanup() {
+    Integration.downloads.unregister(blockFn);
+  }
+  do_register_cleanup(cleanup);
+
+  let download;
+
+  try {
+    // 1. Start the download and get a reference to the promise asociated with
+    //    the first attempt, before allowing the response to continue.
+    download = yield promiseStartDownload_tryToKeepPartialData();
+    let firstAttempt = promiseDownloadStopped(download);
+    continueResponses();
+
+    // 4/5. Wait for the first attempt to be completed. The result of this
+    //      should appear as a cancellation.
+    yield firstAttempt;
+
+    do_throw("The first attempt should have been canceled.");
+  } catch (ex) {
+    // The "becauseBlocked" property should be false.
+    if (!(ex instanceof Downloads.Error) || ex.becauseBlocked) {
+      throw ex;
+    }
+  }
+
+  // 6. Wait for the second attempt to be completed.
+  yield promiseDownloadStopped(download);
+
+  // 7. At this point, "hasBlockedData" should be false.
+  do_check_false(download.hasBlockedData);
+
+  cleanup();
 });
 
 /**
@@ -1896,8 +2115,6 @@ add_task(function* test_blocked_applicationReputation_unblock()
  * download.showContainingDirectory() action
  */
 add_task(function* test_showContainingDirectory() {
-  DownloadIntegration._deferTestShowDir = Promise.defer();
-
   let targetPath = getTempFile(TEST_TARGET_FILE_NAME).path;
 
   let download = yield Downloads.createDownload({
@@ -1905,8 +2122,11 @@ add_task(function* test_showContainingDirectory() {
     target: ""
   });
 
+  let promiseDirectoryShown = waitForDirectoryShown();
+  yield download.showContainingDirectory();
+  let path = yield promiseDirectoryShown;
   try {
-    yield download.showContainingDirectory();
+    new FileUtils.File(path);
     do_throw("Should have failed because of an invalid path.");
   } catch (ex) {
     if (!(ex instanceof Components.Exception)) {
@@ -1924,11 +2144,9 @@ add_task(function* test_showContainingDirectory() {
     target: targetPath
   });
 
-
-  DownloadIntegration._deferTestShowDir = Promise.defer();
+  promiseDirectoryShown = waitForDirectoryShown();
   download.showContainingDirectory();
-  let result = yield DownloadIntegration._deferTestShowDir.promise;
-  do_check_eq(result, "success");
+  yield promiseDirectoryShown;
 });
 
 /**
@@ -1971,9 +2189,9 @@ add_task(function* test_launch() {
 
     do_check_true(download.launchWhenSucceeded);
 
-    DownloadIntegration._deferTestOpenFile = Promise.defer();
+    let promiseFileLaunched = waitForFileLaunched();
     download.launch();
-    let result = yield DownloadIntegration._deferTestOpenFile.promise;
+    let result = yield promiseFileLaunched;
 
     // Verify that the results match the test case.
     if (!launcherPath) {
@@ -1999,11 +2217,23 @@ add_task(function* test_launcherPath_invalid() {
     launcherPath: " "
   });
 
-  DownloadIntegration._deferTestOpenFile = Promise.defer();
+  let promiseDownloadLaunched = new Promise(resolve => {
+    let waitFn = base => ({
+      __proto__: base,
+      launchDownload() {
+        Integration.downloads.unregister(waitFn);
+        let superPromise = super.launchDownload(...arguments);
+        resolve(superPromise);
+        return superPromise;
+      },
+    });
+    Integration.downloads.register(waitFn);
+  });
+
   yield download.start();
   try {
     download.launch();
-    result = yield DownloadIntegration._deferTestOpenFile.promise;
+    yield promiseDownloadLaunched;
     do_throw("Can't launch file with invalid custom launcher")
   } catch (ex) {
     if (!(ex instanceof Components.Exception)) {
@@ -2026,7 +2256,7 @@ add_task(function* test_launchWhenSucceeded() {
 
   // Test both with and without setting a custom application.
   for (let launcherPath of [null, customLauncher.path]) {
-    DownloadIntegration._deferTestOpenFile = Promise.defer();
+    let promiseFileLaunched = waitForFileLaunched();
 
     if (!gUseLegacySaver) {
       let download = yield Downloads.createDownload({
@@ -2044,7 +2274,7 @@ add_task(function* test_launchWhenSucceeded() {
       yield promiseDownloadStopped(download);
     }
 
-    let result = yield DownloadIntegration._deferTestOpenFile.promise;
+    let result = yield promiseFileLaunched;
 
     // Verify that the results match the test case.
     if (!launcherPath) {
@@ -2087,79 +2317,6 @@ add_task(function* test_toSerializable_startTime()
   do_check_eq(download1.startTime.constructor.name, "Date");
   do_check_eq(download2.startTime.constructor.name, "Date");
   do_check_eq(download1.startTime.toJSON(), download2.startTime.toJSON());
-});
-
-/**
- * This test will call the platform specific operations within
- * DownloadPlatform::DownloadDone. While there is no test to verify the
- * specific behaviours, this at least ensures that there is no error or crash.
- */
-add_task(function* test_platform_integration()
-{
-  let downloadFiles = [];
-  let oldDeviceStorageEnabled = false;
-  try {
-     oldDeviceStorageEnabled = Services.prefs.getBoolPref("device.storage.enabled");
-  } catch (e) {
-    // This happens if the pref doesn't exist.
-  }
-  let downloadWatcherNotified = false;
-  let observer = {
-    observe: function(subject, topic, data) {
-      do_check_eq(topic, "download-watcher-notify");
-      do_check_eq(data, "modified");
-      downloadWatcherNotified = true;
-    }
-  }
-  Services.obs.addObserver(observer, "download-watcher-notify", false);
-  Services.prefs.setBoolPref("device.storage.enabled", true);
-  function cleanup() {
-    for (let file of downloadFiles) {
-      file.remove(true);
-    }
-    Services.obs.removeObserver(observer, "download-watcher-notify");
-    Services.prefs.setBoolPref("device.storage.enabled", oldDeviceStorageEnabled);
-  }
-  do_register_cleanup(cleanup);
-
-  for (let isPrivate of [false, true]) {
-    DownloadIntegration.downloadDoneCalled = false;
-
-    // Some platform specific operations only operate on files outside the
-    // temporary directory or in the Downloads directory (such as setting
-    // the Windows searchable attribute, and the Mac Downloads icon bouncing),
-    // so use the system Downloads directory for the target file.
-    let targetFilePath = yield DownloadIntegration.getSystemDownloadsDirectory();
-    targetFilePath = OS.Path.join(targetFilePath,
-                                  "test" + (Math.floor(Math.random() * 1000000)));
-    let targetFile = new FileUtils.File(targetFilePath);
-    downloadFiles.push(targetFile);
-
-    let download;
-    if (gUseLegacySaver) {
-      download = yield promiseStartLegacyDownload(httpUrl("source.txt"),
-                                                  { targetFile: targetFile });
-    }
-    else {
-      download = yield Downloads.createDownload({
-        source: httpUrl("source.txt"),
-        target: targetFile,
-      });
-      download.start();
-    }
-
-    // Wait for the whenSucceeded promise to be resolved first.
-    // downloadDone should be called before the whenSucceeded promise is resolved.
-    yield download.whenSucceeded().then(function () {
-      do_check_true(DownloadIntegration.downloadDoneCalled);
-      do_check_true(downloadWatcherNotified);
-    });
-
-    // Then, wait for the promise returned by "start" to be resolved.
-    yield promiseDownloadStopped(download);
-
-    yield promiseVerifyTarget(download.target, TEST_DATA_SHORT);
-  }
 });
 
 /**
@@ -2225,8 +2382,6 @@ add_task(function* test_history_tryToKeepPartialData()
  * mode after they have been launched.
  */
 add_task(function* test_launchWhenSucceeded_deleteTempFileOnExit() {
-  const kDeleteTempFileOnExit = "browser.helperApps.deleteTempFileOnExit";
-
   let customLauncherPath = getTempFile("app-launcher").path;
   let autoDeleteTargetPathOne = getTempFile(TEST_TARGET_FILE_NAME).path;
   let autoDeleteTargetPathTwo = getTempFile(TEST_TARGET_FILE_NAME).path;

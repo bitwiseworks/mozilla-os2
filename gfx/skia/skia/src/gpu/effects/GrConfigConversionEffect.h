@@ -9,15 +9,14 @@
 #define GrConfigConversionEffect_DEFINED
 
 #include "GrSingleTextureEffect.h"
+#include "GrSwizzle.h"
 
-class GrEffectStage;
-class GrGLConfigConversionEffect;
+class GrInvariantOutput;
 
 /**
  * This class is used to perform config conversions. Clients may want to read/write data that is
- * unpremultiplied. Also on some systems reading/writing BGRA or RGBA is faster. In those cases we
- * read/write using the faster path and perform an R/B swap in the shader if the client data is in
- * the slower config.
+ * unpremultiplied. Additionally, the channels may also be swizzled for optimal readback/upload
+ * performance.
  */
 class GrConfigConversionEffect : public GrSingleTextureEffect {
 public:
@@ -34,20 +33,12 @@ public:
         kPMConversionCnt
     };
 
-    // Installs an effect in the GrEffectStage to perform a config conversion.
-    static const GrEffect* Create(GrTexture*,
-                                  bool swapRedAndBlue,
-                                  PMConversion pmConversion,
-                                  const SkMatrix& matrix);
+    static sk_sp<GrFragmentProcessor> Make(GrTexture*, const GrSwizzle&, PMConversion,
+                                           const SkMatrix&);
 
-    static const char* Name() { return "Config Conversion"; }
-    typedef GrGLConfigConversionEffect GLEffect;
+    const char* name() const override { return "Config Conversion"; }
 
-    virtual const GrBackendEffectFactory& getFactory() const SK_OVERRIDE;
-
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
-    bool swapsRedAndBlue() const { return fSwapRedAndBlue; }
+    const GrSwizzle& swizzle() const { return fSwizzle; }
     PMConversion  pmConversion() const { return fPMConversion; }
 
     // This function determines whether it is possible to choose PM->UPM and UPM->PM conversions
@@ -61,16 +52,22 @@ public:
 
 private:
     GrConfigConversionEffect(GrTexture*,
-                            bool swapRedAndBlue,
-                            PMConversion pmConversion,
-                            const SkMatrix& matrix);
+                             const GrSwizzle&,
+                             PMConversion pmConversion,
+                             const SkMatrix& matrix);
 
-    virtual bool onIsEqual(const GrEffect&) const SK_OVERRIDE;
+    GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
 
-    bool            fSwapRedAndBlue;
+    void onGetGLSLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
+
+    bool onIsEqual(const GrFragmentProcessor&) const override;
+
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override;
+
+    GrSwizzle       fSwizzle;
     PMConversion    fPMConversion;
 
-    GR_DECLARE_EFFECT_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 
     typedef GrSingleTextureEffect INHERITED;
 };

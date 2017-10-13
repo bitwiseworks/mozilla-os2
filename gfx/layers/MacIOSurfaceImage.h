@@ -25,12 +25,13 @@ public:
   MacIOSurface* GetSurface() { return mSurface; }
 
   gfx::IntSize GetSize() override {
-    return gfx::IntSize(mSurface->GetDevicePixelWidth(), mSurface->GetDevicePixelHeight());
+    return gfx::IntSize::Truncate(mSurface->GetDevicePixelWidth(),
+                                  mSurface->GetDevicePixelHeight());
   }
 
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
 
-  virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
+  virtual TextureClient* GetTextureClient(KnowsCompositor* aForwarder) override;
 
   virtual MacIOSurfaceImage* AsMacIOSurfaceImage() override {
     return this;

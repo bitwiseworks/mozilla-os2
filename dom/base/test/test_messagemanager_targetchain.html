@@ -110,11 +110,12 @@
         { type: "browser", allow: 1, context: { url: principal.URI.spec,
                                                 originAttributes: {
                                                   appId: principal.appId,
-                                                  inBrowser: true }}}
+                                                  inIsolatedMozBrowser: true }}}
       ], () => {
         SpecialPowers.pushPrefEnv({
           set: [
             ["dom.mozBrowserFramesEnabled", true],
+            ["network.disable.ipc.security", true],
             ["dom.ipc.browser_frames.oop_by_default", false],
           ]
         }, runTests);

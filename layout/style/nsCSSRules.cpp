@@ -9,7 +9,7 @@
 
 #include "nsCSSRules.h"
 #include "nsCSSValue.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/css/ImportRule.h"
 #include "mozilla/css/NameSpaceRule.h"
@@ -29,7 +29,7 @@
 #include "nsContentUtils.h"
 #include "nsError.h"
 #include "nsStyleUtil.h"
-#include "mozilla/css/Declaration.h"
+#include "mozilla/DeclarationBlockInlines.h"
 #include "nsCSSParser.h"
 #include "nsDOMClassInfoID.h"
 #include "mozilla/dom/CSSStyleDeclarationBinding.h"
@@ -88,14 +88,6 @@ css::Rule*
 Rule::GetCSSRule()
 {
   return this;
-}
-
-size_t
-Rule::SizeOfCOMArrayElementIncludingThis(css::Rule* aElement,
-                                         MallocSizeOf aMallocSizeOf,
-                                         void* aData)
-{
-  return aElement->SizeOfIncludingThis(aMallocSizeOf);
 }
 
 // -------------------------------
@@ -573,12 +565,15 @@ GroupRule::DeleteRule(uint32_t aIndex)
 /* virtual */ size_t
 GroupRule::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return mRules.SizeOfExcludingThis(Rule::SizeOfCOMArrayElementIncludingThis,
-                                    aMallocSizeOf);
+  size_t n = mRules.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (size_t i = 0; i < mRules.Length(); i++) {
+    n += mRules[i]->SizeOfIncludingThis(aMallocSizeOf);
+  }
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:
   // - mRuleCollection
+  return n;
 }
 
 
@@ -980,8 +975,11 @@ DocumentRule::UseForPresentation(nsPresContext* aPresContext)
   nsIDocument *doc = aPresContext->Document();
   nsIURI *docURI = doc->GetDocumentURI();
   nsAutoCString docURISpec;
-  if (docURI)
-    docURI->GetSpec(docURISpec);
+  if (docURI) {
+    // If GetSpec fails (due to OOM) just skip these URI-specific CSS rules.
+    nsresult rv = docURI->GetSpec(docURISpec);
+    NS_ENSURE_SUCCESS(rv, false);
+  }
 
   for (URL *url = mURLs; url; url = url->next) {
     switch (url->func) {
@@ -1302,6 +1300,13 @@ nsCSSFontFaceStyleDecl::GetPropertyValue(nsCSSFontDesc aFontDescID,
                        nsCSSValue::eNormalized);
     return NS_OK;
 
+  case eCSSFontDesc_Display:
+    NS_ASSERTION(val.GetUnit() == eCSSUnit_Enumerated,
+                 "unknown unit for font-display descriptor");
+    AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(val.GetIntValue(),
+                                       nsCSSProps::kFontDisplayKTable), aResult);
+    return NS_OK;
+
   case eCSSFontDesc_Src:
     nsStyleUtil::AppendSerializedFontSrc(val, aResult);
     return NS_OK;
@@ -1462,7 +1467,7 @@ nsCSSFontFaceStyleDecl::GetParentRule(nsIDOMCSSRule** aParentRule)
 }
 
 NS_IMETHODIMP
-nsCSSFontFaceStyleDecl::GetPropertyValue(const nsCSSProperty aPropID,
+nsCSSFontFaceStyleDecl::GetPropertyValue(const nsCSSPropertyID aPropID,
                                          nsAString& aValue)
 {
   return
@@ -1471,7 +1476,7 @@ nsCSSFontFaceStyleDecl::GetPropertyValue(const nsCSSProperty aPropID,
 }
 
 NS_IMETHODIMP
-nsCSSFontFaceStyleDecl::SetPropertyValue(const nsCSSProperty aPropID,
+nsCSSFontFaceStyleDecl::SetPropertyValue(const nsCSSPropertyID aPropID,
                                          const nsAString& aValue)
 {
   return SetProperty(NS_ConvertUTF8toUTF16(nsCSSProps::GetStringValue(aPropID)),
@@ -1918,7 +1923,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSKeyframeStyleDeclaration)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
 
-css::Declaration*
+DeclarationBlock*
 nsCSSKeyframeStyleDeclaration::GetCSSDeclaration(Operation aOperation)
 {
   if (mRule) {
@@ -1944,10 +1949,10 @@ nsCSSKeyframeStyleDeclaration::GetParentRule(nsIDOMCSSRule **aParent)
 }
 
 nsresult
-nsCSSKeyframeStyleDeclaration::SetCSSDeclaration(css::Declaration* aDecl)
+nsCSSKeyframeStyleDeclaration::SetCSSDeclaration(DeclarationBlock* aDecl)
 {
   MOZ_ASSERT(aDecl, "must be non-null");
-  mRule->ChangeDeclaration(aDecl);
+  mRule->ChangeDeclaration(aDecl->AsGecko());
   return NS_OK;
 }
 
@@ -2008,10 +2013,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 // QueryInterface implementation for nsCSSKeyframeRule
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSKeyframeRule)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozCSSKeyframeRule)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCSSKeyframeRule)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRule)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, mozilla::css::Rule)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozCSSKeyframeRule)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSKeyframeRule)
 NS_INTERFACE_MAP_END
 
 IMPL_STYLE_RULE_INHERIT_GET_DOM_RULE_WEAK(nsCSSKeyframeRule, Rule)
@@ -2216,9 +2221,9 @@ NS_IMPL_RELEASE_INHERITED(nsCSSKeyframesRule, css::GroupRule)
 // QueryInterface implementation for nsCSSKeyframesRule
 NS_INTERFACE_MAP_BEGIN(nsCSSKeyframesRule)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRule)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozCSSKeyframesRule)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCSSKeyframesRule)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, mozilla::css::Rule)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozCSSKeyframesRule)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSKeyframesRule)
 NS_INTERFACE_MAP_END_INHERITING(GroupRule)
 
 #ifdef DEBUG
@@ -2409,7 +2414,7 @@ nsCSSKeyframesRule::DeleteRule(const nsAString& aKey)
 
 NS_IMETHODIMP
 nsCSSKeyframesRule::FindRule(const nsAString& aKey,
-                             nsIDOMMozCSSKeyframeRule** aResult)
+                             nsIDOMCSSKeyframeRule** aResult)
 {
   uint32_t index = FindRuleIndexForKey(aKey);
   if (index == RULE_NOT_FOUND) {
@@ -2465,7 +2470,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSPageStyleDeclaration)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
 
-css::Declaration*
+DeclarationBlock*
 nsCSSPageStyleDeclaration::GetCSSDeclaration(Operation aOperation)
 {
   if (mRule) {
@@ -2491,10 +2496,10 @@ nsCSSPageStyleDeclaration::GetParentRule(nsIDOMCSSRule** aParent)
 }
 
 nsresult
-nsCSSPageStyleDeclaration::SetCSSDeclaration(css::Declaration* aDecl)
+nsCSSPageStyleDeclaration::SetCSSDeclaration(DeclarationBlock* aDecl)
 {
   MOZ_ASSERT(aDecl, "must be non-null");
-  mRule->ChangeDeclaration(aDecl);
+  mRule->ChangeDeclaration(aDecl->AsGecko());
   return NS_OK;
 }
 
@@ -2899,23 +2904,23 @@ nsCSSCounterStyleRule::GetType(uint16_t* aType)
 NS_IMETHODIMP
 nsCSSCounterStyleRule::GetCssText(nsAString& aCssText)
 {
-  aCssText.AssignLiteral(MOZ_UTF16("@counter-style "));
+  aCssText.AssignLiteral(u"@counter-style ");
   nsStyleUtil::AppendEscapedCSSIdent(mName, aCssText);
-  aCssText.AppendLiteral(MOZ_UTF16(" {\n"));
+  aCssText.AppendLiteral(u" {\n");
   for (nsCSSCounterDesc id = nsCSSCounterDesc(0);
        id < eCSSCounterDesc_COUNT;
        id = nsCSSCounterDesc(id + 1)) {
     if (mValues[id].GetUnit() != eCSSUnit_Null) {
       nsAutoString tmp;
       (this->*kGetters[id])(tmp);
-      aCssText.AppendLiteral(MOZ_UTF16("  "));
+      aCssText.AppendLiteral(u"  ");
       AppendASCIItoUTF16(nsCSSProps::GetStringValue(id), aCssText);
-      aCssText.AppendLiteral(MOZ_UTF16(": "));
+      aCssText.AppendLiteral(u": ");
       aCssText.Append(tmp);
-      aCssText.AppendLiteral(MOZ_UTF16(";\n"));
+      aCssText.AppendLiteral(u";\n");
     }
   }
-  aCssText.AppendLiteral(MOZ_UTF16("}"));
+  aCssText.AppendLiteral(u"}");
   return NS_OK;
 }
 
@@ -3087,7 +3092,7 @@ nsCSSCounterStyleRule::GetRange(nsAString& aRange)
 
   switch (value.GetUnit()) {
     case eCSSUnit_Auto:
-      aRange.AssignLiteral(MOZ_UTF16("auto"));
+      aRange.AssignLiteral(u"auto");
       break;
 
     case eCSSUnit_PairList:
@@ -3134,16 +3139,16 @@ nsCSSCounterStyleRule::GetSpeakAs(nsAString& aSpeakAs)
     case eCSSUnit_Enumerated:
       switch (value.GetIntValue()) {
         case NS_STYLE_COUNTER_SPEAKAS_BULLETS:
-          aSpeakAs.AssignLiteral(MOZ_UTF16("bullets"));
+          aSpeakAs.AssignLiteral(u"bullets");
           break;
         case NS_STYLE_COUNTER_SPEAKAS_NUMBERS:
-          aSpeakAs.AssignLiteral(MOZ_UTF16("numbers"));
+          aSpeakAs.AssignLiteral(u"numbers");
           break;
         case NS_STYLE_COUNTER_SPEAKAS_WORDS:
-          aSpeakAs.AssignLiteral(MOZ_UTF16("words"));
+          aSpeakAs.AssignLiteral(u"words");
           break;
         case NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT:
-          aSpeakAs.AssignLiteral(MOZ_UTF16("spell-out"));
+          aSpeakAs.AssignLiteral(u"spell-out");
           break;
         default:
           NS_NOTREACHED("Unknown speech synthesis");

@@ -25,8 +25,9 @@
 #include "js/Utility.h"
 #include "js/Vector.h"
 #include "vm/Debugger.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/GlobalObject.h"
-#include "vm/ScopeObject.h"
+#include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
 #include "vm/Symbol.h"
@@ -34,9 +35,10 @@
 #include "jsobjinlines.h"
 #include "vm/Debugger-inl.h"
 
+using namespace js;
+
 using mozilla::Some;
 using mozilla::RangedPtr;
-using mozilla::UniquePtr;
 using JS::DispatchTyped;
 using JS::HandleValue;
 using JS::Value;
@@ -54,8 +56,6 @@ using JS::ubi::TracerConcreteWithCompartment;
 
 struct CopyToBufferMatcher
 {
-    using ReturnType = size_t;
-
     RangedPtr<char16_t> destination;
     size_t              maxLength;
 
@@ -107,8 +107,6 @@ JS::ubi::AtomOrTwoByteChars::copyToBuffer(RangedPtr<char16_t> destination, size_
 
 struct LengthMatcher
 {
-    using ReturnType = size_t;
-
     size_t
     match(JSAtom* atom)
     {
@@ -162,7 +160,7 @@ JS::Zone* Concrete<void>::zone() const             { MOZ_CRASH("null ubi::Node")
 JSCompartment* Concrete<void>::compartment() const { MOZ_CRASH("null ubi::Node"); }
 
 UniquePtr<EdgeRange>
-Concrete<void>::edges(JSRuntime*, bool) const {
+Concrete<void>::edges(JSContext*, bool) const {
     MOZ_CRASH("null ubi::Node");
 }
 
@@ -194,7 +192,7 @@ Node::exposeToJS() const
 
     if (is<JSObject>()) {
         JSObject& obj = *as<JSObject>();
-        if (obj.is<js::ScopeObject>()) {
+        if (obj.is<js::EnvironmentObject>()) {
             v.setUndefined();
         } else if (obj.is<JSFunction>() && js::IsInternalFunctionObject(obj)) {
             v.setUndefined();
@@ -208,6 +206,8 @@ Node::exposeToJS() const
     } else {
         v.setUndefined();
     }
+
+    ExposeValueToActiveJS(v);
 
     return v;
 }
@@ -307,18 +307,36 @@ TracerConcrete<Referent>::zone() const
     return get().zoneFromAnyThread();
 }
 
+template JS::Zone* TracerConcrete<JSScript>::zone() const;
+template JS::Zone* TracerConcrete<js::LazyScript>::zone() const;
+template JS::Zone* TracerConcrete<js::Shape>::zone() const;
+template JS::Zone* TracerConcrete<js::BaseShape>::zone() const;
+template JS::Zone* TracerConcrete<js::ObjectGroup>::zone() const;
+template JS::Zone* TracerConcrete<js::Scope>::zone() const;
+template JS::Zone* TracerConcrete<JS::Symbol>::zone() const;
+template JS::Zone* TracerConcrete<JSString>::zone() const;
+
 template<typename Referent>
 UniquePtr<EdgeRange>
-TracerConcrete<Referent>::edges(JSRuntime* rt, bool wantNames) const {
+TracerConcrete<Referent>::edges(JSContext* cx, bool wantNames) const {
     UniquePtr<SimpleEdgeRange, JS::DeletePolicy<SimpleEdgeRange>> range(js_new<SimpleEdgeRange>());
     if (!range)
         return nullptr;
 
-    if (!range->init(rt, ptr, JS::MapTypeToTraceKind<Referent>::kind, wantNames))
+    if (!range->init(cx, ptr, JS::MapTypeToTraceKind<Referent>::kind, wantNames))
         return nullptr;
 
     return UniquePtr<EdgeRange>(range.release());
 }
+
+template UniquePtr<EdgeRange> TracerConcrete<JSScript>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::LazyScript>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::Shape>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::BaseShape>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::ObjectGroup>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::Scope>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<JS::Symbol>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<JSString>::edges(JSContext* cx, bool wantNames) const;
 
 template<typename Referent>
 JSCompartment*
@@ -326,6 +344,8 @@ TracerConcreteWithCompartment<Referent>::compartment() const
 {
     return TracerBase::get().compartment();
 }
+
+template JSCompartment* TracerConcreteWithCompartment<JSScript>::compartment() const;
 
 bool
 Concrete<JSObject>::hasAllocationStack() const
@@ -347,8 +367,7 @@ Concrete<JSObject>::jsObjectClassName() const
 }
 
 bool
-Concrete<JSObject>::jsObjectConstructorName(JSContext* cx,
-                                            UniquePtr<char16_t[], JS::FreePolicy>& outName) const
+Concrete<JSObject>::jsObjectConstructorName(JSContext* cx, UniqueTwoByteChars& outName) const
 {
     JSAtom* name = Concrete::get().maybeConstructorDisplayAtom();
     if (!name) {
@@ -371,44 +390,21 @@ Concrete<JSObject>::jsObjectConstructorName(JSContext* cx,
     return true;
 }
 
-template<> const char16_t TracerConcrete<JS::Symbol>::concreteTypeName[] =
-    MOZ_UTF16("JS::Symbol");
-template<> const char16_t TracerConcrete<JSScript>::concreteTypeName[] =
-    MOZ_UTF16("JSScript");
-template<> const char16_t TracerConcrete<js::LazyScript>::concreteTypeName[] =
-    MOZ_UTF16("js::LazyScript");
-template<> const char16_t TracerConcrete<js::jit::JitCode>::concreteTypeName[] =
-    MOZ_UTF16("js::jit::JitCode");
-template<> const char16_t TracerConcrete<js::Shape>::concreteTypeName[] =
-    MOZ_UTF16("js::Shape");
-template<> const char16_t TracerConcrete<js::BaseShape>::concreteTypeName[] =
-    MOZ_UTF16("js::BaseShape");
-template<> const char16_t TracerConcrete<js::ObjectGroup>::concreteTypeName[] =
-    MOZ_UTF16("js::ObjectGroup");
-
-
-// Instantiate all the TracerConcrete and templates here, where
-// we have the member functions' definitions in scope.
-namespace JS {
-namespace ubi {
-template class TracerConcreteWithCompartment<JSObject>;
-template class TracerConcrete<JSString>;
-template class TracerConcrete<JS::Symbol>;
-template class TracerConcreteWithCompartment<JSScript>;
-template class TracerConcrete<js::LazyScript>;
-template class TracerConcrete<js::jit::JitCode>;
-template class TracerConcreteWithCompartment<js::Shape>;
-template class TracerConcreteWithCompartment<js::BaseShape>;
-template class TracerConcrete<js::ObjectGroup>;
-} // namespace ubi
-} // namespace JS
+const char16_t Concrete<JS::Symbol>::concreteTypeName[] = u"JS::Symbol";
+const char16_t Concrete<JSScript>::concreteTypeName[] = u"JSScript";
+const char16_t Concrete<js::LazyScript>::concreteTypeName[] = u"js::LazyScript";
+const char16_t Concrete<js::jit::JitCode>::concreteTypeName[] = u"js::jit::JitCode";
+const char16_t Concrete<js::Shape>::concreteTypeName[] = u"js::Shape";
+const char16_t Concrete<js::BaseShape>::concreteTypeName[] = u"js::BaseShape";
+const char16_t Concrete<js::ObjectGroup>::concreteTypeName[] = u"js::ObjectGroup";
+const char16_t Concrete<js::Scope>::concreteTypeName[] = u"js::Scope";
 
 namespace JS {
 namespace ubi {
 
-RootList::RootList(JSRuntime* rt, Maybe<AutoCheckCannotGC>& noGC, bool wantNames /* = false */)
+RootList::RootList(JSContext* cx, Maybe<AutoCheckCannotGC>& noGC, bool wantNames /* = false */)
   : noGC(noGC),
-    rt(rt),
+    cx(cx),
     edges(),
     wantNames(wantNames)
 { }
@@ -417,37 +413,51 @@ RootList::RootList(JSRuntime* rt, Maybe<AutoCheckCannotGC>& noGC, bool wantNames
 bool
 RootList::init()
 {
-    EdgeVectorTracer tracer(rt, &edges, wantNames);
-    JS_TraceRuntime(&tracer);
+    EdgeVectorTracer tracer(cx, &edges, wantNames);
+    js::TraceRuntime(&tracer);
     if (!tracer.okay)
         return false;
-    noGC.emplace(rt);
+    noGC.emplace(cx);
     return true;
 }
 
 bool
-RootList::init(ZoneSet& debuggees)
+RootList::init(CompartmentSet& debuggees)
 {
     EdgeVector allRootEdges;
-    EdgeVectorTracer tracer(rt, &allRootEdges, wantNames);
+    EdgeVectorTracer tracer(cx, &allRootEdges, wantNames);
 
-    JS_TraceRuntime(&tracer);
+    ZoneSet debuggeeZones;
+    if (!debuggeeZones.init())
+        return false;
+    for (auto range = debuggees.all(); !range.empty(); range.popFront()) {
+        if (!debuggeeZones.put(range.front()->zone()))
+            return false;
+    }
+
+    js::TraceRuntime(&tracer);
     if (!tracer.okay)
         return false;
-    JS_TraceIncomingCCWs(&tracer, debuggees);
+    TraceIncomingCCWs(&tracer, debuggees);
     if (!tracer.okay)
         return false;
 
     for (EdgeVector::Range r = allRootEdges.all(); !r.empty(); r.popFront()) {
         Edge& edge = r.front();
-        Zone* zone = edge.referent.zone();
-        if (zone && !debuggees.has(zone))
+
+        JSCompartment* compartment = edge.referent.compartment();
+        if (compartment && !debuggees.has(compartment))
             continue;
+
+        Zone* zone = edge.referent.zone();
+        if (zone && !debuggeeZones.has(zone))
+            continue;
+
         if (!edges.append(mozilla::Move(edge)))
             return false;
     }
 
-    noGC.emplace(rt);
+    noGC.emplace(cx);
     return true;
 }
 
@@ -457,22 +467,22 @@ RootList::init(HandleObject debuggees)
     MOZ_ASSERT(debuggees && JS::dbg::IsDebugger(*debuggees));
     js::Debugger* dbg = js::Debugger::fromJSObject(debuggees.get());
 
-    ZoneSet debuggeeZones;
-    if (!debuggeeZones.init())
+    CompartmentSet debuggeeCompartments;
+    if (!debuggeeCompartments.init())
         return false;
 
     for (js::WeakGlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
-        if (!debuggeeZones.put(r.front()->zone()))
+        if (!debuggeeCompartments.put(r.front()->compartment()))
             return false;
     }
 
-    if (!init(debuggeeZones))
+    if (!init(debuggeeCompartments))
         return false;
 
     // Ensure that each of our debuggee globals are in the root list.
     for (js::WeakGlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
         if (!addRoot(JS::ubi::Node(static_cast<JSObject*>(r.front())),
-                     MOZ_UTF16("debuggee global")))
+                     u"debuggee global"))
         {
             return false;
         }
@@ -487,7 +497,7 @@ RootList::addRoot(Node node, const char16_t* edgeName)
     MOZ_ASSERT(noGC.isSome());
     MOZ_ASSERT_IF(wantNames, edgeName);
 
-    UniquePtr<char16_t[], JS::FreePolicy> name;
+    UniqueTwoByteChars name;
     if (edgeName) {
         name = js::DuplicateString(edgeName);
         if (!name)
@@ -497,10 +507,10 @@ RootList::addRoot(Node node, const char16_t* edgeName)
     return edges.append(mozilla::Move(Edge(name.release(), node)));
 }
 
-const char16_t Concrete<RootList>::concreteTypeName[] = MOZ_UTF16("RootList");
+const char16_t Concrete<RootList>::concreteTypeName[] = u"JS::ubi::RootList";
 
 UniquePtr<EdgeRange>
-Concrete<RootList>::edges(JSRuntime* rt, bool wantNames) const {
+Concrete<RootList>::edges(JSContext* cx, bool wantNames) const {
     MOZ_ASSERT_IF(wantNames, get().wantNames);
     return UniquePtr<EdgeRange>(js_new<PreComputedEdgeRange>(get().edges));
 }

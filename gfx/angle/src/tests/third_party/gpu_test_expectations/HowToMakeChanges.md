@@ -1,4 +1,4 @@
-Because the ```gpu_test_expectations``` directory is based on parts of Chromium's ```gpu/config``
+Because the ```gpu_test_expectations``` directory is based on parts of Chromium's ```gpu/config```
 directory, we want to keep a patch of the changes added to make it compile with ANGLE. This
 will allow us to merge Chromium changes easily in our ```gpu_test_expectations```.
 
@@ -15,8 +15,8 @@ How to update from Chromium:
 
  * ```git apply -R angle-mods.patch```, ```git add . -u```, ```git commit```
  * Copy over Chromium files, ```git add . -u```, ```git commit```
- * ```git revert HEAD~2```
+ * ```git revert HEAD~```
  * ```rm angle-mods.patch```
- * ```git diff HEAD~1 (`)ls(`) > angle-mods.patch```,```git add angle-mods.patch```, ```git commit --amend```
+ * ```git diff HEAD~ (`)ls(`) > angle-mods.patch```,```git add angle-mods.patch```, ```git commit --amend```
  * ```git rebase -i``` to squash the three patches into one.
 

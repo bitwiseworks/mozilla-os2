@@ -10,6 +10,7 @@
 #include "nsSMILAnimationController.h"
 #include "nsSMILAnimationFunction.h"
 #include "nsContentUtils.h"
+#include "nsIContentInlines.h"
 #include "nsIURI.h"
 #include "prtime.h"
 
@@ -80,14 +81,15 @@ SVGAnimationElement::HasAnimAttr(nsIAtom* aAttName) const
 Element*
 SVGAnimationElement::GetTargetElementContent()
 {
-  if (HasAttr(kNameSpaceID_XLink, nsGkAtoms::href)) {
+  if (HasAttr(kNameSpaceID_XLink, nsGkAtoms::href) ||
+      HasAttr(kNameSpaceID_None, nsGkAtoms::href)) {
     return mHrefTarget.get();
   }
   MOZ_ASSERT(!mHrefTarget.get(),
-             "We shouldn't have an xlink:href target "
-             "if we don't have an xlink:href attribute");
+             "We shouldn't have a href target "
+             "if we don't have an xlink:href or href attribute");
 
-  // No "xlink:href" attribute --> I should target my parent.
+  // No "href" or "xlink:href" attribute --> I should target my parent.
   nsIContent* parent = GetFlattenedTreeParent();
   return parent && parent->IsElement() ? parent->AsElement() : nullptr;
 }
@@ -215,8 +217,10 @@ SVGAnimationElement::BindToTree(nsIDocument* aDocument,
     if (controller) {
       controller->RegisterAnimationElement(this);
     }
-    const nsAttrValue* href = mAttrsAndChildren.GetAttr(nsGkAtoms::href,
-                                                        kNameSpaceID_XLink);
+    const nsAttrValue* href =
+      HasAttr(kNameSpaceID_None, nsGkAtoms::href)
+      ? mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_None)
+      : mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
     if (href) {
       nsAutoString hrefStr;
       href->ToString(hrefStr);
@@ -308,13 +312,34 @@ SVGAnimationElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     }
   }
 
-  if (aNamespaceID != kNameSpaceID_XLink || aName != nsGkAtoms::href)
+  if (!((aNamespaceID == kNameSpaceID_None ||
+         aNamespaceID == kNameSpaceID_XLink) &&
+        aName == nsGkAtoms::href)) {
     return rv;
+  }
 
   if (!aValue) {
-    mHrefTarget.Unlink();
-    AnimationTargetChanged();
-  } else if (IsInDoc()) {
+    if (aNamespaceID == kNameSpaceID_None) {
+      mHrefTarget.Unlink();
+      AnimationTargetChanged();
+
+      // After unsetting href, we may still have xlink:href, so we
+      // should try to add it back.
+      const nsAttrValue* xlinkHref =
+        mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
+      if (xlinkHref) {
+        UpdateHrefTarget(this, xlinkHref->GetStringValue());
+      }
+    } else if (!HasAttr(kNameSpaceID_None, nsGkAtoms::href)) {
+      mHrefTarget.Unlink();
+      AnimationTargetChanged();
+    } // else: we unset xlink:href, but we still have href attribute, so keep
+      // mHrefTarget linking to href.
+  } else if (IsInUncomposedDoc() &&
+             !(aNamespaceID == kNameSpaceID_XLink &&
+               HasAttr(kNameSpaceID_None, nsGkAtoms::href))) {
+    // Note: "href" takes priority over xlink:href. So if "xlink:href" is being
+    // set here, we only let that update our target if "href" is *unset*.
     MOZ_ASSERT(aValue->Type() == nsAttrValue::eString,
                "Expected href attribute to be string type");
     UpdateHrefTarget(this, aValue->GetStringValue());
@@ -349,6 +374,15 @@ SVGAnimationElement::IsNodeOfType(uint32_t aFlags) const
 }
 
 //----------------------------------------------------------------------
+// SVGTests methods
+
+bool
+SVGAnimationElement::IsInChromeDoc() const
+{
+  return nsContentUtils::IsChromeDoc(OwnerDoc());
+}
+
+//----------------------------------------------------------------------
 // SVG utility methods
 
 void
@@ -372,7 +406,7 @@ SVGAnimationElement::ActivateByHyperlink()
     // else, silently fail. We mustn't be part of an SVG document fragment that
     // is attached to the document tree so there's nothing we can do here
   } else {
-    ErrorResult rv;
+    IgnoredErrorResult rv;
     BeginElement(rv);
   }
 }

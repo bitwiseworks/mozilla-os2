@@ -50,7 +50,7 @@ public:
   nsresult CompilePrototypeMembers(nsXBLPrototypeBinding* aBinding);
 
   bool LookupMember(JSContext* aCx, nsString& aName, JS::Handle<jsid> aNameAsId,
-                    JS::MutableHandle<JSPropertyDescriptor> aDesc,
+                    JS::MutableHandle<JS::PropertyDescriptor> aDesc,
                     JS::Handle<JSObject*> aClassObject);
 
   void SetMemberList(nsXBLProtoImplMember* aMemberList)
@@ -117,7 +117,7 @@ public:
   nsXBLProtoImplAnonymousMethod* mDestructor;  // Our class destructor.
 };
 
-nsresult
+void
 NS_NewXBLProtoImpl(nsXBLPrototypeBinding* aBinding,
                    const char16_t* aClassName,
                    nsXBLProtoImpl** aResult);

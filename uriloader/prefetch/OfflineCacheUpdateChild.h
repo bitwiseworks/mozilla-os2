@@ -18,6 +18,8 @@
 #include "nsString.h"
 #include "nsWeakReference.h"
 
+class nsPIDOMWindowInner;
+
 namespace mozilla {
 namespace docshell {
 
@@ -41,7 +43,7 @@ public:
     RecvFinish(const bool& succeeded,
                const bool& isUpgrade) override;
 
-    explicit OfflineCacheUpdateChild(nsIDOMWindow* aWindow);
+    explicit OfflineCacheUpdateChild(nsPIDOMWindowInner* aWindow);
 
     void SetDocument(nsIDOMDocument *aDocument);
 
@@ -72,9 +74,6 @@ private:
 
     nsCOMPtr<nsIObserverService> mObserverService;
 
-    uint32_t mAppID;
-    bool mInBrowser;
-
     /* Clients watching this update for changes */
     nsCOMArray<nsIWeakReference> mWeakObservers;
     nsCOMArray<nsIOfflineCacheUpdateObserver> mObservers;
@@ -84,7 +83,7 @@ private:
 
     /* Keep reference to the window that owns this update to call the
        parent offline cache update construcor */
-    nsCOMPtr<nsIDOMWindow> mWindow;
+    nsCOMPtr<nsPIDOMWindowInner> mWindow;
 
     uint64_t mByteProgress;
 };

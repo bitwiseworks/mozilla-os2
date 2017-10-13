@@ -106,6 +106,19 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
          "type": "int",
          "help": "Specify the total number of chunks of locales"
          }
+    ], [
+        ["--disable-mock"],
+        {"dest": "disable_mock",
+         "action": "store_true",
+         "help": "do not run under mock despite what gecko-config says",
+        }
+    ], [
+        ['--revision', ],
+        {"action": "store",
+         "dest": "revision",
+         "type": "string",
+         "help": "Override the gecko revision to use (otherwise use buildbot supplied"
+                 " value, or en-US revision) "}
     ]]
 
     def __init__(self, require_config_file=True):
@@ -113,9 +126,11 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
             'all_actions': [
                 "clobber",
                 "pull",
+                "clone-locales",
                 "list-locales",
                 "setup",
                 "repack",
+                "validate-repacks-signed",
                 "upload-repacks",
                 "create-virtualenv",
                 "taskcluster-upload",
@@ -171,6 +186,9 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         self.repack_env = repack_env
         return self.repack_env
 
+    def query_l10n_env(self):
+        return self.query_env()
+
     def query_upload_env(self):
         if self.upload_env:
             return self.upload_env
@@ -183,16 +201,17 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
 
         # Android l10n builds use a non-standard location for l10n files.  Other
         # builds go to 'mozilla-central-l10n', while android builds add part of
-        # the platform name as well, like 'mozilla-central-android-api-11-l10n'.
+        # the platform name as well, like 'mozilla-central-android-api-15-l10n'.
         # So we override the branch with something that contains the platform
         # name.
         replace_dict['branch'] = c['upload_branch']
+        replace_dict['post_upload_extra'] = ' '.join(c.get('post_upload_extra', []))
 
         upload_env = self.query_env(partial_env=c.get("upload_env"),
                                     replace_dict=replace_dict)
         if 'MOZ_SIGNING_SERVERS' in os.environ:
             upload_env['MOZ_SIGN_CMD'] = subprocess.list2cmdline(self.query_moz_sign_cmd())
-        if self.query_is_release():
+        if self.query_is_release_or_beta():
             upload_env['MOZ_PKG_VERSION'] = '%(version)s' % replace_dict
         self.upload_env = upload_env
         return self.upload_env
@@ -352,6 +371,8 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
             repos = c['repos']
         self.vcs_checkout_repos(repos, parent_dir=dirs['abs_work_dir'],
                                 tag_override=c.get('tag_override'))
+
+    def clone_locales(self):
         self.pull_locale_source()
 
     # list_locales() is defined in LocalesMixin.
@@ -366,18 +387,23 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                               env=env,
                               error_list=MakefileErrorList):
             self.fatal("Configure failed!")
-        for make_dir in c.get('make_dirs', []):
-            self.run_command_m([make, 'export'],
-                               cwd=os.path.join(dirs['abs_objdir'], make_dir),
-                               env=env,
-                               error_list=MakefileErrorList,
-                               halt_on_failure=True)
-            if buildid:
-                self.run_command_m([make, 'export',
-                                    'MOZ_BUILD_DATE=%s' % str(buildid)],
-                                   cwd=os.path.join(dirs['abs_objdir'], make_dir),
-                                   env=env,
-                                   error_list=MakefileErrorList)
+
+        # Run 'make export' in objdir/config to get nsinstall
+        self.run_command_m([make, 'export'],
+                           cwd=os.path.join(dirs['abs_objdir'], 'config'),
+                           env=env,
+                           error_list=MakefileErrorList,
+                           halt_on_failure=True)
+
+        # Run 'make buildid.h' in objdir/ to get the buildid.h file
+        cmd = [make, 'buildid.h']
+        if buildid:
+            cmd.append('MOZ_BUILD_DATE=%s' % str(buildid))
+        self.run_command_m(cmd,
+                           cwd=dirs['abs_objdir'],
+                           env=env,
+                           error_list=MakefileErrorList,
+                           halt_on_failure=True)
 
     def setup(self):
         c = self.config
@@ -387,7 +413,6 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                       mozconfig_path)
         # TODO stop using cat
         cat = self.query_exe("cat")
-        hg = self.query_exe("hg")
         make = self.query_exe("make")
         self.run_command_m([cat, mozconfig_path])
         env = self.query_repack_env()
@@ -407,29 +432,31 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                            env=env,
                            error_list=MakefileErrorList,
                            halt_on_failure=True)
-        revision = self.query_revision()
-        if not revision:
-            self.fatal("Can't determine revision!")
-        # TODO do this through VCSMixin instead of hardcoding hg
-        self.run_command_m([hg, "update", "-r", revision],
-                           cwd=dirs["abs_mozilla_dir"],
-                           env=env,
-                           error_list=BaseErrorList,
-                           halt_on_failure=True)
-        self.set_buildbot_property('revision', revision, write_to_file=True)
-        # Configure again since the hg update may have invalidated it.
-        buildid = self.query_buildid()
-        self._setup_configure(buildid=buildid)
+
+        # on try we want the source we already have, otherwise update to the
+        # same as the en-US binary
+        if self.config.get("update_gecko_source_to_enUS", True):
+            revision = self.query_revision()
+            if not revision:
+                self.fatal("Can't determine revision!")
+            hg = self.query_exe("hg")
+            # TODO do this through VCSMixin instead of hardcoding hg
+            self.run_command_m([hg, "update", "-r", revision],
+                               cwd=dirs["abs_mozilla_dir"],
+                               env=env,
+                               error_list=BaseErrorList,
+                               halt_on_failure=True)
+            self.set_buildbot_property('revision', revision, write_to_file=True)
+            # Configure again since the hg update may have invalidated it.
+            buildid = self.query_buildid()
+            self._setup_configure(buildid=buildid)
 
     def repack(self):
         # TODO per-locale logs and reporting.
-        c = self.config
         dirs = self.query_abs_dirs()
         locales = self.query_locales()
         make = self.query_exe("make")
         repack_env = self.query_repack_env()
-        base_package_name = self.query_base_package_name()
-        base_package_dir = os.path.join(dirs['abs_objdir'], 'dist')
         success_count = total_count = 0
         for locale in locales:
             total_count += 1
@@ -446,6 +473,20 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                                   halt_on_failure=False):
                 self.add_failure(locale, message="%s failed in make installers-%s!" % (locale, locale))
                 continue
+            success_count += 1
+        self.summarize_success_count(success_count, total_count,
+                                     message="Repacked %d of %d binaries successfully.")
+
+    def validate_repacks_signed(self):
+        c = self.config
+        dirs = self.query_abs_dirs()
+        locales = self.query_locales()
+        base_package_name = self.query_base_package_name()
+        base_package_dir = os.path.join(dirs['abs_objdir'], 'dist')
+        repack_env = self.query_repack_env()
+        success_count = total_count = 0
+        for locale in locales:
+            total_count += 1
             signed_path = os.path.join(base_package_dir,
                                        base_package_name % {'locale': locale})
             # We need to wrap what this function does with mock, since
@@ -464,7 +505,7 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                 continue
             success_count += 1
         self.summarize_success_count(success_count, total_count,
-                                     message="Repacked %d of %d binaries successfully.")
+                                     message="Validated signatures on %d of %d binaries successfully.")
 
     def taskcluster_upload(self):
         auth = os.path.join(os.getcwd(), self.config['taskcluster_credentials_file'])
@@ -486,12 +527,12 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         branch = self.config['branch']
         revision = self.query_revision()
         repo = self.query_l10n_repo()
-        pushinfo = self.vcs_query_pushinfo(repo, revision, vcs='hgtool')
+        pushinfo = self.vcs_query_pushinfo(repo, revision, vcs='hg')
         pushdate = time.strftime('%Y%m%d%H%M%S', time.gmtime(pushinfo.pushdate))
         routes_json = os.path.join(self.query_abs_dirs()['abs_mozilla_dir'],
-                                   'testing/taskcluster/routes.json')
-        with open(routes_json) as f:
-            contents = json.load(f)
+                                   'testing/mozharness/configs/routes.json')
+        with open(routes_json) as routes_file:
+            contents = json.load(routes_file)
             templates = contents['l10n']
 
         for locale in locales:
@@ -553,7 +594,7 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                 continue
             total_count += 1
             if c.get('base_post_upload_cmd'):
-                upload_env['POST_UPLOAD_CMD'] = c['base_post_upload_cmd'] % {'version': version, 'locale': locale, 'buildnum': str(buildnum)}
+                upload_env['POST_UPLOAD_CMD'] = c['base_post_upload_cmd'] % {'version': version, 'locale': locale, 'buildnum': str(buildnum), 'post_upload_extra': ' '.join(c.get('post_upload_extra', []))}
             output = self.get_output_from_command_m(
                 # Ugly hack to avoid |make upload| stderr from showing up
                 # as get_output_from_command errors
@@ -570,20 +611,14 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                 continue
             package_name = base_package_name % {'locale': locale}
             r = re.compile("(http.*%s)" % package_name)
-            success = False
             for line in output.splitlines():
                 m = r.match(line)
                 if m:
                     self.upload_urls[locale] = m.groups()[0]
                     self.info("Found upload url %s" % self.upload_urls[locale])
-                    success = True
-            if not success:
-                self.add_failure(locale, message="Failed to detect %s url in make upload!" % (locale))
-                print output
-                continue
             success_count += 1
         self.summarize_success_count(success_count, total_count,
-                                     message="Uploaded %d of %d binaries successfully.")
+                                     message="Make Upload for %d of %d locales successful.")
 
     def checkout_tools(self):
         dirs = self.query_abs_dirs()
@@ -592,7 +627,8 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         self.info("Checking out tools")
         repos = [{
             'repo': self.config['tools_repo'],
-            'vcs': "hg",  # May not have hgtool yet
+            'vcs': "hg",
+            'branch': "default",
             'dest': dirs['abs_tools_dir'],
         }]
         rev = self.vcs_checkout(**repos[0])
@@ -613,13 +649,13 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
 
         return os.path.join(apkdir, apks[0])
 
-    def query_is_release(self):
+    def query_is_release_or_beta(self):
 
-        return bool(self.config.get("is_release"))
+        return bool(self.config.get("is_release_or_beta"))
 
     def submit_to_balrog(self):
 
-        if not self.query_is_nightly() and not self.query_is_release():
+        if not self.query_is_nightly() and not self.query_is_release_or_beta():
             self.info("Not a nightly or release build, skipping balrog submission.")
             return
 
@@ -631,6 +667,16 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
 
         dirs = self.query_abs_dirs()
         locales = self.query_locales()
+        balrogReady = True
+        for locale in locales:
+            apk_url = self.query_upload_url(locale)
+            if not apk_url:
+                self.add_failure(locale, message="Failed to detect %s url in make upload!" % (locale))
+                balrogReady = False
+                continue
+        if not balrogReady:
+            return self.fatal(message="Not all repacks successful, abort without submitting to balrog")
+
         for locale in locales:
             apkfile = self.query_apkfile_path(locale)
             apk_url = self.query_upload_url(locale)

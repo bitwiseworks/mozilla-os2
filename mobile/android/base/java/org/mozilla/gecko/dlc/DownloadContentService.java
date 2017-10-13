@@ -7,10 +7,9 @@ package org.mozilla.gecko.dlc;
 
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
-import org.mozilla.gecko.dlc.DownloadContentHelper;
 import org.mozilla.gecko.dlc.catalog.DownloadContent;
 import org.mozilla.gecko.dlc.catalog.DownloadContentCatalog;
+import org.mozilla.gecko.util.HardwareUtils;
 
 import android.app.IntentService;
 import android.content.ComponentName;
@@ -18,30 +17,63 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
-import ch.boye.httpclientandroidlib.client.HttpClient;
-
-import java.io.File;
-
 /**
  * Service to handle downloadable content that did not ship with the APK.
  */
 public class DownloadContentService extends IntentService {
     private static final String LOGTAG = "GeckoDLCService";
 
+    /**
+     * Study: Scan the catalog for "new" content available for download.
+     */
+    private static final String ACTION_STUDY_CATALOG = AppConstants.ANDROID_PACKAGE_NAME + ".DLC.STUDY";
+
+    /**
+     * Verify: Validate downloaded content. Does it still exist and does it have the correct checksum?
+     */
+    private static final String ACTION_VERIFY_CONTENT = AppConstants.ANDROID_PACKAGE_NAME + ".DLC.VERIFY";
+
+    /**
+     * Download content that has been scheduled during "study" or "verify".
+     */
+    private static final String ACTION_DOWNLOAD_CONTENT = AppConstants.ANDROID_PACKAGE_NAME + ".DLC.DOWNLOAD";
+
+    /**
+     * Sync: Synchronize catalog from a Kinto instance.
+     */
+    private static final String ACTION_SYNCHRONIZE_CATALOG = AppConstants.ANDROID_PACKAGE_NAME + ".DLC.SYNC";
+
+    /**
+     * CleanupAction: Remove content that is no longer needed (e.g. Removed from the catalog after a sync).
+     */
+    private static final String ACTION_CLEANUP_FILES = AppConstants.ANDROID_PACKAGE_NAME + ".DLC.CLEANUP";
+
     public static void startStudy(Context context) {
-        Intent intent = new Intent(DownloadContentHelper.ACTION_STUDY_CATALOG);
+        Intent intent = new Intent(ACTION_STUDY_CATALOG);
         intent.setComponent(new ComponentName(context, DownloadContentService.class));
         context.startService(intent);
     }
 
     public static void startVerification(Context context) {
-        Intent intent = new Intent(DownloadContentHelper.ACTION_VERIFY_CONTENT);
+        Intent intent = new Intent(ACTION_VERIFY_CONTENT);
         intent.setComponent(new ComponentName(context, DownloadContentService.class));
         context.startService(intent);
     }
 
     public static void startDownloads(Context context) {
-        Intent intent = new Intent(DownloadContentHelper.ACTION_DOWNLOAD_CONTENT);
+        Intent intent = new Intent(ACTION_DOWNLOAD_CONTENT);
+        intent.setComponent(new ComponentName(context, DownloadContentService.class));
+        context.startService(intent);
+    }
+
+    public static void startSync(Context context) {
+        Intent intent = new Intent(ACTION_SYNCHRONIZE_CATALOG);
+        intent.setComponent(new ComponentName(context, DownloadContentService.class));
+        context.startService(intent);
+    }
+
+    public static void startCleanup(Context context) {
+        Intent intent = new Intent(ACTION_CLEANUP_FILES);
         intent.setComponent(new ComponentName(context, DownloadContentService.class));
         context.startService(intent);
     }
@@ -65,160 +97,48 @@ public class DownloadContentService extends IntentService {
             return;
         }
 
+        if (!HardwareUtils.isSupportedSystem()) {
+            // This service is running very early before checks in BrowserApp can prevent us from running.
+            Log.w(LOGTAG, "System is not supported. Stop.");
+            return;
+        }
+
         if (intent == null) {
             return;
         }
 
+        final BaseAction action;
+
         switch (intent.getAction()) {
-            case DownloadContentHelper.ACTION_STUDY_CATALOG:
-                studyCatalog();
+            case ACTION_STUDY_CATALOG:
+                action = new StudyAction();
                 break;
 
-            case DownloadContentHelper.ACTION_DOWNLOAD_CONTENT:
-                downloadContent();
+            case ACTION_DOWNLOAD_CONTENT:
+                action = new DownloadAction(new DownloadAction.Callback() {
+                    @Override
+                    public void onContentDownloaded(DownloadContent content) {
+                        if (content.isFont()) {
+                            GeckoAppShell.notifyObservers("Fonts:Reload", "");
+                        }
+                    }
+                });
                 break;
 
-            case DownloadContentHelper.ACTION_VERIFY_CONTENT:
-                verifyCatalog();
+            case ACTION_VERIFY_CONTENT:
+                action = new VerifyAction();
+                break;
+
+            case ACTION_SYNCHRONIZE_CATALOG:
+                action = new SyncAction();
                 break;
 
             default:
                 Log.e(LOGTAG, "Unknown action: " + intent.getAction());
+                return;
         }
 
+        action.perform(this, catalog);
         catalog.persistChanges();
-    }
-
-    /**
-     * Study: Scan the catalog for "new" content available for download.
-     */
-    private void studyCatalog() {
-        Log.d(LOGTAG, "Studying catalog..");
-
-        for (DownloadContent content : catalog.getContentWithoutState()) {
-            if (content.isAssetArchive() && content.isFont()) {
-                catalog.scheduleDownload(content);
-
-                Log.d(LOGTAG, "Scheduled download: " + content);
-            }
-        }
-
-        if (catalog.hasScheduledDownloads()) {
-            startDownloads(this);
-        }
-
-        Log.v(LOGTAG, "Done");
-    }
-
-    /**
-     * Verify: Validate downloaded content. Does it still exist and does it have the correct checksum?
-     */
-    private void verifyCatalog() {
-        Log.d(LOGTAG, "Verifying catalog..");
-
-        for (DownloadContent content : catalog.getDownloadedContent()) {
-            try {
-                File destinationFile = DownloadContentHelper.getDestinationFile(this, content);
-
-                if (!destinationFile.exists()) {
-                    Log.d(LOGTAG, "Downloaded content does not exist anymore: " + content);
-
-                    // This file does not exist even though it is marked as downloaded in the catalog. Scheduling a
-                    // download to fetch it again.
-                    catalog.scheduleDownload(content);
-                }
-
-                if (!DownloadContentHelper.verify(destinationFile, content.getChecksum())) {
-                    catalog.scheduleDownload(content);
-                    Log.d(LOGTAG, "Wrong checksum. Scheduling download: " + content);
-                    continue;
-                }
-
-                Log.v(LOGTAG, "Content okay: " + content);
-            } catch (DownloadContentHelper.UnrecoverableDownloadContentException e) {
-                Log.w(LOGTAG, "Unrecoverable exception while verifying downloaded file", e);
-            } catch (DownloadContentHelper.RecoverableDownloadContentException e) {
-                // That's okay, we are just verifying already existing content. No log.
-            }
-        }
-
-        if (catalog.hasScheduledDownloads()) {
-            startDownloads(this);
-        }
-
-        Log.v(LOGTAG, "Done");
-    }
-
-    /**
-     * Download content that has been scheduled during "study" or "verify".
-     */
-    private void downloadContent() {
-        Log.d(LOGTAG, "Downloading content..");
-
-        if (DownloadContentHelper.isActiveNetworkMetered(this)) {
-            Log.d(LOGTAG, "Network is metered. Postponing download.");
-            // TODO: Reschedule download (bug 1209498)
-            return;
-        }
-
-        HttpClient client = DownloadContentHelper.buildHttpClient();
-
-        for (DownloadContent content : catalog.getScheduledDownloads()) {
-            Log.d(LOGTAG, "Downloading: " + content);
-
-            File temporaryFile = null;
-
-            try {
-                File destinationFile = DownloadContentHelper.getDestinationFile(this, content);
-                if (destinationFile.exists() && DownloadContentHelper.verify(destinationFile, content.getChecksum())) {
-                    Log.d(LOGTAG, "Content already exists and is up-to-date.");
-                    continue;
-                }
-
-                temporaryFile = DownloadContentHelper.createTemporaryFile(this, content);
-
-                // TODO: Check space on disk before downloading content (bug 1220145)
-                final String url = DownloadContentHelper.createDownloadURL(content);
-                DownloadContentHelper.download(client, url, temporaryFile);
-
-                if (!DownloadContentHelper.verify(temporaryFile, content.getDownloadChecksum())) {
-                    Log.w(LOGTAG, "Wrong checksum after download, content=" + content.getId());
-                    temporaryFile.delete();
-                    continue;
-                }
-
-                if (!content.isAssetArchive()) {
-                    Log.e(LOGTAG, "Downloaded content is not of type 'asset-archive': " + content.getType());
-                    continue;
-                }
-
-                DownloadContentHelper.extract(temporaryFile, destinationFile, content.getChecksum());
-
-                catalog.markAsDownloaded(content);
-
-                Log.d(LOGTAG, "Successfully downloaded: " + content);
-
-                onContentDownloaded(content);
-            } catch (DownloadContentHelper.RecoverableDownloadContentException e) {
-                Log.w(LOGTAG, "Downloading content failed (Recoverable): " + content, e);
-                // TODO: Reschedule download (bug 1209498)
-            } catch (DownloadContentHelper.UnrecoverableDownloadContentException e) {
-                Log.w(LOGTAG, "Downloading content failed (Unrecoverable): " + content, e);
-
-                catalog.markAsPermanentlyFailed(content);
-            } finally {
-                if (temporaryFile != null && temporaryFile.exists()) {
-                    temporaryFile.delete();
-                }
-            }
-        }
-
-        Log.v(LOGTAG, "Done");
-    }
-
-    private void onContentDownloaded(DownloadContent content) {
-        if (content.isFont()) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Fonts:Reload", ""));
-        }
     }
 }

@@ -32,7 +32,6 @@ var Change = {
   onLoad: function Change_onLoad() {
     /* Load labels */
     let introText = document.getElementById("introText");
-    let introText2 = document.getElementById("introText2");
     let warningText = document.getElementById("warningText");
 
     // load some other elements & info from the window
@@ -121,7 +120,7 @@ var Change = {
   _updateStatus: function Change__updateStatus(str, state) {
      this._updateStatusWithString(this._str(str), state);
   },
-  
+
   _updateStatusWithString: function Change__updateStatusWithString(string, state) {
     this._statusRow.hidden = false;
     this._status.value = string;
@@ -142,11 +141,10 @@ var Change = {
       case "UpdatePassphrase":
       case "ResetPassphrase":
         return this.doChangePassphrase();
-        break;
       case "ChangePassword":
         return this.doChangePassword();
-        break;
     }
+    return undefined;
   },
 
   doGeneratePassphrase: function () {

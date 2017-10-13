@@ -4,6 +4,7 @@
 
 include protocol PBlob;
 include protocol PFileDescriptorSet;
+include BlobTypes;
 include InputStreamParams;
 
 namespace mozilla {
@@ -14,7 +15,7 @@ protocol PBlobStream
   manager PBlob;
 
 child:
-  __delete__(InputStreamParams params, OptionalFileDescriptorSet fds);
+  async __delete__(InputStreamParams params, OptionalFileDescriptorSet fds);
 };
 
 } // namespace dom

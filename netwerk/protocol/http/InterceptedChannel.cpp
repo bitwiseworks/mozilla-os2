@@ -13,8 +13,10 @@
 #include "nsHttpChannel.h"
 #include "HttpChannelChild.h"
 #include "nsHttpResponseHead.h"
+#include "nsNetUtil.h"
 #include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/dom/ChannelInfo.h"
+#include "nsIChannelEventSink.h"
 
 namespace mozilla {
 namespace net {
@@ -39,6 +41,7 @@ NS_IMPL_ISUPPORTS(InterceptedChannelBase, nsIInterceptedChannel)
 InterceptedChannelBase::InterceptedChannelBase(nsINetworkInterceptController* aController)
 : mController(aController)
 , mReportCollector(new ConsoleReportCollector())
+, mClosed(false)
 {
 }
 
@@ -68,22 +71,16 @@ InterceptedChannelBase::DoNotifyController()
 
     if (NS_WARN_IF(!mController)) {
       rv = ResetInterception();
-      NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                           "Failed to resume intercepted network request");
       return;
     }
 
-    nsCOMPtr<nsIFetchEventDispatcher> dispatcher;
-    rv = mController->ChannelIntercepted(this, getter_AddRefs(dispatcher));
-
-    if (NS_WARN_IF(NS_FAILED(rv) || !dispatcher)) {
+    rv = mController->ChannelIntercepted(this);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       rv = ResetInterception();
-      NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
-    } else {
-      rv = dispatcher->Dispatch();
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        rv = ResetInterception();
-        NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
-      }
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                           "Failed to resume intercepted network request");
     }
     mController = nullptr;
 }
@@ -100,7 +97,7 @@ InterceptedChannelBase::DoSynthesizeStatus(uint16_t aStatus, const nsACString& a
     statusLine.AppendLiteral(" ");
     statusLine.Append(aReason);
 
-    (*mSynthesizedResponseHead)->ParseStatusLine(statusLine.get());
+    (*mSynthesizedResponseHead)->ParseStatusLine(statusLine);
     return NS_OK;
 }
 
@@ -111,7 +108,7 @@ InterceptedChannelBase::DoSynthesizeHeader(const nsACString& aName, const nsACSt
 
     nsAutoCString header = aName + NS_LITERAL_CSTRING(": ") + aValue;
     // Overwrite any existing header.
-    nsresult rv = (*mSynthesizedResponseHead)->ParseHeaderLine(header.get());
+    nsresult rv = (*mSynthesizedResponseHead)->ParseHeaderLine(header);
     NS_ENSURE_SUCCESS(rv, rv);
     return NS_OK;
 }
@@ -131,8 +128,25 @@ InterceptedChannelBase::SetReleaseHandle(nsISupports* aHandle)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mReleaseHandle);
   MOZ_ASSERT(aHandle);
+
+  // We need to keep it and mChannel alive until destructor clear it up.
   mReleaseHandle = aHandle;
   return NS_OK;
+}
+
+/* static */
+already_AddRefed<nsIURI>
+InterceptedChannelBase::SecureUpgradeChannelURI(nsIChannel* aChannel)
+{
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = aChannel->GetURI(getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, nullptr);
+
+  nsCOMPtr<nsIURI> upgradedURI;
+  rv = NS_GetSecureUpgradedURI(uri, getter_AddRefs(upgradedURI));
+  NS_ENSURE_SUCCESS(rv, nullptr);
+
+  return upgradedURI.forget();
 }
 
 InterceptedChannelChrome::InterceptedChannelChrome(nsHttpChannel* aChannel,
@@ -151,8 +165,6 @@ InterceptedChannelChrome::InterceptedChannelChrome(nsHttpChannel* aChannel,
 void
 InterceptedChannelChrome::NotifyController()
 {
-  nsCOMPtr<nsIOutputStream> out;
-
   // Intercepted responses should already be decoded.
   mChannel->SetApplyConversion(false);
 
@@ -172,7 +184,7 @@ InterceptedChannelChrome::GetChannel(nsIChannel** aChannel)
 NS_IMETHODIMP
 InterceptedChannelChrome::ResetInterception()
 {
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -189,8 +201,10 @@ InterceptedChannelChrome::ResetInterception()
   nsresult rv = mChannel->StartRedirectChannelToURI(uri, nsIChannelEventSink::REDIRECT_INTERNAL);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mReleaseHandle = nullptr;
-  mChannel = nullptr;
+  mResponseBody->Close();
+  mResponseBody = nullptr;
+  mClosed = true;
+
   return NS_OK;
 }
 
@@ -217,9 +231,14 @@ InterceptedChannelChrome::SynthesizeHeader(const nsACString& aName, const nsACSt
 NS_IMETHODIMP
 InterceptedChannelChrome::FinishSynthesizedResponse(const nsACString& aFinalURLSpec)
 {
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_NOT_AVAILABLE;
   }
+
+  // Make sure the cache entry's output stream is always closed.  If the
+  // channel was intercepted with a null-body response then its possible
+  // the synthesis completed without a stream copy operation.
+  mResponseBody->Close();
 
   mReportCollector->FlushConsoleReports(mChannel);
 
@@ -256,7 +275,7 @@ InterceptedChannelChrome::FinishSynthesizedResponse(const nsACString& aFinalURLS
 
   nsCOMPtr<nsIURI> responseURI;
   if (!aFinalURLSpec.IsEmpty()) {
-    nsresult rv = NS_NewURI(getter_AddRefs(responseURI), aFinalURLSpec);
+    rv = NS_NewURI(getter_AddRefs(responseURI), aFinalURLSpec);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
     responseURI = originalURI;
@@ -265,7 +284,7 @@ InterceptedChannelChrome::FinishSynthesizedResponse(const nsACString& aFinalURLS
   bool equal = false;
   originalURI->Equals(responseURI, &equal);
   if (!equal) {
-    nsresult rv =
+    rv =
         mChannel->StartRedirectChannelToURI(responseURI, nsIChannelEventSink::REDIRECT_INTERNAL);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
@@ -283,8 +302,9 @@ InterceptedChannelChrome::FinishSynthesizedResponse(const nsACString& aFinalURLS
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
-  mReleaseHandle = nullptr;
-  mChannel = nullptr;
+
+  mClosed = true;
+
   return NS_OK;
 }
 
@@ -293,7 +313,7 @@ InterceptedChannelChrome::Cancel(nsresult aStatus)
 {
   MOZ_ASSERT(NS_FAILED(aStatus));
 
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_FAILURE;
   }
 
@@ -303,14 +323,16 @@ InterceptedChannelChrome::Cancel(nsresult aStatus)
   // to cancel which will provide OnStart/OnStopRequest to the channel.
   nsresult rv = mChannel->AsyncAbort(aStatus);
   NS_ENSURE_SUCCESS(rv, rv);
-  mReleaseHandle = nullptr;
+
+  mClosed = true;
+
   return NS_OK;
 }
 
 NS_IMETHODIMP
 InterceptedChannelChrome::SetChannelInfo(dom::ChannelInfo* aChannelInfo)
 {
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_FAILURE;
   }
 
@@ -329,12 +351,20 @@ InterceptedChannelChrome::GetInternalContentPolicyType(nsContentPolicyType* aPol
   return NS_OK;
 }
 
+NS_IMETHODIMP
+InterceptedChannelChrome::GetSecureUpgradedChannelURI(nsIURI** aURI)
+{
+  return mChannel->GetURI(aURI);
+}
+
 InterceptedChannelContent::InterceptedChannelContent(HttpChannelChild* aChannel,
                                                      nsINetworkInterceptController* aController,
-                                                     InterceptStreamListener* aListener)
+                                                     InterceptStreamListener* aListener,
+                                                     bool aSecureUpgrade)
 : InterceptedChannelBase(aController)
 , mChannel(aChannel)
 , mStreamListener(aListener)
+, mSecureUpgrade(aSecureUpgrade)
 {
 }
 
@@ -359,18 +389,20 @@ InterceptedChannelContent::GetChannel(nsIChannel** aChannel)
 NS_IMETHODIMP
 InterceptedChannelContent::ResetInterception()
 {
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
   mReportCollector->FlushConsoleReports(mChannel);
 
+  mResponseBody->Close();
   mResponseBody = nullptr;
   mSynthesizedInput = nullptr;
 
   mChannel->ResetInterception();
-  mReleaseHandle = nullptr;
-  mChannel = nullptr;
+
+  mClosed = true;
+
   return NS_OK;
 }
 
@@ -397,9 +429,14 @@ InterceptedChannelContent::SynthesizeHeader(const nsACString& aName, const nsACS
 NS_IMETHODIMP
 InterceptedChannelContent::FinishSynthesizedResponse(const nsACString& aFinalURLSpec)
 {
-  if (NS_WARN_IF(!mChannel)) {
+  if (NS_WARN_IF(mClosed)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
+
+  // Make sure the body output stream is always closed.  If the channel was
+  // intercepted with a null-body response then its possible the synthesis
+  // completed without a stream copy operation.
+  mResponseBody->Close();
 
   mReportCollector->FlushConsoleReports(mChannel);
 
@@ -411,6 +448,10 @@ InterceptedChannelContent::FinishSynthesizedResponse(const nsACString& aFinalURL
   nsCOMPtr<nsIURI> responseURI;
   if (!aFinalURLSpec.IsEmpty()) {
     nsresult rv = NS_NewURI(getter_AddRefs(responseURI), aFinalURLSpec);
+    NS_ENSURE_SUCCESS(rv, rv);
+  } else if (mSecureUpgrade) {
+    nsresult rv = NS_GetSecureUpgradedURI(originalURI,
+                                          getter_AddRefs(responseURI));
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
     responseURI = originalURI;
@@ -428,9 +469,9 @@ InterceptedChannelContent::FinishSynthesizedResponse(const nsACString& aFinalURL
   }
 
   mResponseBody = nullptr;
-  mReleaseHandle = nullptr;
-  mChannel = nullptr;
   mStreamListener = nullptr;
+  mClosed = true;
+
   return NS_OK;
 }
 
@@ -439,7 +480,7 @@ InterceptedChannelContent::Cancel(nsresult aStatus)
 {
   MOZ_ASSERT(NS_FAILED(aStatus));
 
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_FAILURE;
   }
 
@@ -449,16 +490,16 @@ InterceptedChannelContent::Cancel(nsresult aStatus)
   // to cancel which will provide OnStart/OnStopRequest to the channel.
   nsresult rv = mChannel->AsyncAbort(aStatus);
   NS_ENSURE_SUCCESS(rv, rv);
-  mReleaseHandle = nullptr;
-  mChannel = nullptr;
   mStreamListener = nullptr;
+  mClosed = true;
+
   return NS_OK;
 }
 
 NS_IMETHODIMP
 InterceptedChannelContent::SetChannelInfo(dom::ChannelInfo* aChannelInfo)
 {
-  if (!mChannel) {
+  if (mClosed) {
     return NS_ERROR_FAILURE;
   }
 
@@ -476,6 +517,23 @@ InterceptedChannelContent::GetInternalContentPolicyType(nsContentPolicyType* aPo
 
   *aPolicyType = loadInfo->InternalContentPolicyType();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+InterceptedChannelContent::GetSecureUpgradedChannelURI(nsIURI** aURI)
+{
+  nsCOMPtr<nsIURI> uri;
+  if (mSecureUpgrade) {
+    uri = SecureUpgradeChannelURI(mChannel);
+  } else {
+    nsresult rv = mChannel->GetURI(getter_AddRefs(uri));
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  if (uri) {
+    uri.forget(aURI);
+    return NS_OK;
+  }
+  return NS_ERROR_FAILURE;
 }
 
 } // namespace net

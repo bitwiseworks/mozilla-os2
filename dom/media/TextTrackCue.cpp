@@ -5,6 +5,7 @@
 
 #include "mozilla/dom/HTMLTrackElement.h"
 #include "mozilla/dom/TextTrackCue.h"
+#include "mozilla/dom/TextTrackList.h"
 #include "mozilla/dom/TextTrackRegion.h"
 #include "nsComponentManagerUtils.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -32,18 +33,19 @@ StaticRefPtr<nsIWebVTTParserWrapper> TextTrackCue::sParserWrapper;
 void
 TextTrackCue::SetDefaultCueSettings()
 {
-  mPosition = 50;
-  mPositionAlign = AlignSetting::Middle;
-  mSize = 100;
+  mPositionIsAutoKeyword = true;
+  mPositionAlign = PositionAlignSetting::Center;
+  mSize = 100.0;
   mPauseOnExit = false;
   mSnapToLines = true;
   mLineIsAutoKeyword = true;
-  mAlign = AlignSetting::Middle;
-  mLineAlign = AlignSetting::Start;
+  mAlign = AlignSetting::Center;
+  mLineAlign = LineAlignSetting::Start;
   mVertical = DirectionSetting::_empty;
+  mActive = false;
 }
 
-TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
+TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow,
                            double aStartTime,
                            double aEndTime,
                            const nsAString& aText,
@@ -52,7 +54,9 @@ TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
   , mText(aText)
   , mStartTime(aStartTime)
   , mEndTime(aEndTime)
-  , mReset(false)
+  , mReset(false, "TextTrackCue::mReset")
+  , mHaveStartedWatcher(false)
+  , mWatchManager(this, AbstractThread::MainThread())
 {
   SetDefaultCueSettings();
   MOZ_ASSERT(aOwnerWindow);
@@ -61,7 +65,7 @@ TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
   }
 }
 
-TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
+TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow,
                            double aStartTime,
                            double aEndTime,
                            const nsAString& aText,
@@ -72,7 +76,9 @@ TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
   , mStartTime(aStartTime)
   , mEndTime(aEndTime)
   , mTrackElement(aTrackElement)
-  , mReset(false)
+  , mReset(false, "TextTrackCue::mReset")
+  , mHaveStartedWatcher(false)
+  , mWatchManager(this, AbstractThread::MainThread())
 {
   SetDefaultCueSettings();
   MOZ_ASSERT(aOwnerWindow);
@@ -91,7 +97,7 @@ TextTrackCue::~TextTrackCue()
 nsresult
 TextTrackCue::StashDocument()
 {
-  nsPIDOMWindow* window = GetOwner();
+  nsPIDOMWindowInner* window = GetOwner();
   if (!window) {
     return NS_ERROR_NO_INTERFACE;
   }
@@ -122,7 +128,7 @@ TextTrackCue::GetCueAsHTML()
     ClearOnShutdown(&sParserWrapper);
   }
 
-  nsPIDOMWindow* window = mDocument->GetWindow();
+  nsPIDOMWindowInner* window = mDocument->GetInnerWindow();
   if (!window) {
     return mDocument->CreateDocumentFragment();
   }
@@ -166,6 +172,84 @@ TextTrackCue::SetRegion(TextTrackRegion* aRegion)
   }
   mRegion = aRegion;
   mReset = true;
+}
+
+double
+TextTrackCue::ComputedLine()
+{
+  // See spec https://w3c.github.io/webvtt/#cue-computed-line
+  if (!mLineIsAutoKeyword && !mSnapToLines &&
+      (mLine < 0.0 || mLine > 100.0)) {
+    return 100.0;
+  } else if (!mLineIsAutoKeyword) {
+    return mLine;
+  } else if (mLineIsAutoKeyword && !mSnapToLines) {
+    return 100.0;
+  } else if (!mTrack ||
+             !mTrack->GetTextTrackList() ||
+             !mTrack->GetTextTrackList()->GetMediaElement()) {
+    return -1.0;
+  }
+
+  RefPtr<TextTrackList> trackList = mTrack->GetTextTrackList();
+  bool dummy;
+  uint32_t showingTracksNum = 0;
+  for (uint32_t idx = 0; idx < trackList->Length(); idx++) {
+    RefPtr<TextTrack> track = trackList->IndexedGetter(idx, dummy);
+    if (track->Mode() == TextTrackMode::Showing) {
+      showingTracksNum++;
+    }
+
+    if (mTrack == track) {
+      break;
+    }
+  }
+
+  return (-1.0) * showingTracksNum;
+}
+
+double
+TextTrackCue::ComputedPosition()
+{
+  // See spec https://w3c.github.io/webvtt/#cue-computed-position
+  if (!mPositionIsAutoKeyword) {
+    return mPosition;
+  } else if (mAlign == AlignSetting::Left) {
+    return 0.0;
+  } else if (mAlign == AlignSetting::Right) {
+    return 100.0;
+  }
+  return 50.0;
+}
+
+PositionAlignSetting
+TextTrackCue::ComputedPositionAlign()
+{
+  // See spec https://w3c.github.io/webvtt/#cue-computed-position-alignment
+  if (mPositionAlign != PositionAlignSetting::Auto) {
+    return mPositionAlign;
+  } else if (mAlign == AlignSetting::Left) {
+    return PositionAlignSetting::Line_left;
+  } else if (mAlign == AlignSetting::Right) {
+    return PositionAlignSetting::Line_right;
+  }
+  return PositionAlignSetting::Center;
+}
+
+void
+TextTrackCue::NotifyDisplayStatesChanged()
+{
+  if (!mReset) {
+    return;
+  }
+
+  if (!mTrack ||
+      !mTrack->GetTextTrackList() ||
+      !mTrack->GetTextTrackList()->GetMediaElement()) {
+    return;
+  }
+
+  mTrack->GetTextTrackList()->GetMediaElement()->NotifyCueDisplayStatesChanged();
 }
 
 } // namespace dom

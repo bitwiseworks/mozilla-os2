@@ -10,6 +10,7 @@
 #include <shlwapi.h>
 #include <cderr.h>
 
+#include "mozilla/mscom/EnsureMTA.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WindowsVersion.h"
 #include "nsReadableUtils.h"
@@ -28,7 +29,9 @@
 #include "GeckoProfiler.h"
 
 using mozilla::IsVistaOrLater;
+using mozilla::IsWin8OrLater;
 using mozilla::MakeUnique;
+using mozilla::mscom::EnsureMTA;
 using mozilla::UniquePtr;
 using namespace mozilla::widget;
 
@@ -191,9 +194,9 @@ nsFilePicker::~nsFilePicker()
 
 NS_IMPL_ISUPPORTS(nsFilePicker, nsIFilePicker)
 
-NS_IMETHODIMP nsFilePicker::Init(nsIDOMWindow *aParent, const nsAString& aTitle, int16_t aMode)
+NS_IMETHODIMP nsFilePicker::Init(mozIDOMWindowProxy *aParent, const nsAString& aTitle, int16_t aMode)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aParent);
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aParent);
   nsIDocShell* docShell = window ? window->GetDocShell() : nullptr;  
   mLoadContext = do_QueryInterface(docShell);
   
@@ -577,6 +580,15 @@ nsFilePicker::ShowXPFolderPicker(const nsString& aInitialDir)
 bool
 nsFilePicker::ShowFolderPicker(const nsString& aInitialDir, bool &aWasInitError)
 {
+  if (!IsWin8OrLater()) {
+    // Some Windows 7 users are experiencing a race condition when some dlls
+    // that are loaded by the file picker cause a crash while attempting to shut
+    // down the COM multithreaded apartment. By instantiating EnsureMTA, we hold
+    // an additional reference to the MTA that should prevent this race, since
+    // the MTA will remain alive until shutdown.
+    EnsureMTA ensureMTA;
+  }
+
   RefPtr<IFileOpenDialog> dialog;
   if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC,
                               IID_IFileOpenDialog,
@@ -595,6 +607,11 @@ nsFilePicker::ShowFolderPicker(const nsString& aInitialDir, bool &aWasInitError)
  
   // initial strings
   dialog->SetTitle(mTitle.get());
+
+  if (!mOkButtonLabel.IsEmpty()) {
+    dialog->SetOkButtonLabel(mOkButtonLabel.get());
+  }
+
   if (!aInitialDir.IsEmpty()) {
     RefPtr<IShellItem> folder;
     if (SUCCEEDED(
@@ -870,6 +887,16 @@ bool
 nsFilePicker::ShowFilePicker(const nsString& aInitialDir, bool &aWasInitError)
 {
   PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+
+  if (!IsWin8OrLater()) {
+    // Some Windows 7 users are experiencing a race condition when some dlls
+    // that are loaded by the file picker cause a crash while attempting to shut
+    // down the COM multithreaded apartment. By instantiating EnsureMTA, we hold
+    // an additional reference to the MTA that should prevent this race, since
+    // the MTA will remain alive until shutdown.
+    EnsureMTA ensureMTA;
+  }
+
   RefPtr<IFileDialog> dialog;
   if (mMode != modeSave) {
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC,
@@ -1048,6 +1075,10 @@ nsFilePicker::ShowW(int16_t *aReturnVal)
   // Clear previous file selections
   mUnicodeFile.Truncate();
   mFiles.Clear();
+
+  // On Win10, the picker doesn't support per-monitor DPI, so we open it
+  // with our context set temporarily to system-dpi-aware
+  WinUtils::AutoSystemDpiAware dpiAwareness;
 
   // Launch the XP file/folder picker on XP and as a fallback on Vista+. 
   // The CoCreateInstance call to CLSID_FileOpenDialog fails with "(0x80040111)

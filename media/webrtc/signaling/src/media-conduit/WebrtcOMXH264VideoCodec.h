@@ -36,11 +36,11 @@ public:
   virtual ~WebrtcOMXH264VideoEncoder();
 
   // Implement VideoEncoder interface.
-  virtual const uint64_t PluginID() override { return 0; }
+  virtual uint64_t PluginID() const override { return 0; }
 
   virtual int32_t InitEncode(const webrtc::VideoCodec* aCodecSettings,
                              int32_t aNumOfCores,
-                             uint32_t aMaxPayloadSize) override;
+                             size_t aMaxPayloadSize) override;
 
   virtual int32_t Encode(const webrtc::I420VideoFrame& aInputImage,
                          const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
@@ -82,7 +82,7 @@ public:
   virtual ~WebrtcOMXH264VideoDecoder();
 
   // Implement VideoDecoder interface.
-  virtual const uint64_t PluginID() override { return 0; }
+  virtual uint64_t PluginID() const override { return 0; }
 
   virtual int32_t InitDecode(const webrtc::VideoCodec* aCodecSettings,
                              int32_t aNumOfCores) override;

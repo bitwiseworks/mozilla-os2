@@ -44,7 +44,6 @@ public:
   void LinkRemoved();
 
   void UpdateImport();
-  void UpdatePreconnect();
 
   // nsIDOMEventTarget
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) override;
@@ -119,7 +118,7 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::hreflang, aHreflang, aRv);
   }
-  nsDOMSettableTokenList* Sizes()
+  nsDOMTokenList* Sizes()
   {
     return GetTokenList(nsGkAtoms::sizes);
   }
@@ -151,6 +150,18 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::integrity, aIntegrity, aRv);
   }
+  void SetReferrerPolicy(const nsAString& aReferrer, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::referrerpolicy, aReferrer, aError);
+  }
+  void GetReferrerPolicy(nsAString& aReferrer)
+  {
+    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
+  }
+  mozilla::net::ReferrerPolicy GetLinkReferrerPolicy() override
+  {
+    return GetReferrerPolicyAsEnum();
+  }
 
   already_AddRefed<nsIDocument> GetImport();
   already_AddRefed<ImportLoader> GetImportLoader()
@@ -170,13 +181,8 @@ protected:
                                  bool* aIsScoped,
                                  bool* aIsAlternate) override;
 protected:
-  // nsGenericHTMLElement
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
+  RefPtr<nsDOMTokenList> mRelList;
 
-  bool HasDNSPrefetchRel();
-
-  RefPtr<nsDOMTokenList > mRelList;
 private:
   RefPtr<ImportLoader> mImportLoader;
 };

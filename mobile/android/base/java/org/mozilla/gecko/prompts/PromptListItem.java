@@ -1,17 +1,18 @@
 package org.mozilla.gecko.prompts;
 
-import org.mozilla.gecko.gfx.BitmapUtils;
+import org.json.JSONException;
+import org.mozilla.gecko.IntentHelper;
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.ThumbnailHelper;
+import org.mozilla.gecko.util.ResourceDrawableUtils;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.json.JSONException;
 
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.Drawable;
-import android.util.Log;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -47,7 +48,7 @@ public class PromptListItem {
             String type = obj.isNull("type") ? GeckoActionProvider.DEFAULT_MIME_TYPE :
                                                obj.optString("type", GeckoActionProvider.DEFAULT_MIME_TYPE);
 
-            mIntent = GeckoAppShell.getShareIntent(context, uri, type, "");
+            mIntent = IntentHelper.getShareIntent(context, uri, type, "");
             isParent = true;
         } else {
             mIntent = null;
@@ -58,12 +59,19 @@ public class PromptListItem {
 
         final String iconStr = aObject.optString("icon");
         if (iconStr != null) {
-            BitmapUtils.getDrawable(context, iconStr, new BitmapUtils.BitmapLoader() {
+            final ResourceDrawableUtils.BitmapLoader loader = new ResourceDrawableUtils.BitmapLoader() {
                     @Override
                     public void onBitmapFound(Drawable d) {
                         mIcon = d;
                     }
-                });
+                };
+
+            if (iconStr.startsWith("thumbnail:")) {
+                final int id = Integer.parseInt(iconStr.substring(10), 10);
+                ThumbnailHelper.getInstance().getAndProcessThumbnailFor(id, loader);
+            } else {
+                ResourceDrawableUtils.getDrawable(context, iconStr, loader);
+            }
         }
     }
 
@@ -112,7 +120,7 @@ public class PromptListItem {
             try {
                 PromptListItem item = new PromptListItem(items.getJSONObject(i));
                 list.add(item);
-            } catch(Exception ex) { }
+            } catch (JSONException ex) { }
         }
 
         return list.toArray(new PromptListItem[length]);

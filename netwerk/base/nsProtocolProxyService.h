@@ -19,13 +19,17 @@
 #include "prio.h"
 #include "mozilla/Attributes.h"
 
-typedef nsDataHashtable<nsCStringHashKey, uint32_t> nsFailedProxyTable;
-
-class nsProxyInfo;
-struct nsProtocolInfo;
 class nsIPrefBranch;
 class nsISystemProxySettings;
+
+namespace mozilla {
+namespace net {
+
+typedef nsDataHashtable<nsCStringHashKey, uint32_t> nsFailedProxyTable;
+
 class nsPACMan;
+class nsProxyInfo;
+struct nsProtocolInfo;
 
 // CID for the nsProtocolProxyService class
 // 091eedd8-8bae-4fe3-ad62-0c87351e640d
@@ -53,6 +57,7 @@ public:
 
 protected:
     friend class nsAsyncResolveRequest;
+    friend class TestProtocolProxyService_LoadHostFilters_Test; // for gtest
 
     ~nsProtocolProxyService();
 
@@ -211,10 +216,6 @@ protected:
      *
      * @param channel
      *        The channel to test.
-     * @param appId
-     *        The id of the app making the query.
-     * @param isInBrowser
-     *        True if the iframe has mozbrowser but has no mozapp attribute.
      * @param info
      *        Information about the URI's protocol.
      * @param flags
@@ -226,8 +227,6 @@ protected:
      *        The resulting proxy info or null.
      */
     nsresult Resolve_Internal(nsIChannel *channel,
-                              uint32_t appId,
-                              bool isInBrowser,
                               const nsProtocolInfo &info,
                               uint32_t flags,
                               bool *usePAC,
@@ -278,7 +277,7 @@ protected:
      * @param hostFilters
      *        A "no-proxy-for" exclusion list.
      */
-    void LoadHostFilters(const char *hostFilters);
+    void LoadHostFilters(const nsACString& hostFilters);
 
     /**
      * This method checks the given URI against mHostFiltersArray.
@@ -334,6 +333,7 @@ protected:
 
         HostInfo()
             : is_ipaddr(false)
+            , port(0)
             { /* other members intentionally uninitialized */ }
        ~HostInfo() {
             if (!is_ipaddr && name.host)
@@ -382,8 +382,10 @@ protected:
 
     nsCString                    mHTTPSProxyHost;
     int32_t                      mHTTPSProxyPort;
-    
-    nsCString                    mSOCKSProxyHost;
+
+    // mSOCKSProxyTarget could be a host, a domain socket path,
+    // or a named-pipe name.
+    nsCString                    mSOCKSProxyTarget;
     int32_t                      mSOCKSProxyPort;
     int32_t                      mSOCKSProxyVersion;
     bool                         mSOCKSProxyRemoteDNS;
@@ -405,5 +407,8 @@ private:
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsProtocolProxyService, NS_PROTOCOL_PROXY_SERVICE_IMPL_CID)
+
+} // namespace net
+} // namespace mozilla
 
 #endif // !nsProtocolProxyService_h__

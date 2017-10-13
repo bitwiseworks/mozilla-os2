@@ -8,7 +8,6 @@ import ch.boye.httpclientandroidlib.ProtocolVersion;
 import ch.boye.httpclientandroidlib.message.BasicHttpResponse;
 import ch.boye.httpclientandroidlib.message.BasicStatusLine;
 import junit.framework.AssertionFailedError;
-import org.json.simple.parser.ParseException;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -72,7 +71,7 @@ public class TestGlobalSession {
   }
 
   @Test
-  public void testGetSyncStagesBy() throws SyncConfigurationException, IllegalArgumentException, NonObjectJSONException, IOException, ParseException, CryptoException, NoSuchStageException {
+  public void testGetSyncStagesBy() throws SyncConfigurationException, IllegalArgumentException, NonObjectJSONException, IOException, CryptoException, NoSuchStageException {
 
     final MockGlobalSessionCallback callback = new MockGlobalSessionCallback();
     GlobalSession s = MockPrefsGlobalSession.getSession(TEST_USERNAME, TEST_PASSWORD,
@@ -108,13 +107,13 @@ public class TestGlobalSession {
   @Test
   public void testBackoffCalledByHandleHTTPError() {
     try {
-      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback(TEST_CLUSTER_URL);
+      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback();
       SyncConfiguration config = new SyncConfiguration(TEST_USERNAME, new BasicAuthHeaderProvider(TEST_USERNAME, TEST_PASSWORD), new MockSharedPreferences(), new KeyBundle(TEST_USERNAME, TEST_SYNC_KEY));
       final GlobalSession session = new MockGlobalSession(config, callback);
 
       final HttpResponse response = new BasicHttpResponse(
         new BasicStatusLine(new ProtocolVersion("HTTP", 1, 1), 503, "Illegal method/protocol"));
-      response.addHeader("X-Weave-Backoff", Long.toString(TEST_BACKOFF_IN_SECONDS)); // Backoff given in seconds.
+      response.setHeader("X-Weave-Backoff", Long.toString(TEST_BACKOFF_IN_SECONDS)); // Backoff given in seconds.
 
       getTestWaiter().performWait(WaitHelper.onThreadRunnable(new Runnable() {
         @Override
@@ -140,7 +139,7 @@ public class TestGlobalSession {
   @Test
   public void testSuccessCalledAfterStages() {
     try {
-      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback(TEST_CLUSTER_URL);
+      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback();
       SyncConfiguration config = new SyncConfiguration(TEST_USERNAME, new BasicAuthHeaderProvider(TEST_USERNAME, TEST_PASSWORD), new MockSharedPreferences(), new KeyBundle(TEST_USERNAME, TEST_SYNC_KEY));
       final GlobalSession session = new MockGlobalSession(config, callback);
 
@@ -173,7 +172,7 @@ public class TestGlobalSession {
   @Test
   public void testBackoffCalledInStages() {
     try {
-      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback(TEST_CLUSTER_URL);
+      final MockGlobalSessionCallback callback = new MockGlobalSessionCallback();
 
       // Stage fakes a 503 and sets X-Weave-Backoff header to the given seconds.
       final GlobalSyncStage stage = new MockAbstractNonRepositorySyncStage() {
@@ -240,12 +239,12 @@ public class TestGlobalSession {
     });
   }
 
-  public MockGlobalSessionCallback doTestSuccess(final boolean stageShouldBackoff, final boolean stageShouldAdvance) throws SyncConfigurationException, IllegalArgumentException, NonObjectJSONException, IOException, ParseException, CryptoException {
+  public MockGlobalSessionCallback doTestSuccess(final boolean stageShouldBackoff, final boolean stageShouldAdvance) throws SyncConfigurationException, IllegalArgumentException, NonObjectJSONException, IOException, CryptoException {
     MockServer server = new MockServer() {
       @Override
       public void handle(Request request, Response response) {
         if (stageShouldBackoff) {
-          response.set("X-Weave-Backoff", Long.toString(TEST_BACKOFF_IN_SECONDS));
+          response.addValue("X-Weave-Backoff", Long.toString(TEST_BACKOFF_IN_SECONDS));
         }
         super.handle(request, response);
       }
@@ -266,7 +265,7 @@ public class TestGlobalSession {
       }
     };
 
-    final MockGlobalSessionCallback callback = new MockGlobalSessionCallback(TEST_CLUSTER_URL);
+    final MockGlobalSessionCallback callback = new MockGlobalSessionCallback();
     SyncConfiguration config = new SyncConfiguration(TEST_USERNAME, new BasicAuthHeaderProvider(TEST_USERNAME, TEST_PASSWORD), new MockSharedPreferences(), new KeyBundle(TEST_USERNAME, TEST_SYNC_KEY));
     final GlobalSession session = new MockGlobalSession(config, callback)
                                       .withStage(Stage.syncBookmarks, stage);
@@ -295,7 +294,7 @@ public class TestGlobalSession {
   @Test
   public void testOnSuccessBackoffAdvanced() throws SyncConfigurationException,
       IllegalArgumentException, NonObjectJSONException, IOException,
-      ParseException, CryptoException {
+      CryptoException {
     MockGlobalSessionCallback callback = doTestSuccess(true, true);
 
     assertTrue(callback.calledError); // TODO: this should be calledAborted.
@@ -306,7 +305,7 @@ public class TestGlobalSession {
   @Test
   public void testOnSuccessBackoffAborted() throws SyncConfigurationException,
       IllegalArgumentException, NonObjectJSONException, IOException,
-      ParseException, CryptoException {
+      CryptoException {
     MockGlobalSessionCallback callback = doTestSuccess(true, false);
 
     assertTrue(callback.calledError); // TODO: this should be calledAborted.
@@ -317,7 +316,7 @@ public class TestGlobalSession {
   @Test
   public void testOnSuccessNoBackoffAdvanced() throws SyncConfigurationException,
       IllegalArgumentException, NonObjectJSONException, IOException,
-      ParseException, CryptoException {
+      CryptoException {
     MockGlobalSessionCallback callback = doTestSuccess(false, true);
 
     assertTrue(callback.calledSuccess);
@@ -327,7 +326,7 @@ public class TestGlobalSession {
   @Test
   public void testOnSuccessNoBackoffAborted() throws SyncConfigurationException,
       IllegalArgumentException, NonObjectJSONException, IOException,
-      ParseException, CryptoException {
+      CryptoException {
     MockGlobalSessionCallback callback = doTestSuccess(false, false);
 
     assertTrue(callback.calledError); // TODO: this should be calledAborted.
@@ -396,7 +395,7 @@ public class TestGlobalSession {
     ExtendedJSONObject origEnginesJSONObject = new ExtendedJSONObject();
     for (String engineName : origEngines) {
       EngineSettings mockEngineSettings = new EngineSettings(Utils.generateGuid(), Integer.valueOf(0));
-      origEnginesJSONObject.put(engineName, mockEngineSettings);
+      origEnginesJSONObject.put(engineName, mockEngineSettings.toJSONObject());
     }
     session.config.metaGlobal.setEngines(origEnginesJSONObject);
 

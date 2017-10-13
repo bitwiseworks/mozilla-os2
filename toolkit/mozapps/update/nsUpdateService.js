@@ -10,11 +10,11 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/FileUtils.jsm", this);
-Cu.import("resource://gre/modules/AddonManager.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/ctypes.jsm", this);
 Cu.import("resource://gre/modules/UpdateTelemetry.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm", this);
+Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}");
 const UPDATESERVICE_CONTRACTID = "@mozilla.org/updates/update-service;1";
@@ -25,35 +25,27 @@ const PREF_APP_UPDATE_BACKGROUNDINTERVAL   = "app.update.download.backgroundInte
 const PREF_APP_UPDATE_BACKGROUNDERRORS     = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS  = "app.update.backgroundMaxErrors";
 const PREF_APP_UPDATE_CANCELATIONS         = "app.update.cancelations";
-const PREF_APP_UPDATE_CERT_CHECKATTRIBUTES = "app.update.cert.checkAttributes";
-const PREF_APP_UPDATE_CERT_ERRORS          = "app.update.cert.errors";
-const PREF_APP_UPDATE_CERT_MAXERRORS       = "app.update.cert.maxErrors";
-const PREF_APP_UPDATE_CERT_REQUIREBUILTIN  = "app.update.cert.requireBuiltIn";
+const PREF_APP_UPDATE_CANCELATIONS_OSX     = "app.update.cancelations.osx";
+const PREF_APP_UPDATE_CANCELATIONS_OSX_MAX = "app.update.cancelations.osx.max";
+const PREF_APP_UPDATE_ELEVATE_NEVER        = "app.update.elevate.never";
+const PREF_APP_UPDATE_ELEVATE_VERSION      = "app.update.elevate.version";
 const PREF_APP_UPDATE_ENABLED              = "app.update.enabled";
 const PREF_APP_UPDATE_IDLETIME             = "app.update.idletime";
-const PREF_APP_UPDATE_INCOMPATIBLE_MODE    = "app.update.incompatible.mode";
-const PREF_APP_UPDATE_INTERVAL             = "app.update.interval";
 const PREF_APP_UPDATE_LOG                  = "app.update.log";
-const PREF_APP_UPDATE_MODE                 = "app.update.mode";
 const PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED  = "app.update.notifiedUnsupported";
 const PREF_APP_UPDATE_POSTUPDATE           = "app.update.postupdate";
 const PREF_APP_UPDATE_PROMPTWAITTIME       = "app.update.promptWaitTime";
 const PREF_APP_UPDATE_SERVICE_ENABLED      = "app.update.service.enabled";
 const PREF_APP_UPDATE_SERVICE_ERRORS       = "app.update.service.errors";
 const PREF_APP_UPDATE_SERVICE_MAXERRORS    = "app.update.service.maxErrors";
-const PREF_APP_UPDATE_SHOW_INSTALLED_UI    = "app.update.showInstalledUI";
 const PREF_APP_UPDATE_SILENT               = "app.update.silent";
 const PREF_APP_UPDATE_SOCKET_MAXERRORS     = "app.update.socket.maxErrors";
 const PREF_APP_UPDATE_SOCKET_RETRYTIMEOUT  = "app.update.socket.retryTimeout";
 const PREF_APP_UPDATE_STAGING_ENABLED      = "app.update.staging.enabled";
 const PREF_APP_UPDATE_URL                  = "app.update.url";
 const PREF_APP_UPDATE_URL_DETAILS          = "app.update.url.details";
-const PREF_APP_UPDATE_URL_OVERRIDE         = "app.update.url.override";
 
-const PREFBRANCH_APP_UPDATE_CERTS = "app.update.certs.";
 const PREFBRANCH_APP_UPDATE_NEVER = "app.update.never.";
-
-const PREF_EM_HOTFIX_ID                   = "extensions.hotfix.id";
 
 const URI_BRAND_PROPERTIES      = "chrome://branding/locale/brand.properties";
 const URI_UPDATE_HISTORY_DIALOG = "chrome://mozapps/content/update/history.xul";
@@ -61,14 +53,11 @@ const URI_UPDATE_NS             = "http://www.mozilla.org/2005/app-update";
 const URI_UPDATE_PROMPT_DIALOG  = "chrome://mozapps/content/update/updates.xul";
 const URI_UPDATES_PROPERTIES    = "chrome://mozapps/locale/update/updates.properties";
 
-const KEY_GRED            = "GreD";
 const KEY_UPDROOT         = "UpdRootD";
 const KEY_EXECUTABLE      = "XREExeF";
 // Gonk only
 const KEY_UPDATE_ARCHIVE_DIR = "UpdArchD";
 
-const DIR_UPDATED         = "updated";
-const DIR_UPDATED_APP     = "Updated.app";
 const DIR_UPDATES         = "updates";
 
 const FILE_ACTIVE_UPDATE_XML = "active-update.xml";
@@ -85,11 +74,12 @@ const FILE_UPDATE_VERSION    = "update.version";
 const STATE_NONE            = "null";
 const STATE_DOWNLOADING     = "downloading";
 const STATE_PENDING         = "pending";
-const STATE_PENDING_SVC     = "pending-service";
+const STATE_PENDING_SERVICE = "pending-service";
+const STATE_PENDING_ELEVATE = "pending-elevate";
 const STATE_APPLYING        = "applying";
 const STATE_APPLIED         = "applied";
 const STATE_APPLIED_OS      = "applied-os";
-const STATE_APPLIED_SVC     = "applied-service";
+const STATE_APPLIED_SERVICE = "applied-service";
 const STATE_SUCCEEDED       = "succeeded";
 const STATE_DOWNLOAD_FAILED = "download-failed";
 const STATE_FAILED          = "failed";
@@ -164,8 +154,6 @@ const INVALID_UPDATER_STATE_CODE           = 98;
 const INVALID_UPDATER_STATUS_CODE          = 99;
 
 // Custom update error codes
-const CERT_ATTR_CHECK_FAILED_NO_UPDATE  = 100;
-const CERT_ATTR_CHECK_FAILED_HAS_UPDATE = 101;
 const BACKGROUNDCHECK_MULTIPLE_FAILURES = 110;
 const NETWORK_ERROR_OFFLINE             = 111;
 
@@ -189,7 +177,25 @@ const DEFAULT_SOCKET_MAX_ERRORS = 10;
 // The number of milliseconds to wait before retrying a connection error.
 const DEFAULT_SOCKET_RETRYTIMEOUT = 2000;
 
-var gLocale = null;
+// Default maximum number of elevation cancelations per update version before
+// giving up.
+const DEFAULT_CANCELATIONS_OSX_MAX = 3;
+
+// This maps app IDs to their respective notification topic which signals when
+// the application's user interface has been displayed.
+const APPID_TO_TOPIC = {
+  // Firefox
+  "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}": "sessionstore-windows-restored",
+  // SeaMonkey
+  "{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}": "sessionstore-windows-restored",
+  // Fennec
+  "{aa3c5121-dab2-40e2-81ca-7ea25febc110}": "sessionstore-windows-restored",
+  // Thunderbird
+  "{3550f703-e582-4d05-9a08-453d09bdfdc6}": "mail-startup-done",
+  // Instantbird
+  "{33cb9019-c295-46dd-be21-8c4936574bee}": "xul-window-visible",
+};
+
 var gUpdateMutexHandle = null;
 
 // Gonk only
@@ -338,6 +344,66 @@ function hasUpdateMutex() {
   return !!gUpdateMutexHandle;
 }
 
+/**
+ * Determines whether or not all descendants of a directory are writeable.
+ * Note: Does not check the root directory itself for writeability.
+ *
+ * @return true if all descendants are writeable, false otherwise
+ */
+function areDirectoryEntriesWriteable(aDir) {
+  let items = aDir.directoryEntries;
+  while (items.hasMoreElements()) {
+    let item = items.getNext().QueryInterface(Ci.nsIFile);
+    if (!item.isWritable()) {
+      LOG("areDirectoryEntriesWriteable - unable to write to " + item.path);
+      return false;
+    }
+    if (item.isDirectory() && !areDirectoryEntriesWriteable(item)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * OSX only function to determine if the user requires elevation to be able to
+ * write to the application bundle.
+ *
+ * @return true if elevation is required, false otherwise
+ */
+function getElevationRequired() {
+  if (AppConstants.platform != "macosx") {
+    return false;
+  }
+
+  try {
+    // Recursively check that the application bundle (and its descendants) can
+    // be written to.
+    LOG("getElevationRequired - recursively testing write access on " +
+        getInstallDirRoot().path);
+    if (!getInstallDirRoot().isWritable() ||
+        !areDirectoryEntriesWriteable(getInstallDirRoot())) {
+      LOG("getElevationRequired - unable to write to application bundle, " +
+          "elevation required");
+      return true;
+    }
+  } catch (ex) {
+    LOG("getElevationRequired - unable to write to application bundle, " +
+        "elevation required. Exception: " + ex);
+    return true;
+  }
+  LOG("getElevationRequired - able to write to application bundle, elevation " +
+      "not required");
+  return false;
+}
+
+/**
+ * Determines whether or not an update can be applied. This is always true on
+ * Windows when the service is used. Also, this is always true on OSX because we
+ * offer users the option to perform an elevated update when necessary.
+ *
+ * @return true if an update can be applied, false otherwise
+ */
 function getCanApplyUpdates() {
   let useService = false;
   if (shouldUseService()) {
@@ -347,37 +413,27 @@ function getCanApplyUpdates() {
     useService = true;
   }
 
-  if (!useService) {
+  if (!useService && AppConstants.platform != "macosx") {
     try {
       let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
       LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
       testWriteAccess(updateTestFile, false);
-      if (AppConstants.platform == "macosx") {
-        // Check that the application bundle can be written to.
-        let appDirTestFile = getAppBaseDir();
-        appDirTestFile.append(FILE_UPDATE_TEST);
-        LOG("getCanApplyUpdates - testing write access " + appDirTestFile.path);
-        if (appDirTestFile.exists()) {
-          appDirTestFile.remove(false);
-        }
-        appDirTestFile.create(Ci.nsILocalFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
-        appDirTestFile.remove(false);
-      } else if (AppConstants.platform == "win") {
+      if (AppConstants.platform == "win") {
         // Example windowsVersion:  Windows XP == 5.1
         let windowsVersion = Services.sysinfo.getProperty("version");
         LOG("getCanApplyUpdates - windowsVersion = " + windowsVersion);
 
-      /**
-       * For Vista, updates can be performed to a location requiring admin
-       * privileges by requesting elevation via the UAC prompt when launching
-       * updater.exe if the appDir is under the Program Files directory
-       * (e.g. C:\Program Files\) and UAC is turned on and  we can elevate
-       * (e.g. user has a split token).
-       *
-       * Note: this does note attempt to handle the case where UAC is turned on
-       * and the installation directory is in a restricted location that
-       * requires admin privileges to update other than Program Files.
-       */
+        /**
+         * For Vista, updates can be performed to a location requiring admin
+         * privileges by requesting elevation via the UAC prompt when launching
+         * updater.exe if the appDir is under the Program Files directory
+         * (e.g. C:\Program Files\) and UAC is turned on and  we can elevate
+         * (e.g. user has a split token).
+         *
+         * Note: this does note attempt to handle the case where UAC is turned on
+         * and the installation directory is in a restricted location that
+         * requires admin privileges to update other than Program Files.
+         */
         let userCanElevate = false;
 
         if (parseFloat(windowsVersion) >= 6) {
@@ -431,7 +487,7 @@ function getCanApplyUpdates() {
         }
       }
     } catch (e) {
-       LOG("getCanApplyUpdates - unable to apply updates. Exception: " + e);
+      LOG("getCanApplyUpdates - unable to apply updates. Exception: " + e);
       // No write privileges to install directory
       return false;
     }
@@ -447,11 +503,21 @@ function getCanApplyUpdates() {
  *
  * @return true if updates can be staged for this session.
  */
-XPCOMUtils.defineLazyGetter(this, "gCanStageUpdatesSession",
-                            function aus_gCanStageUpdatesSession() {
+XPCOMUtils.defineLazyGetter(this, "gCanStageUpdatesSession", function aus_gCSUS() {
+  if (getElevationRequired()) {
+    LOG("gCanStageUpdatesSession - unable to stage updates because elevation " +
+        "is required.");
+    return false;
+  }
+
   try {
-    let updateTestFile = getInstallDirRoot();
-    updateTestFile.append(FILE_UPDATE_TEST);
+    let updateTestFile;
+    if (AppConstants.platform == "macosx") {
+      updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
+    } else {
+      updateTestFile = getInstallDirRoot();
+      updateTestFile.append(FILE_UPDATE_TEST);
+    }
     LOG("gCanStageUpdatesSession - testing write access " +
         updateTestFile.path);
     testWriteAccess(updateTestFile, true);
@@ -468,8 +534,8 @@ XPCOMUtils.defineLazyGetter(this, "gCanStageUpdatesSession",
       updateTestFile.remove(false);
     }
   } catch (e) {
-     LOG("gCanStageUpdatesSession - unable to stage updates. Exception: " +
-         e);
+    LOG("gCanStageUpdatesSession - unable to stage updates. Exception: " +
+        e);
     // No write privileges
     return false;
   }
@@ -484,7 +550,7 @@ XPCOMUtils.defineLazyGetter(this, "gCanStageUpdatesSession",
  * @return true if updates can be staged.
  */
 function getCanStageUpdates() {
-  // If background updates are disabled, then just bail out!
+  // If staging updates are disabled, then just bail out!
   if (!getPref("getBoolPref", PREF_APP_UPDATE_STAGING_ENABLED, false)) {
     LOG("getCanStageUpdates - staging updates is disabled by preference " +
         PREF_APP_UPDATE_STAGING_ENABLED);
@@ -600,18 +666,6 @@ function binaryToHex(input) {
  */
 function getUpdateDirCreate(pathArray) {
   return FileUtils.getDir(KEY_UPDROOT, pathArray, true);
-}
-
-/**
- * Gets the specified directory at the specified hierarchy under the
- * update root directory and without creating it if it doesn't exist.
- * @param   pathArray
- *          An array of path components to locate beneath the directory
- *          specified by |key|
- * @return  nsIFile object for the location specified.
- */
-function getUpdateDirNoCreate(pathArray) {
-  return FileUtils.getDir(KEY_UPDROOT, pathArray, false);
 }
 
 /**
@@ -881,19 +935,19 @@ function shouldUseService() {
   // http://msdn.microsoft.com/en-us/library/ms724833%28v=vs.85%29.aspx
   const SZCSDVERSIONLENGTH = 128;
   const OSVERSIONINFOEXW = new ctypes.StructType('OSVERSIONINFOEXW',
-  [
-    {dwOSVersionInfoSize: DWORD},
-    {dwMajorVersion: DWORD},
-    {dwMinorVersion: DWORD},
-    {dwBuildNumber: DWORD},
-    {dwPlatformId: DWORD},
-    {szCSDVersion: ctypes.ArrayType(WCHAR, SZCSDVERSIONLENGTH)},
-    {wServicePackMajor: WORD},
-    {wServicePackMinor: WORD},
-    {wSuiteMask: WORD},
-    {wProductType: BYTE},
-    {wReserved: BYTE}
-  ]);
+    [
+      {dwOSVersionInfoSize: DWORD},
+      {dwMajorVersion: DWORD},
+      {dwMinorVersion: DWORD},
+      {dwBuildNumber: DWORD},
+      {dwPlatformId: DWORD},
+      {szCSDVersion: ctypes.ArrayType(WCHAR, SZCSDVERSIONLENGTH)},
+      {wServicePackMajor: WORD},
+      {wServicePackMinor: WORD},
+      {wSuiteMask: WORD},
+      {wProductType: BYTE},
+      {wReserved: BYTE}
+    ]);
 
   let kernel32 = false;
   try {
@@ -915,10 +969,9 @@ function shouldUseService() {
 
         if (0 !== GetVersionEx(winVer.address())) {
           return winVer.wServicePackMajor >= 3;
-        } else {
-          Cu.reportError("Unknown failure in GetVersionEX (returned 0)");
-          return false;
         }
+        Cu.reportError("Unknown failure in GetVersionEX (returned 0)");
+        return false;
       } catch (e) {
         Cu.reportError("Error getting service pack information. Exception: " + e);
         return false;
@@ -948,63 +1001,13 @@ function isServiceInstalled() {
                wrk.ACCESS_READ | wrk.WOW64_64);
       installed = wrk.readIntValue("Installed");
       wrk.close();
-    } catch(e) {
+    } catch (e) {
     }
     installed = installed == 1;  // convert to bool
     LOG("isServiceInstalled = " + installed);
     return installed;
   }
   return false;
-}
-
-/**
- * Removes the MozUpdater directory that is created when replacing an install
- * with a staged update and leftover MozUpdater-i folders in the tmp directory.
- */
-function cleanUpMozUpdaterDirs() {
-  try {
-    // Remove the MozUpdater directory in the updates/0 directory.
-    var mozUpdaterDir = getUpdatesDir();
-    mozUpdaterDir.append("MozUpdater");
-    if (mozUpdaterDir.exists()) {
-      LOG("cleanUpMozUpdaterDirs - removing MozUpdater directory");
-      mozUpdaterDir.remove(true);
-    }
-  } catch (e) {
-    LOG("cleanUpMozUpdaterDirs - Exception: " + e);
-  }
-
-  try {
-    var tmpDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
-
-    // We used to store MozUpdater-i directories in the temp directory.
-    // We need to remove these directories if we detect that they still exist.
-    // To check if they still exist, we simply check for MozUpdater-1.
-    var mozUpdaterDir1 = tmpDir.clone();
-    mozUpdaterDir1.append("MozUpdater-1");
-    // Only try to delete the left over directories in "$Temp/MozUpdater-i/*" if
-    // MozUpdater-1 exists.
-    if (mozUpdaterDir1.exists()) {
-      LOG("cleanUpMozUpdaterDirs - Removing top level tmp MozUpdater-i " +
-          "directories");
-      let i = 0;
-      let dirEntries = tmpDir.directoryEntries;
-      while (dirEntries.hasMoreElements() && i < 10) {
-        let file = dirEntries.getNext().QueryInterface(Ci.nsILocalFile);
-        if (file.leafName.startsWith("MozUpdater-") && file.leafName != "MozUpdater-1") {
-          file.remove(true);
-          i++;
-        }
-      }
-      // If you enumerate the whole temp directory and the count of deleted
-      // items is less than 10, then delete MozUpdate-1.
-      if (i < 10) {
-        mozUpdaterDir1.remove(true);
-      }
-    }
-  } catch (e) {
-    LOG("cleanUpMozUpdaterDirs - Exception: " + e);
-  }
 }
 
 /**
@@ -1028,9 +1031,9 @@ function cleanUpUpdatesDir(aRemovePatchFiles = true) {
   }
 
   // Preserve the last update log file for debugging purposes.
-  let file = updateDir.clone();
-  file.append(FILE_UPDATE_LOG);
-  if (file.exists()) {
+  let updateLogFile = updateDir.clone();
+  updateLogFile.append(FILE_UPDATE_LOG);
+  if (updateLogFile.exists()) {
     let dir = updateDir.parent;
     let logFile = dir.clone();
     logFile.append(FILE_LAST_UPDATE_LOG);
@@ -1044,19 +1047,19 @@ function cleanUpUpdatesDir(aRemovePatchFiles = true) {
     }
 
     try {
-      file.moveTo(dir, FILE_LAST_UPDATE_LOG);
+      updateLogFile.moveTo(dir, FILE_LAST_UPDATE_LOG);
     } catch (e) {
-      LOG("cleanUpUpdatesDir - failed to rename file " + file.path +
+      LOG("cleanUpUpdatesDir - failed to rename file " + updateLogFile.path +
           " to " + FILE_LAST_UPDATE_LOG);
     }
   }
 
   if (aRemovePatchFiles) {
-    let e = updateDir.directoryEntries;
-    while (e.hasMoreElements()) {
-      let f = e.getNext().QueryInterface(Ci.nsIFile);
+    let dirEntries = updateDir.directoryEntries;
+    while (dirEntries.hasMoreElements()) {
+      let file = dirEntries.getNext().QueryInterface(Ci.nsIFile);
       if (AppConstants.platform == "gonk") {
-        if (f.leafName == FILE_UPDATE_LINK) {
+        if (file.leafName == FILE_UPDATE_LINK) {
           let linkedFile = getFileFromUpdateLink(updateDir);
           if (linkedFile && linkedFile.exists()) {
             linkedFile.remove(false);
@@ -1066,11 +1069,12 @@ function cleanUpUpdatesDir(aRemovePatchFiles = true) {
 
       // Now, recursively remove this file.  The recursive removal is needed for
       // Mac OSX because this directory will contain a copy of updater.app,
-      // which is itself a directory.
+      // which is itself a directory and the MozUpdater directory on platforms
+      // other than Windows.
       try {
-        f.remove(true);
+        file.remove(true);
       } catch (e) {
-        LOG("cleanUpUpdatesDir - failed to remove file " + f.path);
+        LOG("cleanUpUpdatesDir - failed to remove file " + file.path);
       }
     }
   }
@@ -1189,15 +1193,43 @@ function handleUpdateFailure(update, errorCode) {
   }
 
   if (update.errorCode == ELEVATION_CANCELED) {
-    writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
     let cancelations = getPref("getIntPref", PREF_APP_UPDATE_CANCELATIONS, 0);
     cancelations++;
     Services.prefs.setIntPref(PREF_APP_UPDATE_CANCELATIONS, cancelations);
+    if (AppConstants.platform == "macosx") {
+      let osxCancelations = getPref("getIntPref",
+                                  PREF_APP_UPDATE_CANCELATIONS_OSX, 0);
+      osxCancelations++;
+      Services.prefs.setIntPref(PREF_APP_UPDATE_CANCELATIONS_OSX,
+                                osxCancelations);
+      let maxCancels = getPref("getIntPref",
+                               PREF_APP_UPDATE_CANCELATIONS_OSX_MAX,
+                               DEFAULT_CANCELATIONS_OSX_MAX);
+      // Prevent the preference from setting a value greater than 5.
+      maxCancels = Math.min(maxCancels, 5);
+      if (osxCancelations >= maxCancels) {
+        cleanupActiveUpdate();
+      } else {
+        writeStatusFile(getUpdatesDir(),
+                        update.state = STATE_PENDING_ELEVATE);
+      }
+      update.statusText = gUpdateBundle.GetStringFromName("elevationFailure");
+      update.QueryInterface(Ci.nsIWritablePropertyBag);
+      update.setProperty("patchingFailed", "elevationFailure");
+      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
+                 createInstance(Ci.nsIUpdatePrompt);
+      prompter.showUpdateError(update);
+    } else {
+      writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
+    }
     return true;
   }
 
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CANCELATIONS)) {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_CANCELATIONS);
+  }
+  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CANCELATIONS_OSX)) {
+    Services.prefs.clearUserPref(PREF_APP_UPDATE_CANCELATIONS_OSX);
   }
 
   // Replace with Array.prototype.includes when it has stabilized.
@@ -1207,7 +1239,8 @@ function handleUpdateFailure(update, errorCode) {
     var maxFail = getPref("getIntPref",
                           PREF_APP_UPDATE_SERVICE_MAXERRORS,
                           DEFAULT_SERVICE_MAX_ERRORS);
-
+    // Prevent the preference from setting a value greater than 10.
+    maxFail = Math.min(maxFail, 10);
     // As a safety, when the service reaches maximum failures, it will
     // disable itself and fallback to using the normal update mechanism
     // without the service.
@@ -1286,7 +1319,7 @@ function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
       case STATE_PENDING:
         stateCode = 4;
         break;
-      case STATE_PENDING_SVC:
+      case STATE_PENDING_SERVICE:
         stateCode = 5;
         break;
       case STATE_APPLYING:
@@ -1298,7 +1331,7 @@ function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
       case STATE_APPLIED_OS:
         stateCode = 8;
         break;
-      case STATE_APPLIED_SVC:
+      case STATE_APPLIED_SERVICE:
         stateCode = 9;
         break;
       case STATE_SUCCEEDED:
@@ -1309,6 +1342,9 @@ function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
         break;
       case STATE_FAILED:
         stateCode = 12;
+        break;
+      case STATE_PENDING_ELEVATE:
+        stateCode = 13;
         break;
       default:
         stateCode = 1;
@@ -1472,6 +1508,8 @@ function Update(update) {
   this.unsupported = false;
   this.channel = "default";
   this.promptWaitTime = getPref("getIntPref", PREF_APP_UPDATE_PROMPTWAITTIME, 43200);
+  this.backgroundInterval = getPref("getIntPref", PREF_APP_UPDATE_BACKGROUNDINTERVAL,
+                                    DOWNLOAD_BACKGROUND_INTERVAL);
 
   // Null <update>, assume this is a message container and do no
   // further initialization
@@ -1501,18 +1539,6 @@ function Update(update) {
     throw Cr.NS_ERROR_ILLEGAL_VALUE;
   }
 
-  // Fallback to the behavior prior to bug 530872 if the update does not have an
-  // appVersion attribute.
-  if (!update.hasAttribute("appVersion")) {
-    if (update.getAttribute("type") == "major") {
-      if (update.hasAttribute("detailsURL")) {
-        this.billboardURL = update.getAttribute("detailsURL");
-        this.showPrompt = true;
-        this.showNeverForVersion = true;
-      }
-    }
-  }
-
   // Set the installDate value with the current time. If the update has an
   // installDate attribute this will be replaced with that value if it doesn't
   // equal 0.
@@ -1525,12 +1551,6 @@ function Update(update) {
       continue;
     } else if (attr.name == "detailsURL") {
       this._detailsURL = attr.value;
-    } else if (attr.name == "extensionVersion") {
-      // Prevent extensionVersion from replacing appVersion if appVersion is
-      // present in the update xml.
-      if (!this.appVersion) {
-        this.appVersion = attr.value;
-      }
     } else if (attr.name == "installDate" && attr.value) {
       let val = parseInt(attr.value);
       if (val) {
@@ -1547,29 +1567,24 @@ function Update(update) {
     } else if (attr.name == "showPrompt") {
       this.showPrompt = attr.value == "true";
     } else if (attr.name == "promptWaitTime") {
-      if(!isNaN(attr.value)) {
+      if (!isNaN(attr.value)) {
         this.promptWaitTime = parseInt(attr.value);
+      }
+    } else if (attr.name == "backgroundInterval") {
+      if (!isNaN(attr.value)) {
+        this.backgroundInterval = parseInt(attr.value);
       }
     } else if (attr.name == "unsupported") {
       this.unsupported = attr.value == "true";
-    } else if (attr.name == "version") {
-      // Prevent version from replacing displayVersion if displayVersion is
-      // present in the update xml.
-      if (!this.displayVersion) {
-        this.displayVersion = attr.value;
-      }
     } else {
       this[attr.name] = attr.value;
 
       switch (attr.name) {
         case "appVersion":
-        case "billboardURL":
         case "buildID":
         case "channel":
         case "displayVersion":
-        case "licenseURL":
         case "name":
-        case "platformVersion":
         case "previousAppVersion":
         case "serviceURL":
         case "statusText":
@@ -1584,6 +1599,13 @@ function Update(update) {
       }
     }
   }
+
+  if (!this.displayVersion) {
+    this.displayVersion = this.appVersion;
+  }
+
+  // Don't allow the background download interval to be greater than 10 minutes.
+  this.backgroundInterval = Math.min(this.backgroundInterval, 600);
 
   // The Update Name is either the string provided by the <update> element, or
   // the string: "<App Name> <Update App Version>"
@@ -1670,9 +1692,8 @@ Update.prototype = {
    * See nsIUpdateService.idl
    */
   serialize: function Update_serialize(updates) {
-    // If appVersion isn't defined just return null. This happens when a
-    // temporary nsIUpdate is passed to the UI when the
-    // app.update.showInstalledUI prefence is set to true.
+    // If appVersion isn't defined just return null. This happens when cleaning
+    // up invalid updates (e.g. incorrect channel).
     if (!this.appVersion) {
       return null;
     }
@@ -1681,8 +1702,6 @@ Update.prototype = {
     update.setAttribute("buildID", this.buildID);
     update.setAttribute("channel", this.channel);
     update.setAttribute("displayVersion", this.displayVersion);
-    // for backwards compatibility in case the user downgrades
-    update.setAttribute("extensionVersion", this.appVersion);
     update.setAttribute("installDate", this.installDate);
     update.setAttribute("isCompleteUpdate", this.isCompleteUpdate);
     update.setAttribute("isOSUpdate", this.isOSUpdate);
@@ -1691,22 +1710,11 @@ Update.prototype = {
     update.setAttribute("showNeverForVersion", this.showNeverForVersion);
     update.setAttribute("showPrompt", this.showPrompt);
     update.setAttribute("promptWaitTime", this.promptWaitTime);
+    update.setAttribute("backgroundInterval", this.backgroundInterval);
     update.setAttribute("type", this.type);
-    // for backwards compatibility in case the user downgrades
-    update.setAttribute("version", this.displayVersion);
 
-    // Optional attributes
-    if (this.billboardURL) {
-      update.setAttribute("billboardURL", this.billboardURL);
-    }
     if (this.detailsURL) {
       update.setAttribute("detailsURL", this.detailsURL);
-    }
-    if (this.licenseURL) {
-      update.setAttribute("licenseURL", this.licenseURL);
-    }
-    if (this.platformVersion) {
-      update.setAttribute("platformVersion", this.platformVersion);
     }
     if (this.previousAppVersion) {
       update.setAttribute("previousAppVersion", this.previousAppVersion);
@@ -1817,11 +1825,6 @@ UpdateService.prototype = {
   _downloader: null,
 
   /**
-   * Incompatible add-on count.
-   */
-  _incompatAddonsCount: 0,
-
-  /**
    * Whether or not the service registered the "online" observer.
    */
   _registeredOnlineObserver: false,
@@ -1854,6 +1857,35 @@ UpdateService.prototype = {
   observe: function AUS_observe(subject, topic, data) {
     switch (topic) {
       case "post-update-processing":
+        if (readStatusFile(getUpdatesDir()) == STATE_SUCCEEDED) {
+          // The active update needs to be copied to the first update in the
+          // updates.xml early during startup to support post update actions
+          // (bug 1301288).
+          let um = Cc["@mozilla.org/updates/update-manager;1"].
+                   getService(Ci.nsIUpdateManager);
+          um.activeUpdate.state = STATE_SUCCEEDED;
+          um.saveUpdates();
+          Services.prefs.setBoolPref(PREF_APP_UPDATE_POSTUPDATE, true);
+        }
+
+        if (Services.appinfo.ID in APPID_TO_TOPIC) {
+          // Delay post-update processing to ensure that possible update
+          // dialogs are shown in front of the app window, if possible.
+          // See bug 311614.
+          Services.obs.addObserver(this, APPID_TO_TOPIC[Services.appinfo.ID],
+                                   false);
+          break;
+        }
+        // intentional fallthrough
+      case "sessionstore-windows-restored":
+      case "mail-startup-done":
+      case "xul-window-visible":
+        if (Services.appinfo.ID in APPID_TO_TOPIC) {
+          Services.obs.removeObserver(this,
+                                      APPID_TO_TOPIC[Services.appinfo.ID]);
+        }
+        // intentional fallthrough
+      case "test-post-update-processing":
         // Clean up any extant updates
         this._postUpdateProcessing();
         break;
@@ -1931,6 +1963,23 @@ UpdateService.prototype = {
       return;
     }
 
+    // Handle the case when the update is the same or older than the current
+    // version and nsUpdateDriver.cpp skipped updating due to the version being
+    // older than the current version.
+    if (update && update.appVersion &&
+        (status == STATE_PENDING || status == STATE_PENDING_SERVICE ||
+         status == STATE_APPLIED || status == STATE_APPLIED_SERVICE ||
+         status == STATE_PENDING_ELEVATE)) {
+      if (Services.vc.compare(update.appVersion, Services.appinfo.version) < 0 ||
+          Services.vc.compare(update.appVersion, Services.appinfo.version) == 0 &&
+          update.buildID == Services.appinfo.appBuildID) {
+        LOG("UpdateService:_postUpdateProcessing - removing update for older " +
+            "or same application version");
+        cleanupActiveUpdate();
+        return;
+      }
+    }
+
     if (AppConstants.platform == "gonk") {
       // This code is called very early in the boot process, before we've even
       // had a chance to setup the UI so we can give feedback to the user.
@@ -1975,7 +2024,8 @@ UpdateService.prototype = {
       // If it's "applying", we know that we've already been here once, so
       // we really want to start from a clean state.
       if (update &&
-          (update.state == STATE_PENDING || update.state == STATE_PENDING_SVC)) {
+          (update.state == STATE_PENDING ||
+           update.state == STATE_PENDING_SERVICE)) {
         LOG("UpdateService:_postUpdateProcessing - patch found in applying " +
             "state for the first time");
         update.state = STATE_APPLYING;
@@ -2032,6 +2082,7 @@ UpdateService.prototype = {
       update.errorCode = parseInt(parts[1]);
     }
 
+
     if (status != STATE_SUCCEEDED) {
       // Since the update didn't succeed save a copy of the active update's
       // current state to the updates.xml so it is possible to track failures.
@@ -2046,13 +2097,14 @@ UpdateService.prototype = {
 
       // Update the patch's metadata.
       um.activeUpdate = update;
-      Services.prefs.setBoolPref(PREF_APP_UPDATE_POSTUPDATE, true);
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateInstalled();
 
       // Done with this update. Clean it up.
       cleanupActiveUpdate();
+    } else if (status == STATE_PENDING_ELEVATE) {
+      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
+                     createInstance(Ci.nsIUpdatePrompt);
+      prompter.showUpdateElevationRequired();
+      return;
     } else {
       // If there was an I/O error it is assumed that the patch is not invalid
       // and it is set to pending so an attempt to apply it again will happen
@@ -2069,10 +2121,6 @@ UpdateService.prototype = {
                      createInstance(Ci.nsIUpdatePrompt);
       prompter.showUpdateError(update);
     }
-
-    // Now trash the MozUpdater directory created when replacing an install with
-    // a staged update.
-    cleanUpMozUpdaterDirs();
   },
 
   /**
@@ -2118,8 +2166,6 @@ UpdateService.prototype = {
     LOG("UpdateService:onError - error during background update. error code: " +
         update.errorCode + ", status text: " + update.statusText);
 
-    var maxErrors;
-    var errCount;
     if (update.errorCode == NETWORK_ERROR_OFFLINE) {
       // Register an online observer to try again
       this._registerOnlineObserver();
@@ -2129,52 +2175,23 @@ UpdateService.prototype = {
       return;
     }
 
-    if (update.errorCode == CERT_ATTR_CHECK_FAILED_NO_UPDATE ||
-        update.errorCode == CERT_ATTR_CHECK_FAILED_HAS_UPDATE) {
-      errCount = getPref("getIntPref", PREF_APP_UPDATE_CERT_ERRORS, 0);
-      errCount++;
-      Services.prefs.setIntPref(PREF_APP_UPDATE_CERT_ERRORS, errCount);
-      maxErrors = getPref("getIntPref", PREF_APP_UPDATE_CERT_MAXERRORS, 5);
-    } else {
-      // Send the actual error code to telemetry
-      AUSTLMY.pingCheckExError(this._pingSuffix, update.errorCode);
-      update.errorCode = BACKGROUNDCHECK_MULTIPLE_FAILURES;
-      errCount = getPref("getIntPref", PREF_APP_UPDATE_BACKGROUNDERRORS, 0);
-      errCount++;
-      Services.prefs.setIntPref(PREF_APP_UPDATE_BACKGROUNDERRORS, errCount);
-      maxErrors = getPref("getIntPref", PREF_APP_UPDATE_BACKGROUNDMAXERRORS,
-                          10);
-    }
+    // Send the error code to telemetry
+    AUSTLMY.pingCheckExError(this._pingSuffix, update.errorCode);
+    update.errorCode = BACKGROUNDCHECK_MULTIPLE_FAILURES;
+    let errCount = getPref("getIntPref", PREF_APP_UPDATE_BACKGROUNDERRORS, 0);
+    errCount++;
+    Services.prefs.setIntPref(PREF_APP_UPDATE_BACKGROUNDERRORS, errCount);
+    // Don't allow the preference to set a value greater than 20 for max errors.
+    let maxErrors = Math.min(getPref("getIntPref", PREF_APP_UPDATE_BACKGROUNDMAXERRORS, 10), 20);
 
-    let checkCode;
     if (errCount >= maxErrors) {
       let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
                      createInstance(Ci.nsIUpdatePrompt);
       prompter.showUpdateError(update);
-
-      switch (update.errorCode) {
-        case CERT_ATTR_CHECK_FAILED_NO_UPDATE:
-          checkCode = AUSTLMY.CHK_CERT_ATTR_NO_UPDATE_PROMPT;
-          break;
-        case CERT_ATTR_CHECK_FAILED_HAS_UPDATE:
-          checkCode = AUSTLMY.CHK_CERT_ATTR_WITH_UPDATE_PROMPT;
-          break;
-        default:
-          checkCode = AUSTLMY.CHK_GENERAL_ERROR_PROMPT;
-      }
+      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_GENERAL_ERROR_PROMPT);
     } else {
-      switch (update.errorCode) {
-        case CERT_ATTR_CHECK_FAILED_NO_UPDATE:
-          checkCode = AUSTLMY.CHK_CERT_ATTR_NO_UPDATE_SILENT;
-          break;
-        case CERT_ATTR_CHECK_FAILED_HAS_UPDATE:
-          checkCode = AUSTLMY.CHK_CERT_ATTR_WITH_UPDATE_SILENT;
-          break;
-        default:
-          checkCode = AUSTLMY.CHK_GENERAL_ERROR_SILENT;
-      }
+      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_GENERAL_ERROR_SILENT);
     }
-    AUSTLMY.pingCheckCode(this._pingSuffix, checkCode);
   },
 
   /**
@@ -2270,12 +2287,20 @@ UpdateService.prototype = {
     AUSTLMY.pingBoolPref("UPDATE_NOT_PREF_UPDATE_STAGING_ENABLED_" +
                          this._pingSuffix,
                          PREF_APP_UPDATE_STAGING_ENABLED, true, true);
-    if (AppConstants.platform == "win") {
+    if (AppConstants.platform == "win" || AppConstants.platform == "macosx") {
       // Histogram IDs:
       // UPDATE_PREF_UPDATE_CANCELATIONS_EXTERNAL
       // UPDATE_PREF_UPDATE_CANCELATIONS_NOTIFY
       AUSTLMY.pingIntPref("UPDATE_PREF_UPDATE_CANCELATIONS_" + this._pingSuffix,
                           PREF_APP_UPDATE_CANCELATIONS, 0, 0);
+    }
+    if (AppConstants.platform == "macosx") {
+      // Histogram IDs:
+      // UPDATE_PREF_UPDATE_CANCELATIONS_OSX_EXTERNAL
+      // UPDATE_PREF_UPDATE_CANCELATIONS_OSX_NOTIFY
+      AUSTLMY.pingIntPref("UPDATE_PREF_UPDATE_CANCELATIONS_OSX_" +
+                          this._pingSuffix,
+                          PREF_APP_UPDATE_CANCELATIONS_OSX, 0, 0);
     }
     if (AppConstants.MOZ_MAINTENANCE_SERVICE) {
       // Histogram IDs:
@@ -2299,14 +2324,6 @@ UpdateService.prototype = {
       }
     }
 
-    let prefType = Services.prefs.getPrefType(PREF_APP_UPDATE_URL_OVERRIDE);
-    let overridePrefHasValue = prefType != Ci.nsIPrefBranch.PREF_INVALID;
-    // Histogram IDs:
-    // UPDATE_HAS_PREF_URL_OVERRIDE_EXTERNAL
-    // UPDATE_HAS_PREF_URL_OVERRIDE_NOTIFY
-    AUSTLMY.pingGeneric("UPDATE_HAS_PREF_URL_OVERRIDE_" + this._pingSuffix,
-                        overridePrefHasValue, false);
-
     // If a download is in progress or the patch has been staged do nothing.
     if (this.isDownloading) {
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_IS_DOWNLOADING);
@@ -2315,7 +2332,8 @@ UpdateService.prototype = {
 
     if (this._downloader && this._downloader.patchIsStaged) {
       let readState = readStatusFile(getUpdatesDir());
-      if (readState == STATE_PENDING || readState == STATE_PENDING_SVC) {
+      if (readState == STATE_PENDING || readState == STATE_PENDING_SERVICE ||
+          readState == STATE_PENDING_ELEVATE) {
         AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_IS_DOWNLOADED);
       } else {
         AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_IS_STAGED);
@@ -2336,18 +2354,8 @@ UpdateService.prototype = {
     } else if (!UpdateUtils.ABI) {
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_OS_ABI);
     } else if (!validUpdateURL) {
-      if (overridePrefHasValue) {
-        if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_URL_OVERRIDE)) {
-          AUSTLMY.pingCheckCode(this._pingSuffix,
-                                AUSTLMY.CHK_INVALID_USER_OVERRIDE_URL);
-        } else {
-          AUSTLMY.pingCheckCode(this._pingSuffix,
-                                AUSTLMY.CHK_INVALID_DEFAULT_OVERRIDE_URL);
-        }
-      } else {
-        AUSTLMY.pingCheckCode(this._pingSuffix,
-                              AUSTLMY.CHK_INVALID_DEFAULT_URL);
-      }
+      AUSTLMY.pingCheckCode(this._pingSuffix,
+                            AUSTLMY.CHK_INVALID_DEFAULT_URL);
     } else if (!getPref("getBoolPref", PREF_APP_UPDATE_ENABLED, true)) {
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_PREF_DISABLED);
     } else if (!hasUpdateMutex()) {
@@ -2432,19 +2440,70 @@ UpdateService.prototype = {
       }
     });
 
-    var update = minorUpdate || majorUpdate;
-    if (!update) {
+    let update = minorUpdate || majorUpdate;
+    if (AppConstants.platform == "macosx" && update) {
+      if (getElevationRequired()) {
+        let installAttemptVersion = getPref("getCharPref",
+                                            PREF_APP_UPDATE_ELEVATE_VERSION,
+                                            null);
+        if (vc.compare(installAttemptVersion, update.appVersion) != 0) {
+          Services.prefs.setCharPref(PREF_APP_UPDATE_ELEVATE_VERSION,
+                                     update.appVersion);
+          if (Services.prefs.prefHasUserValue(
+                PREF_APP_UPDATE_CANCELATIONS_OSX)) {
+            Services.prefs.clearUserPref(PREF_APP_UPDATE_CANCELATIONS_OSX);
+          }
+          if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ELEVATE_NEVER)) {
+            Services.prefs.clearUserPref(PREF_APP_UPDATE_ELEVATE_NEVER);
+          }
+        } else {
+          let numCancels = getPref("getIntPref",
+                                   PREF_APP_UPDATE_CANCELATIONS_OSX, 0);
+          let rejectedVersion = getPref("getCharPref",
+                                        PREF_APP_UPDATE_ELEVATE_NEVER, "");
+          let maxCancels = getPref("getIntPref",
+                                   PREF_APP_UPDATE_CANCELATIONS_OSX_MAX,
+                                   DEFAULT_CANCELATIONS_OSX_MAX);
+          if (numCancels >= maxCancels) {
+            LOG("UpdateService:selectUpdate - the user requires elevation to " +
+                "install this update, but the user has exceeded the max " +
+                "number of elevation attempts.");
+            update.elevationFailure = true;
+            AUSTLMY.pingCheckCode(
+              this._pingSuffix,
+              AUSTLMY.CHK_ELEVATION_DISABLED_FOR_VERSION);
+          } else if (vc.compare(rejectedVersion, update.appVersion) == 0) {
+            LOG("UpdateService:selectUpdate - the user requires elevation to " +
+                "install this update, but elevation is disabled for this " +
+                "version.");
+            update.elevationFailure = true;
+            AUSTLMY.pingCheckCode(this._pingSuffix,
+                                  AUSTLMY.CHK_ELEVATION_OPTOUT_FOR_VERSION);
+          } else {
+            LOG("UpdateService:selectUpdate - the user requires elevation to " +
+                "install the update.");
+          }
+        }
+      } else {
+        // Clear elevation-related prefs since they no longer apply (the user
+        // may have gained write access to the Firefox directory or an update
+        // was executed with a different profile).
+        if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ELEVATE_VERSION)) {
+          Services.prefs.clearUserPref(PREF_APP_UPDATE_ELEVATE_VERSION);
+        }
+        if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CANCELATIONS_OSX)) {
+          Services.prefs.clearUserPref(PREF_APP_UPDATE_CANCELATIONS_OSX);
+        }
+        if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ELEVATE_NEVER)) {
+          Services.prefs.clearUserPref(PREF_APP_UPDATE_ELEVATE_NEVER);
+        }
+      }
+    } else if (!update) {
       AUSTLMY.pingCheckCode(this._pingSuffix, lastCheckCode);
     }
 
     return update;
   },
-
-  /**
-   * Reference to the currently selected update for when add-on compatibility
-   * is checked.
-   */
-  _update: null,
 
   /**
    * Determine which of the specified updates should be installed and begin the
@@ -2476,7 +2535,7 @@ UpdateService.prototype = {
     }
 
     var update = this.selectUpdate(updates, updates.length);
-    if (!update) {
+    if (!update || update.elevationFailure) {
       return;
     }
 
@@ -2509,22 +2568,12 @@ UpdateService.prototype = {
      * a) if the app.update.auto preference is false then automatic download and
      *    install is disabled and the user will be notified.
      * b) if the update has a showPrompt attribute the user will be notified.
-     * c) Mode is determined by the value of the app.update.mode preference.
-     *
-     * If the update when it is first read has an appVersion attribute the
-     * following behavior implemented in bug 530872 will occur:
-     * Mode   Incompatible Add-ons   Outcome
-     * 0      N/A                    Auto Install
-     * 1      Yes                    Notify
-     * 1      No                     Auto Install
      *
      * If the update when it is first read does not have an appVersion attribute
      * the following deprecated behavior will occur:
-     * Update Type   Mode   Incompatible Add-ons   Outcome
-     * Major         all    N/A                    Notify
-     * Minor         0      N/A                    Auto Install
-     * Minor         1      Yes                    Notify
-     * Minor         1      No                     Auto Install
+     * Update Type   Outcome
+     * Major         Notify
+     * Minor         Auto Install
      */
     if (update.showPrompt) {
       LOG("UpdateService:_selectAndInstallUpdate - prompting because the " +
@@ -2542,186 +2591,18 @@ UpdateService.prototype = {
       return;
     }
 
-    if (getPref("getIntPref", PREF_APP_UPDATE_MODE, 1) == 0) {
-      // Do not prompt regardless of add-on incompatibilities
-      LOG("UpdateService:_selectAndInstallUpdate - add-on compatibility " +
-          "check disabled by preference, just download the update");
-      let status = this.downloadUpdate(update, true);
-      if (status == STATE_NONE) {
-        cleanupActiveUpdate();
-      }
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_ADDON_PREF_DISABLED);
-      return;
+    LOG("UpdateService:_selectAndInstallUpdate - download the update");
+    let status = this.downloadUpdate(update, true);
+    if (status == STATE_NONE) {
+      cleanupActiveUpdate();
     }
-
-    // Only check add-on compatibility when the version changes.
-    if (update.appVersion &&
-        Services.vc.compare(update.appVersion, Services.appinfo.version) != 0) {
-      this._update = update;
-      this._checkAddonCompatibility();
-    }
-    else {
-      LOG("UpdateService:_selectAndInstallUpdate - add-on compatibility " +
-          "check not performed due to the update version being the same as " +
-          "the current application version, just download the update");
-      let status = this.downloadUpdate(update, true);
-      if (status == STATE_NONE) {
-        cleanupActiveUpdate();
-      }
-      AUSTLMY.pingCheckCode(this._pingSuffix,AUSTLMY.CHK_ADDON_SAME_APP_VER);
-    }
+    AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_DOWNLOAD_UPDATE);
   },
 
   _showPrompt: function AUS__showPrompt(update) {
     let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
                    createInstance(Ci.nsIUpdatePrompt);
     prompter.showUpdateAvailable(update);
-  },
-
-  _checkAddonCompatibility: function AUS__checkAddonCompatibility() {
-    try {
-      var hotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID);
-    }
-    catch (e) { }
-
-    // Get all the installed add-ons
-    var self = this;
-    AddonManager.getAllAddons(function(addons) {
-      self._incompatibleAddons = [];
-      addons.forEach(function(addon) {
-        // Protect against code that overrides the add-ons manager and doesn't
-        // implement the isCompatibleWith or the findUpdates method.
-        if (!("isCompatibleWith" in addon) || !("findUpdates" in addon)) {
-          let errMsg = "Add-on doesn't implement either the isCompatibleWith " +
-                       "or the findUpdates method!";
-          if (addon.id) {
-            errMsg += " Add-on ID: " + addon.id;
-          }
-          Cu.reportError(errMsg);
-          return;
-        }
-
-        // If an add-on isn't appDisabled and isn't userDisabled then it is
-        // either active now or the user expects it to be active after the
-        // restart. If that is the case and the add-on is not installed by the
-        // application and is not compatible with the new application version
-        // then the user should be warned that the add-on will become
-        // incompatible. If an addon's type equals plugin it is skipped since
-        // checking plugins compatibility information isn't supported and
-        // getting the scope property of a plugin breaks in some environments
-        // (see bug 566787). The hotfix add-on is also ignored as it shouldn't
-        // block the user from upgrading.
-        try {
-          if (addon.type != "plugin" && addon.id != hotfixID &&
-              !addon.appDisabled && !addon.userDisabled &&
-              addon.scope != AddonManager.SCOPE_APPLICATION &&
-              addon.isCompatible &&
-              !addon.isCompatibleWith(self._update.appVersion,
-                                      self._update.platformVersion)) {
-            self._incompatibleAddons.push(addon);
-          }
-        } catch (e) {
-          Cu.reportError(e);
-        }
-      });
-
-      if (self._incompatibleAddons.length > 0) {
-      /**
-       * PREF_APP_UPDATE_INCOMPATIBLE_MODE
-       * Controls the mode in which we check for updates as follows.
-       *
-       *   PREF_APP_UPDATE_INCOMPATIBLE_MODE != 1
-       *   We check for VersionInfo _and_ NewerVersion updates for the
-       *   incompatible add-ons - i.e. if Foo 1.2 is installed and it is
-       *   incompatible with the update, and we find Foo 2.0 which is but has
-       *   not been installed, then we do NOT prompt because the user can
-       *   download Foo 2.0 when they restart after the update during the add-on
-       *   mismatch checking UI. This is the default, since it suppresses most
-       *   prompt dialogs.
-       *
-       *   PREF_APP_UPDATE_INCOMPATIBLE_MODE == 1
-       *   We check for VersionInfo updates for the incompatible add-ons - i.e.
-       *   if the situation above with Foo 1.2 and available update to 2.0
-       *   applies, we DO show the prompt since a download operation will be
-       *   required after the update. This is not the default and is supplied
-       *   only as a hidden option for those that want it.
-       */
-        self._updateCheckCount = self._incompatibleAddons.length;
-        LOG("UpdateService:_checkAddonCompatibility - checking for " +
-            "incompatible add-ons");
-
-        self._incompatibleAddons.forEach(function(addon) {
-          addon.findUpdates(this, AddonManager.UPDATE_WHEN_NEW_APP_DETECTED,
-                            this._update.appVersion, this._update.platformVersion);
-        }, self);
-      }
-      else {
-        LOG("UpdateService:_checkAddonCompatibility - no incompatible " +
-            "add-ons found, just download the update");
-        var status = self.downloadUpdate(self._update, true);
-        if (status == STATE_NONE)
-          cleanupActiveUpdate();
-        self._update = null;
-        AUSTLMY.pingCheckCode(self._pingSuffix, AUSTLMY.CHK_ADDON_NO_INCOMPAT);
-      }
-    });
-  },
-
-  // AddonUpdateListener
-  onCompatibilityUpdateAvailable: function(addon) {
-    // Remove the add-on from the list of add-ons that will become incompatible
-    // with the new version of the application.
-    for (var i = 0; i < this._incompatibleAddons.length; ++i) {
-      if (this._incompatibleAddons[i].id == addon.id) {
-        LOG("UpdateService:onCompatibilityUpdateAvailable - found update for " +
-            "add-on ID: " + addon.id);
-        this._incompatibleAddons.splice(i, 1);
-      }
-    }
-  },
-
-  onUpdateAvailable: function(addon, install) {
-    if (getPref("getIntPref", PREF_APP_UPDATE_INCOMPATIBLE_MODE, 0) == 1) {
-      return;
-    }
-
-    // If the new version of this add-on is blocklisted for the new application
-    // then it isn't a valid update and the user should still be warned that
-    // the add-on will become incompatible.
-    if (Services.blocklist.isAddonBlocklisted(addon, this._update.appVersion,
-                                              this._update.platformVersion)) {
-      return;
-    }
-
-    // Compatibility or new version updates mean the same thing here.
-    this.onCompatibilityUpdateAvailable(addon);
-  },
-
-  onUpdateFinished: function(addon) {
-    if (--this._updateCheckCount > 0) {
-      return;
-    }
-
-    if (this._incompatibleAddons.length > 0 || !getCanApplyUpdates()) {
-      LOG("UpdateService:onUpdateEnded - prompting because there are " +
-          "incompatible add-ons");
-      if (this._incompatibleAddons.length > 0) {
-        AUSTLMY.pingCheckCode(this._pingSuffix,
-                              AUSTLMY.CHK_ADDON_HAVE_INCOMPAT);
-      } else {
-        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNABLE_TO_APPLY);
-      }
-      this._showPrompt(this._update);
-    } else {
-      LOG("UpdateService:_selectAndInstallUpdate - updates for all " +
-          "incompatible add-ons found, just download the update");
-      var status = this.downloadUpdate(this._update, true);
-      if (status == STATE_NONE)
-        cleanupActiveUpdate();
-      AUSTLMY.pingCheckCode(this._pingSuffix,
-                            AUSTLMY.CHK_ADDON_UPDATES_FOR_INCOMPAT);
-    }
-    this._update = null;
   },
 
   /**
@@ -2743,6 +2624,13 @@ UpdateService.prototype = {
    */
   get canCheckForUpdates() {
     return gCanCheckForUpdates && hasUpdateMutex();
+  },
+
+  /**
+   * See nsIUpdateService.idl
+   */
+  get elevationRequired() {
+    return getElevationRequired();
   },
 
   /**
@@ -3164,9 +3052,8 @@ UpdateManager.prototype = {
       var doc = parser.parseFromString(EMPTY_UPDATES_DOCUMENT, "text/xml");
 
       for (var i = 0; i < updates.length; ++i) {
-        // If appVersion isn't defined don't add the update. This happens when a
-        // temporary nsIUpdate is passed to the UI when the
-        // app.update.showInstalledUI prefence is set to true.
+        // If appVersion isn't defined don't add the update. This happens when
+        // cleaning up invalid updates (e.g. incorrect channel).
         if (updates[i] && updates[i].appVersion) {
           doc.documentElement.appendChild(updates[i].serialize(doc));
         }
@@ -3197,8 +3084,9 @@ UpdateManager.prototype = {
       for (let i = updates.length - 1; i >= 0; --i) {
         let state = updates[i].state;
         if (state == STATE_NONE || state == STATE_DOWNLOADING ||
-            state == STATE_APPLIED || state == STATE_APPLIED_SVC ||
-            state == STATE_PENDING || state == STATE_PENDING_SVC) {
+            state == STATE_APPLIED || state == STATE_APPLIED_SERVICE ||
+            state == STATE_PENDING || state == STATE_PENDING_SERVICE ||
+            state == STATE_PENDING_ELEVATE) {
           updates.splice(i, 1);
         }
       }
@@ -3216,7 +3104,6 @@ UpdateManager.prototype = {
     if (!update) {
       return;
     }
-    var updateSucceeded = true;
     var status = readStatusFile(getUpdatesDir());
     pingStateAndStatusCodes(update, false, status);
     var parts = status.split(":");
@@ -3236,13 +3123,15 @@ UpdateManager.prototype = {
     cleanUpUpdatesDir(false);
 
     if (update.state == STATE_FAILED && parts[1]) {
-      updateSucceeded = false;
       if (!handleUpdateFailure(update, parts[1])) {
         handleFallbackToCompleteUpdate(update, true);
       }
+
+      update.QueryInterface(Ci.nsIWritablePropertyBag);
+      update.setProperty("stagingFailed", "true");
     }
     if (update.state == STATE_APPLIED && shouldUseService()) {
-      writeStatusFile(getUpdatesDir(), update.state = STATE_APPLIED_SVC);
+      writeStatusFile(getUpdatesDir(), update.state = STATE_APPLIED_SERVICE);
     }
 
     // Send an observer notification which the update wizard uses in
@@ -3273,14 +3162,50 @@ UpdateManager.prototype = {
       return;
     }
 
-    if (update.state == STATE_APPLIED || update.state == STATE_APPLIED_SVC ||
-        update.state == STATE_PENDING || update.state == STATE_PENDING_SVC) {
-        // Notify the user that an update has been staged and is ready for
-        // installation (i.e. that they should restart the application).
+    if (update.state == STATE_APPLIED ||
+        update.state == STATE_APPLIED_SERVICE ||
+        update.state == STATE_PENDING ||
+        update.state == STATE_PENDING_SERVICE ||
+        update.state == STATE_PENDING_ELEVATE) {
+      // Notify the user that an update has been staged and is ready for
+      // installation (i.e. that they should restart the application).
       let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
                      createInstance(Ci.nsIUpdatePrompt);
       prompter.showUpdateDownloaded(update, true);
     }
+  },
+
+  /**
+   * See nsIUpdateService.idl
+   */
+  elevationOptedIn: function UM_elevationOptedIn() {
+    // The user has been been made aware that the update requires elevation.
+    let update = this._activeUpdate;
+    if (!update) {
+      return;
+    }
+    let status = readStatusFile(getUpdatesDir());
+    let parts = status.split(":");
+    update.state = parts[0];
+    if (update.state == STATE_PENDING_ELEVATE) {
+      // Proceed with the pending update.
+      // Note: STATE_PENDING_ELEVATE stands for "pending user's approval to
+      // proceed with an elevated update". As long as we see this state, we will
+      // notify the user of the availability of an update that requires
+      // elevation. |elevationOptedIn| (this function) is called when the user
+      // gives us approval to proceed, so we want to switch to STATE_PENDING.
+      // The updater then detects whether or not elevation is required and
+      // displays the elevation prompt if necessary. This last step does not
+      // depend on the state in the status file.
+      writeStatusFile(getUpdatesDir(), STATE_PENDING);
+    }
+  },
+
+  /**
+   * See nsIUpdateService.idl
+   */
+  cleanupActiveUpdate: function UM_cleanupActiveUpdate() {
+    cleanupActiveUpdate();
   },
 
   classID: Components.ID("{093C2356-4843-4C65-8709-D7DBCBBE7DFB}"),
@@ -3298,12 +3223,12 @@ Checker.prototype = {
   /**
    * The XMLHttpRequest object that performs the connection.
    */
-  _request  : null,
+  _request: null,
 
   /**
    * The nsIUpdateCheckListener callback
    */
-  _callback : null,
+  _callback: null,
 
   /**
    * The URL of the update service XML file to connect to that contains details
@@ -3312,16 +3237,11 @@ Checker.prototype = {
   getUpdateURL: function UC_getUpdateURL(force) {
     this._forced = force;
 
-    // Use the override URL if specified.
-    let url = getPref("getCharPref", PREF_APP_UPDATE_URL_OVERRIDE, null);
-
-    // Otherwise, construct the update URL from component parts.
-    if (!url) {
-      try {
-        url = Services.prefs.getDefaultBranch(null).
-              getCharPref(PREF_APP_UPDATE_URL);
-      } catch (e) {
-      }
+    let url;
+    try {
+      url = Services.prefs.getDefaultBranch(null).
+            getCharPref(PREF_APP_UPDATE_URL);
+    } catch (e) {
     }
 
     if (!url || url == "") {
@@ -3353,20 +3273,15 @@ Checker.prototype = {
     if (!url || (!this.enabled && !force))
       return;
 
-    this._request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                    createInstance(Ci.nsISupports);
-    // This is here to let unit test code override XHR
-    if (this._request.wrappedJSObject) {
-      this._request = this._request.wrappedJSObject;
-    }
+    this._request = new XMLHttpRequest();
     this._request.open("GET", url, true);
-    var allowNonBuiltIn = !getPref("getBoolPref",
-                                   PREF_APP_UPDATE_CERT_REQUIREBUILTIN, true);
-    this._request.channel.notificationCallbacks = new gCertUtils.BadCertHandler(allowNonBuiltIn);
+    this._request.channel.notificationCallbacks = new gCertUtils.BadCertHandler(false);
     // Prevent the request from reading from the cache.
     this._request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
     // Prevent the request from writing to the cache.
     this._request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+    // Disable cutting edge features, like TLS 1.3, where middleboxes might brick us
+    this._request.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative = true;
 
     this._request.overrideMimeType("text/xml");
     // The Cache-Control header is only interpreted by proxies and the
@@ -3378,7 +3293,7 @@ Checker.prototype = {
     this._request.setRequestHeader("Pragma", "no-cache");
 
     var self = this;
-    this._request.addEventListener("error", function(event) { self.onError(event); } ,false);
+    this._request.addEventListener("error", function(event) { self.onError(event); }, false);
     this._request.addEventListener("load", function(event) { self.onLoad(event); }, false);
 
     LOG("Checker:checkForUpdates - sending request to: " + url);
@@ -3456,31 +3371,18 @@ Checker.prototype = {
   onLoad: function UC_onLoad(event) {
     LOG("Checker:onLoad - request completed downloading document");
 
-    var prefs = Services.prefs;
-    var certs = null;
-    if (!getPref("getCharPref", PREF_APP_UPDATE_URL_OVERRIDE, null) &&
-        getPref("getBoolPref", PREF_APP_UPDATE_CERT_CHECKATTRIBUTES, true)) {
-      certs = gCertUtils.readCertPrefs(PREFBRANCH_APP_UPDATE_CERTS);
-    }
-
     try {
       // Analyze the resulting DOM and determine the set of updates.
       var updates = this._updates;
       LOG("Checker:onLoad - number of updates available: " + updates.length);
-      var allowNonBuiltIn = !getPref("getBoolPref",
-                                     PREF_APP_UPDATE_CERT_REQUIREBUILTIN, true);
-      gCertUtils.checkCert(this._request.channel, allowNonBuiltIn, certs);
 
-      if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CERT_ERRORS))
-        Services.prefs.clearUserPref(PREF_APP_UPDATE_CERT_ERRORS);
-
-      if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_BACKGROUNDERRORS))
+      if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_BACKGROUNDERRORS)) {
         Services.prefs.clearUserPref(PREF_APP_UPDATE_BACKGROUNDERRORS);
+      }
 
       // Tell the callback about the updates
       this._callback.onCheckComplete(event.target, updates, updates.length);
-    }
-    catch (e) {
+    } catch (e) {
       LOG("Checker:onLoad - there was a problem checking for updates. " +
           "Exception: " + e);
       var request = event.target;
@@ -3492,10 +3394,6 @@ Checker.prototype = {
 
       if (this._isHttpStatusCode(status)) {
         update.errorCode = HTTP_ERROR_OFFSET + status;
-      }
-      if (e.result && e.result == Cr.NS_ERROR_ILLEGAL_VALUE) {
-        update.errorCode = updates[0] ? CERT_ATTR_CHECK_FAILED_HAS_UPDATE
-                                      : CERT_ATTR_CHECK_FAILED_NO_UPDATE;
       }
 
       this._callback.onError(request, update);
@@ -3628,8 +3526,9 @@ Downloader.prototype = {
     // Note that if we decide to download and apply new updates after another
     // update has been successfully applied in the background, we need to stop
     // checking for the APPLIED state here.
-    return readState == STATE_PENDING || readState == STATE_PENDING_SVC ||
-           readState == STATE_APPLIED || readState == STATE_APPLIED_SVC;
+    return readState == STATE_PENDING || readState == STATE_PENDING_SERVICE ||
+           readState == STATE_PENDING_ELEVATE ||
+           readState == STATE_APPLIED || readState == STATE_APPLIED_SERVICE;
   },
 
   /**
@@ -3755,7 +3654,8 @@ Downloader.prototype = {
           LOG("Downloader:_selectPatch - already downloaded and staged");
           return null;
         }
-      } else if (state == STATE_PENDING || state == STATE_PENDING_SVC) {
+      } else if (state == STATE_PENDING || state == STATE_PENDING_SERVICE ||
+                 state == STATE_PENDING_ELEVATE) {
         LOG("Downloader:_selectPatch - already downloaded and staged");
         return null;
       }
@@ -3880,7 +3780,11 @@ Downloader.prototype = {
           if (patchFile.fileSize == this._patch.size) {
             LOG("Downloader:downloadUpdate - patchFile appears to be fully downloaded");
             // Bump the status along so that we don't try to redownload again.
-            status = STATE_PENDING;
+            if (getElevationRequired()) {
+              status = STATE_PENDING_ELEVATE;
+            } else {
+              status = STATE_PENDING;
+            }
           }
         } else {
           LOG("Downloader:downloadUpdate - patchFile " + patchFile.path +
@@ -3893,7 +3797,11 @@ Downloader.prototype = {
           // It looks like the patch was downloaded, but got interrupted while it
           // was being verified or applied. So we'll fake the downloading portion.
 
-          writeStatusFile(updateDir, STATE_PENDING);
+          if (getElevationRequired()) {
+            writeStatusFile(updateDir, STATE_PENDING_ELEVATE);
+          } else {
+            writeStatusFile(updateDir, STATE_PENDING);
+          }
 
           // Since the code expects the onStopRequest callback to happen
           // asynchronously (And you have to call AUS_addDownloadListener
@@ -3939,17 +3847,16 @@ Downloader.prototype = {
       }
     }
 
+    update.QueryInterface(Ci.nsIPropertyBag);
+    let interval = this.background ? update.getProperty("backgroundInterval")
+                                   : DOWNLOAD_FOREGROUND_INTERVAL;
+
     var uri = Services.io.newURI(this._patch.URL, null, null);
+    LOG("Downloader:downloadUpdate - url: " + uri.spec + ", path: " +
+        patchFile.path + ", interval: " + interval);
 
     this._request = Cc["@mozilla.org/network/incremental-download;1"].
                     createInstance(Ci.nsIIncrementalDownload);
-
-    LOG("Downloader:downloadUpdate - downloading from " + uri.spec + " to " +
-        patchFile.path);
-    var interval = this.background ? getPref("getIntPref",
-                                             PREF_APP_UPDATE_BACKGROUNDINTERVAL,
-                                             DOWNLOAD_BACKGROUND_INTERVAL)
-                                   : DOWNLOAD_FOREGROUND_INTERVAL;
     this._request.init(uri, patchFile, DOWNLOAD_CHUNK_SIZE, interval);
     this._request.start(this, null);
 
@@ -4101,7 +4008,7 @@ Downloader.prototype = {
    * @param   status
    *          Status code containing the reason for the cessation.
    */
-  onStopRequest: function  Downloader_onStopRequest(request, context, status) {
+  onStopRequest: function Downloader_onStopRequest(request, context, status) {
     if (request instanceof Ci.nsIIncrementalDownload)
       LOG("Downloader:onStopRequest - original URI spec: " + request.URI.spec +
           ", final URI spec: " + request.finalURI.spec + ", status: " + status);
@@ -4115,14 +4022,24 @@ Downloader.prototype = {
     var deleteActiveUpdate = false;
     var retryTimeout = getPref("getIntPref", PREF_APP_UPDATE_SOCKET_RETRYTIMEOUT,
                                DEFAULT_SOCKET_RETRYTIMEOUT);
+    // Prevent the preference from setting a value greater than 10000.
+    retryTimeout = Math.min(retryTimeout, 10000);
     var maxFail = getPref("getIntPref", PREF_APP_UPDATE_SOCKET_MAXERRORS,
                           DEFAULT_SOCKET_MAX_ERRORS);
+    // Prevent the preference from setting a value greater than 20.
+    maxFail = Math.min(maxFail, 20);
     LOG("Downloader:onStopRequest - status: " + status + ", " +
         "current fail: " + this.updateService._consecutiveSocketErrors + ", " +
         "max fail: " + maxFail + ", " + "retryTimeout: " + retryTimeout);
     if (Components.isSuccessCode(status)) {
       if (this._verifyDownload()) {
-        state = shouldUseService() ? STATE_PENDING_SVC : STATE_PENDING;
+        if (shouldUseService()) {
+          state = STATE_PENDING_SERVICE;
+        } else if (getElevationRequired()) {
+          state = STATE_PENDING_ELEVATE;
+        } else {
+          state = STATE_PENDING;
+        }
         if (this.background) {
           shouldShowPrompt = !getCanStageUpdates();
         }
@@ -4150,68 +4067,67 @@ Downloader.prototype = {
         // Destroy the updates directory, since we're done with it.
         cleanUpUpdatesDir();
       }
-    } else {
-      if (status == Cr.NS_ERROR_OFFLINE) {
-        // Register an online observer to try again.
-        // The online observer will continue the incremental download by
-        // calling downloadUpdate on the active update which continues
-        // downloading the file from where it was.
-        LOG("Downloader:onStopRequest - offline, register online observer: true");
-        AUSTLMY.pingDownloadCode(this.isCompleteUpdate,
-                                 AUSTLMY.DWNLD_RETRY_OFFLINE);
-        shouldRegisterOnlineObserver = true;
-        deleteActiveUpdate = false;
-      // Each of NS_ERROR_NET_TIMEOUT, ERROR_CONNECTION_REFUSED, and
-      // NS_ERROR_NET_RESET can be returned when disconnecting the internet while
-      // a download of a MAR is in progress.  There may be others but I have not
-      // encountered them during testing.
-      } else if ((status == Cr.NS_ERROR_NET_TIMEOUT ||
-                  status == Cr.NS_ERROR_CONNECTION_REFUSED ||
-                  status == Cr.NS_ERROR_NET_RESET) &&
-                 this.updateService._consecutiveSocketErrors < maxFail) {
-        LOG("Downloader:onStopRequest - socket error, shouldRetrySoon: true");
-        let dwnldCode = AUSTLMY.DWNLD_RETRY_CONNECTION_REFUSED;
-        if (status == Cr.NS_ERROR_NET_TIMEOUT) {
-          dwnldCode = AUSTLMY.DWNLD_RETRY_NET_TIMEOUT;
-        } else if (status == Cr.NS_ERROR_NET_RESET) {
-          dwnldCode = AUSTLMY.DWNLD_RETRY_NET_RESET;
-        }
-        AUSTLMY.pingDownloadCode(this.isCompleteUpdate, dwnldCode);
-        shouldRetrySoon = true;
-        deleteActiveUpdate = false;
-      } else if (status != Cr.NS_BINDING_ABORTED &&
-                 status != Cr.NS_ERROR_ABORT &&
-                 status != Cr.NS_ERROR_DOCUMENT_NOT_CACHED) {
-        LOG("Downloader:onStopRequest - non-verification failure");
-        let dwnldCode = AUSTLMY.DWNLD_ERR_DOCUMENT_NOT_CACHED;
-        if (status == Cr.NS_BINDING_ABORTED) {
-          dwnldCode = AUSTLMY.DWNLD_ERR_BINDING_ABORTED;
-        } else if (status == Cr.NS_ERROR_ABORT) {
-          dwnldCode = AUSTLMY.DWNLD_ERR_ABORT;
-        }
-        AUSTLMY.pingDownloadCode(this.isCompleteUpdate, dwnldCode);
-
-        // Some sort of other failure, log this in the |statusText| property
-        state = STATE_DOWNLOAD_FAILED;
-
-        // XXXben - if |request| (The Incremental Download) provided a means
-        // for accessing the http channel we could do more here.
-
-        this._update.statusText = getStatusTextFromCode(status,
-                                                        Cr.NS_BINDING_FAILED);
-
-        if (AppConstants.platform == "gonk") {
-          // bug891009: On FirefoxOS, manaully retry OTA download will reuse
-          // the Update object. We need to remove selected patch so that download
-          // can be triggered again successfully.
-          this._update.selectedPatch.selected = false;
-        }
-
-        // Destroy the updates directory, since we're done with it.
-        cleanUpUpdatesDir();
-
-        deleteActiveUpdate = true;
+    } else if (status == Cr.NS_ERROR_OFFLINE) {
+      // Register an online observer to try again.
+      // The online observer will continue the incremental download by
+      // calling downloadUpdate on the active update which continues
+      // downloading the file from where it was.
+      LOG("Downloader:onStopRequest - offline, register online observer: true");
+      AUSTLMY.pingDownloadCode(this.isCompleteUpdate,
+                               AUSTLMY.DWNLD_RETRY_OFFLINE);
+      shouldRegisterOnlineObserver = true;
+      deleteActiveUpdate = false;
+    // Each of NS_ERROR_NET_TIMEOUT, ERROR_CONNECTION_REFUSED,
+    // NS_ERROR_NET_RESET and NS_ERROR_DOCUMENT_NOT_CACHED can be returned
+    // when disconnecting the internet while a download of a MAR is in
+    // progress.  There may be others but I have not encountered them during
+    // testing.
+    } else if ((status == Cr.NS_ERROR_NET_TIMEOUT ||
+                status == Cr.NS_ERROR_CONNECTION_REFUSED ||
+                status == Cr.NS_ERROR_NET_RESET ||
+                status == Cr.NS_ERROR_DOCUMENT_NOT_CACHED) &&
+               this.updateService._consecutiveSocketErrors < maxFail) {
+      LOG("Downloader:onStopRequest - socket error, shouldRetrySoon: true");
+      let dwnldCode = AUSTLMY.DWNLD_RETRY_CONNECTION_REFUSED;
+      if (status == Cr.NS_ERROR_NET_TIMEOUT) {
+        dwnldCode = AUSTLMY.DWNLD_RETRY_NET_TIMEOUT;
+      } else if (status == Cr.NS_ERROR_NET_RESET) {
+        dwnldCode = AUSTLMY.DWNLD_RETRY_NET_RESET;
+      } else if (status == Cr.NS_ERROR_DOCUMENT_NOT_CACHED) {
+        dwnldCode = AUSTLMY.DWNLD_ERR_DOCUMENT_NOT_CACHED;
       }
+      AUSTLMY.pingDownloadCode(this.isCompleteUpdate, dwnldCode);
+      shouldRetrySoon = true;
+      deleteActiveUpdate = false;
+    } else if (status != Cr.NS_BINDING_ABORTED &&
+               status != Cr.NS_ERROR_ABORT) {
+      LOG("Downloader:onStopRequest - non-verification failure");
+      let dwnldCode = AUSTLMY.DWNLD_ERR_BINDING_ABORTED;
+      if (status == Cr.NS_ERROR_ABORT) {
+        dwnldCode = AUSTLMY.DWNLD_ERR_ABORT;
+      }
+      AUSTLMY.pingDownloadCode(this.isCompleteUpdate, dwnldCode);
+
+      // Some sort of other failure, log this in the |statusText| property
+      state = STATE_DOWNLOAD_FAILED;
+
+      // XXXben - if |request| (The Incremental Download) provided a means
+      // for accessing the http channel we could do more here.
+
+      this._update.statusText = getStatusTextFromCode(status,
+                                                      Cr.NS_BINDING_FAILED);
+
+      if (AppConstants.platform == "gonk") {
+        // bug891009: On FirefoxOS, manaully retry OTA download will reuse
+        // the Update object. We need to remove selected patch so that download
+        // can be triggered again successfully.
+        this._update.selectedPatch.selected = false;
+      }
+
+      // Destroy the updates directory, since we're done with it.
+      cleanUpUpdatesDir();
+
+      deleteActiveUpdate = true;
     }
     LOG("Downloader:onStopRequest - setting state to: " + state);
     this._patch.state = state;
@@ -4221,10 +4137,8 @@ Downloader.prototype = {
       this._update.installDate = (new Date()).getTime();
       um.activeUpdate = null;
     }
-    else {
-      if (um.activeUpdate) {
-        um.activeUpdate.state = state;
-      }
+    else if (um.activeUpdate) {
+      um.activeUpdate.state = state;
     }
     um.saveUpdates();
 
@@ -4285,7 +4199,8 @@ Downloader.prototype = {
       return;
     }
 
-    if (state == STATE_PENDING || state == STATE_PENDING_SVC) {
+    if (state == STATE_PENDING || state == STATE_PENDING_SERVICE ||
+        state == STATE_PENDING_ELEVATE) {
       if (getCanStageUpdates()) {
         LOG("Downloader:onStopRequest - attempting to stage update: " +
             this._update.name);
@@ -4382,17 +4297,12 @@ UpdatePrompt.prototype = {
    */
   showUpdateAvailable: function UP_showUpdateAvailable(update) {
     if (getPref("getBoolPref", PREF_APP_UPDATE_SILENT, false) ||
-        this._getUpdateWindow() || this._getAltUpdateWindow())
+        this._getUpdateWindow() || this._getAltUpdateWindow()) {
       return;
+    }
 
-    var stringsPrefix = "updateAvailable_" + update.type + ".";
-    var title = gUpdateBundle.formatStringFromName(stringsPrefix + "title",
-                                                   [update.name], 1);
-    var text = gUpdateBundle.GetStringFromName(stringsPrefix + "text");
-    var imageUrl = "";
     this._showUnobtrusiveUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                           UPDATE_WINDOW_NAME, "updatesavailable", update,
-                           title, text, imageUrl);
+                           UPDATE_WINDOW_NAME, "updatesavailable", update);
   },
 
   /**
@@ -4409,42 +4319,11 @@ UpdatePrompt.prototype = {
       return;
 
     if (background) {
-      var stringsPrefix = "updateDownloaded_" + update.type + ".";
-      var title = gUpdateBundle.formatStringFromName(stringsPrefix + "title",
-                                                     [update.name], 1);
-      var text = gUpdateBundle.GetStringFromName(stringsPrefix + "text");
-      var imageUrl = "";
       this._showUnobtrusiveUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                              UPDATE_WINDOW_NAME, "finishedBackground", update,
-                              title, text, imageUrl);
+                              UPDATE_WINDOW_NAME, "finishedBackground", update);
     } else {
       this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null,
                    UPDATE_WINDOW_NAME, "finishedBackground", update);
-    }
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateInstalled: function UP_showUpdateInstalled() {
-    if (getPref("getBoolPref", PREF_APP_UPDATE_SILENT, false) ||
-        !getPref("getBoolPref", PREF_APP_UPDATE_SHOW_INSTALLED_UI, false) ||
-        this._getUpdateWindow())
-      return;
-
-    var page = "installed";
-    var win = this._getUpdateWindow();
-    if (win) {
-      if (page && "setCurrentPage" in win)
-        win.setCurrentPage(page);
-      win.focus();
-    }
-    else {
-      var openFeatures = "chrome,centerscreen,dialog=no,resizable=no,titlebar,toolbar=no";
-      var arg = Cc["@mozilla.org/supports-string;1"].
-                createInstance(Ci.nsISupportsString);
-      arg.data = page;
-      Services.ww.openWindow(null, URI_UPDATE_PROMPT_DIALOG, null, openFeatures, arg);
     }
   },
 
@@ -4473,9 +4352,7 @@ UpdatePrompt.prototype = {
       return;
     }
 
-    if (update.errorCode == CERT_ATTR_CHECK_FAILED_NO_UPDATE ||
-        update.errorCode == CERT_ATTR_CHECK_FAILED_HAS_UPDATE ||
-        update.errorCode == BACKGROUNDCHECK_MULTIPLE_FAILURES) {
+    if (update.errorCode == BACKGROUNDCHECK_MULTIPLE_FAILURES) {
       this._showUIWhenIdle(null, URI_UPDATE_PROMPT_DIALOG, null,
                            UPDATE_WINDOW_NAME, null, update);
       return;
@@ -4491,6 +4368,21 @@ UpdatePrompt.prototype = {
   showUpdateHistory: function UP_showUpdateHistory(parent) {
     this._showUI(parent, URI_UPDATE_HISTORY_DIALOG, "modal,dialog=yes",
                  "Update:History", null, null);
+  },
+
+  /**
+   * See nsIUpdateService.idl
+   */
+  showUpdateElevationRequired: function UP_showUpdateElevationRequired() {
+    if (getPref("getBoolPref", PREF_APP_UPDATE_SILENT, false) ||
+        this._getAltUpdateWindow()) {
+      return;
+    }
+
+    let um = Cc["@mozilla.org/updates/update-manager;1"].
+             getService(Ci.nsIUpdateManager);
+    this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null,
+                 UPDATE_WINDOW_NAME, "finishedBackground", um.activeUpdate);
   },
 
   /**
@@ -4513,7 +4405,7 @@ UpdatePrompt.prototype = {
   },
 
   /**
-   * Initiate a less obtrusive UI, starting with a non-modal notification alert
+   * Display the update UI after the prompt wait time has elapsed.
    * @param   parent
    *          A parent window, can be null
    * @param   uri
@@ -4526,15 +4418,9 @@ UpdatePrompt.prototype = {
    * @param   update
    *          An update to pass to the UI in the window arguments.
    *          Can be null
-   * @param   title
-   *          The title for the notification alert.
-   * @param   text
-   *          The contents of the notification alert.
-   * @param   imageUrl
-   *          A URL identifying the image to put in the notification alert.
    */
   _showUnobtrusiveUI: function UP__showUnobUI(parent, uri, features, name, page,
-                                              update, title, text, imageUrl) {
+                                              update) {
     var observer = {
       updatePrompt: this,
       service: null,
@@ -4549,9 +4435,6 @@ UpdatePrompt.prototype = {
       },
       observe: function (aSubject, aTopic, aData) {
         switch (aTopic) {
-          case "alertclickcallback":
-            this.updatePrompt._showUI(parent, uri, features, name, page, update);
-            // fall thru
           case "quit-application":
             if (this.timer)
               this.timer.cancel();
@@ -4562,28 +4445,16 @@ UpdatePrompt.prototype = {
     };
 
     // bug 534090 - show the UI for update available notifications when the
-    // the system has been idle for at least IDLE_TIME without displaying an
-    // alert notification.
+    // the system has been idle for at least IDLE_TIME.
     if (page == "updatesavailable") {
       var idleService = Cc["@mozilla.org/widget/idleservice;1"].
                         getService(Ci.nsIIdleService);
-
-      const IDLE_TIME = getPref("getIntPref", PREF_APP_UPDATE_IDLETIME, 60);
+      // Don't allow the preference to set a value greater than 600 seconds for the idle time.
+      const IDLE_TIME = Math.min(getPref("getIntPref", PREF_APP_UPDATE_IDLETIME, 60), 600);
       if (idleService.idleTime / 1000 >= IDLE_TIME) {
         this._showUI(parent, uri, features, name, page, update);
         return;
       }
-    }
-
-    try {
-      var notifier = Cc["@mozilla.org/alerts-service;1"].
-                     getService(Ci.nsIAlertsService);
-      notifier.showAlertNotification(imageUrl, title, text, true, "", observer);
-    }
-    catch (e) {
-      // Failed to retrieve alerts service, platform unsupported
-      this._showUIWhenIdle(parent, uri, features, name, page, update);
-      return;
     }
 
     observer.service = Services.obs;
@@ -4623,7 +4494,8 @@ UpdatePrompt.prototype = {
     var idleService = Cc["@mozilla.org/widget/idleservice;1"].
                       getService(Ci.nsIIdleService);
 
-    const IDLE_TIME = getPref("getIntPref", PREF_APP_UPDATE_IDLETIME, 60);
+    // Don't allow the preference to set a value greater than 600 seconds for the idle time.
+    const IDLE_TIME = Math.min(getPref("getIntPref", PREF_APP_UPDATE_IDLETIME, 60), 600);
     if (idleService.idleTime / 1000 >= IDLE_TIME) {
       this._showUI(parent, uri, features, name, page, update);
     } else {
@@ -4666,9 +4538,9 @@ UpdatePrompt.prototype = {
   _showUI: function UP__showUI(parent, uri, features, name, page, update) {
     var ary = null;
     if (update) {
-      ary = Cc["@mozilla.org/supports-array;1"].
-            createInstance(Ci.nsISupportsArray);
-      ary.AppendElement(update);
+      ary = Cc["@mozilla.org/array;1"].
+            createInstance(Ci.nsIMutableArray);
+      ary.appendElement(update, /* weak =*/ false);
     }
 
     var win = this._getUpdateWindow();

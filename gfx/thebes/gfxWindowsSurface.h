@@ -22,12 +22,9 @@ class gfxContext;
 class gfxWindowsSurface : public gfxASurface {
 public:
     enum {
-        FLAG_TAKE_DC = (1 << 0),
-        FLAG_FOR_PRINTING = (1 << 1),
         FLAG_IS_TRANSPARENT = (1 << 2)
     };
 
-    gfxWindowsSurface(HWND wnd, uint32_t flags = 0);
     gfxWindowsSurface(HDC dc, uint32_t flags = 0);
 
     // Create from a shared d3d9surface
@@ -35,12 +32,7 @@ public:
 
     // Create a DIB surface
     gfxWindowsSurface(const mozilla::gfx::IntSize& size,
-                      gfxImageFormat imageFormat = gfxImageFormat::RGB24);
-
-    // Create a DDB surface; dc may be nullptr to use the screen DC
-    gfxWindowsSurface(HDC dc,
-                      const mozilla::gfx::IntSize& size,
-                      gfxImageFormat imageFormat = gfxImageFormat::RGB24);
+                      gfxImageFormat imageFormat = mozilla::gfx::SurfaceFormat::X8R8G8B8_UINT32);
 
     gfxWindowsSurface(cairo_surface_t *csurf);
 
@@ -53,15 +45,7 @@ public:
 
     HDC GetDC();
 
-    HDC GetDCWithClip(gfxContext *);
-
     already_AddRefed<gfxImageSurface> GetAsImageSurface();
-
-    nsresult BeginPrinting(const nsAString& aTitle, const nsAString& aPrintToFileName);
-    nsresult EndPrinting();
-    nsresult AbortPrinting();
-    nsresult BeginPage();
-    nsresult EndPage();
 
     const mozilla::gfx::IntSize GetSize() const;
 
@@ -69,7 +53,6 @@ private:
     void MakeInvalid(mozilla::gfx::IntSize& size);
 
     bool mOwnsDC;
-    bool mForPrinting;
 
     HDC mDC;
     HWND mWnd;

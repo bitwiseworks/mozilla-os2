@@ -4,6 +4,12 @@
 
 "use strict";
 
+// These are injected from XPIProvider.jsm
+/* globals ADDON_SIGNING, SIGNED_TYPES, BOOTSTRAP_REASONS, DB_SCHEMA,
+          AddonInternal, XPIProvider, XPIStates, syncLoadManifestFromFile,
+          isUsableAddon, recordAddonTelemetry, applyBlocklistChanges,
+          flushChromeCaches, canRunInSafeMode*/
+
 var Cc = Components.classes;
 var Ci = Components.interfaces;
 var Cr = Components.results;
@@ -12,6 +18,7 @@ var Cu = Components.utils;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
+/* globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
@@ -31,6 +38,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "Blocklist",
 Cu.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.xpi-utils";
 
+const nsIFile = Components.Constructor("@mozilla.org/file/local;1", "nsIFile");
+
 // Create a new logger for use by the Addons XPI Provider Utils
 // (Requires AddonManager.jsm)
 var logger = Log.repository.getLogger(LOGGER_ID);
@@ -49,6 +58,7 @@ const PREF_EM_ENABLED_ADDONS          = "extensions.enabledAddons";
 const PREF_EM_DSS_ENABLED             = "extensions.dss.enabled";
 const PREF_EM_AUTO_DISABLED_SCOPES    = "extensions.autoDisableScopes";
 const PREF_E10S_BLOCKED_BY_ADDONS     = "extensions.e10sBlockedByAddons";
+const PREF_E10S_HAS_NONEXEMPT_ADDON   = "extensions.e10s.rollout.hasAddon";
 
 const KEY_APP_PROFILE                 = "app-profile";
 const KEY_APP_SYSTEM_ADDONS           = "app-system-addons";
@@ -79,7 +89,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "softDisabled", "foreignInstall", "hasBinaryComponents",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "multiprocessCompatible", "signedState",
-                          "seen"];
+                          "seen", "dependencies", "hasEmbeddedWebExtension", "mpcOptedOut"];
 
 // Properties that should be migrated where possible from an old database. These
 // shouldn't include properties that can be read directly from install.rdf files
@@ -160,7 +170,7 @@ function makeSafe(aCallback) {
     try {
       aCallback(...aArgs);
     }
-    catch(ex) {
+    catch (ex) {
       logger.warn("XPI Database callback failed", ex);
     }
   }
@@ -323,6 +333,10 @@ function DBAddonInternal(aLoaded) {
 
   copyProperties(aLoaded, PROP_JSON_FIELDS, this);
 
+  if (!this.dependencies)
+    this.dependencies = [];
+  Object.freeze(this.dependencies);
+
   if (aLoaded._installLocation) {
     this._installLocation = aLoaded._installLocation;
     this.location = aLoaded._installLocation.name;
@@ -333,16 +347,11 @@ function DBAddonInternal(aLoaded) {
 
   this._key = this.location + ":" + this.id;
 
-  if (aLoaded._sourceBundle) {
-    this._sourceBundle = aLoaded._sourceBundle;
-  }
-  else if (aLoaded.descriptor) {
-    this._sourceBundle = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    this._sourceBundle.persistentDescriptor = aLoaded.descriptor;
-  }
-  else {
+  if (!aLoaded._sourceBundle) {
     throw new Error("Expected passed argument to contain a descriptor");
   }
+
+  this._sourceBundle = aLoaded._sourceBundle;
 
   XPCOMUtils.defineLazyGetter(this, "pendingUpgrade", function() {
       for (let install of XPIProvider.installs) {
@@ -353,7 +362,7 @@ function DBAddonInternal(aLoaded) {
           delete this.pendingUpgrade;
           return this.pendingUpgrade = install.addon;
         }
-      };
+      }
       return null;
     });
 }
@@ -589,7 +598,7 @@ this.XPIDatabase = {
         readTimer.done();
         this.parseDB(data, aRebuildOnError);
       }
-      catch(e) {
+      catch (e) {
         logger.error("Failed to load XPI JSON data from profile", e);
         let rebuildTimer = AddonManagerPrivate.simpleTimer("XPIDB_rebuildReadFailed_MS");
         this.rebuildDatabase(aRebuildOnError);
@@ -659,15 +668,25 @@ this.XPIDatabase = {
       // Make AddonInternal instances from the loaded data and save them
       let addonDB = new Map();
       for (let loadedAddon of inputAddons.addons) {
+        loadedAddon._sourceBundle = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+        try {
+          loadedAddon._sourceBundle.persistentDescriptor = loadedAddon.descriptor;
+        }
+        catch (e) {
+          // We can fail here when the descriptor is invalid, usually from the
+          // wrong OS
+          logger.warn("Could not find source bundle for add-on " + loadedAddon.id, e);
+        }
+
         let newAddon = new DBAddonInternal(loadedAddon);
         addonDB.set(newAddon._key, newAddon);
-      };
+      }
       parseTimer.done();
       this.addonDB = addonDB;
       logger.debug("Successfully read XPI database");
       this.initialized = true;
     }
-    catch(e) {
+    catch (e) {
       // If we catch and log a SyntaxError from the JSON
       // parser, the xpcshell test harness fails the test for us: bug 870828
       parseTimer.done();
@@ -703,7 +722,7 @@ this.XPIDatabase = {
         AddonManagerPrivate.recordSimpleMeasure("XPIDB_startupError", "dbMissing");
       }
     }
-    catch(e) {
+    catch (e) {
       // No schema version pref means either a really old upgrade (RDF) or
       // a new profile
       this.migrateData = this.getMigrateDataFromRDF();
@@ -1396,11 +1415,15 @@ this.XPIDatabase = {
 
   updateAddonsBlockingE10s: function() {
     let blockE10s = false;
+
+    Preferences.set(PREF_E10S_HAS_NONEXEMPT_ADDON, false);
     for (let [, addon] of this.addonDB) {
       let active = (addon.visible && !addon.disabled && !addon.pendingUninstall);
 
-      if (active && XPIProvider.isBlockingE10s(addon))
+      if (active && XPIProvider.isBlockingE10s(addon)) {
         blockE10s = true;
+        break;
+      }
     }
     Preferences.set(PREF_E10S_BLOCKED_BY_ADDONS, blockE10s);
   },
@@ -1832,10 +1855,13 @@ this.XPIDatabaseReconcile = {
    * @param  aOldPlatformVersion
    *         The version of the platform last run with this profile or null
    *         if it is a new profile or the version is unknown
-   * @return a boolean indicating if flushing caches is required to complete
-   *         changing this add-on
+   * @param  aReloadMetadata
+   *         A boolean which indicates whether metadata should be reloaded from
+   *         the addon manifests. Default to false.
+   * @return the new addon.
    */
-  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aOldAppVersion, aOldPlatformVersion) {
+  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aOldAppVersion,
+                      aOldPlatformVersion, aReloadMetadata) {
     logger.debug("Updating compatibility for add-on " + aOldAddon.id + " in " + aInstallLocation.name);
 
     // If updating from a version of the app that didn't support signedState
@@ -1847,6 +1873,25 @@ this.XPIDatabaseReconcile = {
       let manifest = syncLoadManifestFromFile(file, aInstallLocation);
       aOldAddon.signedState = manifest.signedState;
     }
+
+    // May be updating from a version of the app that didn't support all the
+    // properties of the currently-installed add-ons.
+    if (aReloadMetadata) {
+      let file = new nsIFile()
+      file.persistentDescriptor = aAddonState.descriptor;
+      let manifest = syncLoadManifestFromFile(file, aInstallLocation);
+
+      // Avoid re-reading these properties from manifest,
+      // use existing addon instead.
+      // TODO - consider re-scanning for targetApplications.
+      let remove = ["syncGUID", "foreignInstall", "visible", "active",
+                    "userDisabled", "applyBackgroundUpdates", "sourceURI",
+                    "releaseNotesURI", "targetApplications"];
+
+      let props = PROP_JSON_FIELDS.filter(a => !remove.includes(a));
+      copyProperties(manifest, props, aOldAddon);
+    }
+
     // This updates the addon's JSON cached data in place
     applyBlocklistChanges(aOldAddon, aOldAddon, aOldAppVersion,
                           aOldPlatformVersion);
@@ -1874,16 +1919,32 @@ this.XPIDatabaseReconcile = {
    * @param  aOldPlatformVersion
    *         The version of the platform last run with this profile or null
    *         if it is a new profile or the version is unknown
+   * @param  aSchemaChange
+   *         The schema has changed and all add-on manifests should be re-read.
    * @return a boolean indicating if a change requiring flushing the caches was
    *         detected
    */
-  processFileChanges(aManifests, aUpdateCompatibility, aOldAppVersion, aOldPlatformVersion) {
+  processFileChanges(aManifests, aUpdateCompatibility, aOldAppVersion, aOldPlatformVersion,
+                     aSchemaChange) {
     let loadedManifest = (aInstallLocation, aId) => {
       if (!(aInstallLocation.name in aManifests))
         return null;
       if (!(aId in aManifests[aInstallLocation.name]))
         return null;
       return aManifests[aInstallLocation.name][aId];
+    };
+
+    // Add-ons loaded from the database can have an uninitialized _sourceBundle
+    // if the descriptor was invalid. Swallow that error and say they don't exist.
+    let exists = (aAddon) => {
+      try {
+        return aAddon._sourceBundle.exists();
+      }
+      catch (e) {
+        if (e.result == Cr.NS_ERROR_NOT_INITIALIZED)
+          return false;
+        throw e;
+      }
     };
 
     // Get the previous add-ons from the database and put them into maps by location
@@ -1935,10 +1996,12 @@ this.XPIDatabaseReconcile = {
               }
             }
 
-            // The add-on has changed if the modification time has changed, or
-            // we have an updated manifest for it. Also reload the metadata for
-            // add-ons in the application directory when the application version
-            // has changed
+            // The add-on has changed if the modification time has changed, if
+            // we have an updated manifest for it, or if the schema version has
+            // changed.
+            //
+            // Also reload the metadata for add-ons in the application directory
+            // when the application version has changed.
             let newAddon = loadedManifest(installLocation, id);
             if (newAddon || oldAddon.updateDate != xpiState.mtime ||
                 (aUpdateCompatibility && (installLocation.name == KEY_APP_GLOBAL ||
@@ -1948,9 +2011,13 @@ this.XPIDatabaseReconcile = {
             else if (oldAddon.descriptor != xpiState.descriptor) {
               newAddon = this.updateDescriptor(installLocation, oldAddon, xpiState);
             }
-            else if (aUpdateCompatibility) {
+            // Check compatility when the application version and/or schema
+            // version has changed. A schema change also reloads metadata from
+            // the manifests.
+            else if (aUpdateCompatibility || aSchemaChange) {
               newAddon = this.updateCompatibility(installLocation, oldAddon, xpiState,
-                                                  aOldAppVersion, aOldPlatformVersion);
+                                                  aOldAppVersion, aOldPlatformVersion,
+                                                  aSchemaChange);
             }
             else {
               // No change
@@ -2004,14 +2071,10 @@ this.XPIDatabaseReconcile = {
     let addons = currentAddons.get(KEY_APP_SYSTEM_ADDONS) || new Map();
 
     let hideLocation;
-    if (systemAddonLocation.isActive() && systemAddonLocation.isValid(addons)) {
-      // Hide the system add-on defaults
-      logger.info("Hiding the default system add-ons.");
-      hideLocation = KEY_APP_SYSTEM_DEFAULTS;
-    }
-    else {
-      // Hide the system add-on updates
-      logger.info("Hiding the updated system add-ons.");
+
+    if (!systemAddonLocation.isValid(addons)) {
+      // Hide the system add-on updates if any are invalid.
+      logger.info("One or more updated system add-ons invalid, falling back to defaults.");
       hideLocation = KEY_APP_SYSTEM_ADDONS;
     }
 
@@ -2062,6 +2125,7 @@ this.XPIDatabaseReconcile = {
             AddonManagerPrivate.addStartupChange(AddonManager.STARTUP_CHANGE_INSTALLED, id);
 
           if (currentAddon.bootstrap) {
+            AddonManagerPrivate.addStartupChange(AddonManager.STARTUP_CHANGE_INSTALLED, id);
             // Visible bootstrapped add-ons need to have their install method called
             XPIProvider.callBootstrapMethod(currentAddon, currentAddon._sourceBundle,
                                             "install", BOOTSTRAP_REASONS.ADDON_INSTALL);
@@ -2083,7 +2147,7 @@ this.XPIDatabaseReconcile = {
           // If the previous add-on was in a different path, bootstrapped
           // and still exists then call its uninstall method.
           if (previousAddon.bootstrap && previousAddon._installLocation &&
-              previousAddon._sourceBundle.exists() &&
+              exists(previousAddon) &&
               currentAddon._sourceBundle.path != previousAddon._sourceBundle.path) {
 
             XPIProvider.callBootstrapMethod(previousAddon, previousAddon._sourceBundle,
@@ -2093,7 +2157,7 @@ this.XPIDatabaseReconcile = {
           }
 
           // Make sure to flush the cache when an old add-on has gone away
-          flushStartupCache();
+          flushChromeCaches();
 
           if (currentAddon.bootstrap) {
             // Visible bootstrapped add-ons need to have their install method called
@@ -2125,6 +2189,8 @@ this.XPIDatabaseReconcile = {
           descriptor: currentAddon._sourceBundle.persistentDescriptor,
           multiprocessCompatible: currentAddon.multiprocessCompatible,
           runInSafeMode: canRunInSafeMode(currentAddon),
+          dependencies: currentAddon.dependencies,
+          hasEmbeddedWebExtension: currentAddon.hasEmbeddedWebExtension,
         };
       }
 
@@ -2142,7 +2208,7 @@ this.XPIDatabaseReconcile = {
 
       // If the previous add-on was bootstrapped and still exists then call its
       // uninstall method.
-      if (previousAddon.bootstrap && previousAddon._sourceBundle.exists()) {
+      if (previousAddon.bootstrap && exists(previousAddon)) {
         XPIProvider.callBootstrapMethod(previousAddon, previousAddon._sourceBundle,
                                         "uninstall", BOOTSTRAP_REASONS.ADDON_UNINSTALL);
         XPIProvider.unloadBootstrapScope(previousAddon.id);
@@ -2150,7 +2216,7 @@ this.XPIDatabaseReconcile = {
       AddonManagerPrivate.addStartupChange(AddonManager.STARTUP_CHANGE_UNINSTALLED, id);
 
       // Make sure to flush the cache when an old add-on has gone away
-      flushStartupCache();
+      flushChromeCaches();
     }
 
     // Make sure add-ons from hidden locations are marked invisible and inactive

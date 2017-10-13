@@ -22,10 +22,25 @@
 #include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/common_video/rotation.h"
 
+#ifdef XP_WIN
+typedef int pid_t;
+#endif
+
 namespace webrtc {
 
 class VideoEngine;
 class VideoCaptureModule;
+
+// The observer is registered using RegisterInputObserver() and
+// deregistered using DeregisterInputObserver().
+class WEBRTC_DLLEXPORT ViEInputObserver {
+ public:
+  // This method is called if an input device is connected or disconnected .
+  virtual void DeviceChange() = 0;
+
+ protected:
+  virtual ~ViEInputObserver() {}
+};
 
 // This structure describes one set of the supported capabilities for a capture
 // device.
@@ -135,7 +150,8 @@ class WEBRTC_DLLEXPORT ViECapture {
                                char* device_nameUTF8,
                                const unsigned int device_nameUTF8Length,
                                char* unique_idUTF8,
-                               const unsigned int unique_idUTF8Length) = 0;
+                               const unsigned int unique_idUTF8Length,
+                               pid_t* pid = nullptr) = 0;
 
   // Allocates a capture device to be used in VideoEngine.
   virtual int AllocateCaptureDevice(const char* unique_idUTF8,
@@ -216,8 +232,12 @@ class WEBRTC_DLLEXPORT ViECapture {
   virtual int RegisterObserver(const int capture_id,
                                ViECaptureObserver& observer) = 0;
 
+  virtual int RegisterInputObserver(ViEInputObserver* observer) = 0;
+
   // Removes an already registered instance of ViECaptureObserver.
   virtual int DeregisterObserver(const int capture_id) = 0;
+
+  virtual int DeregisterInputObserver() = 0;
 
  protected:
   ViECapture() {}

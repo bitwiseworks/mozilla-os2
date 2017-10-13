@@ -22,7 +22,8 @@ struct WorkaroundsGL;
 class PbufferSurfaceCGL : public SurfaceGL
 {
   public:
-    PbufferSurfaceCGL(RendererGL *renderer,
+    PbufferSurfaceCGL(const egl::SurfaceState &state,
+                      RendererGL *renderer,
                       EGLint width,
                       EGLint height,
                       const FunctionsGL *functions);
@@ -34,7 +35,7 @@ class PbufferSurfaceCGL : public SurfaceGL
     egl::Error swap() override;
     egl::Error postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height) override;
     egl::Error querySurfacePointerANGLE(EGLint attribute, void **value) override;
-    egl::Error bindTexImage(EGLint buffer) override;
+    egl::Error bindTexImage(gl::Texture *texture, EGLint buffer) override;
     egl::Error releaseTexImage(EGLint buffer) override;
     void setSwapInterval(EGLint interval) override;
 
@@ -44,7 +45,7 @@ class PbufferSurfaceCGL : public SurfaceGL
     EGLint isPostSubBufferSupported() const override;
     EGLint getSwapBehavior() const override;
 
-    FramebufferImpl *createDefaultFramebuffer(const gl::Framebuffer::Data &data) override;
+    FramebufferImpl *createDefaultFramebuffer(const gl::FramebufferState &state) override;
 
   private:
     unsigned mWidth;
@@ -52,7 +53,7 @@ class PbufferSurfaceCGL : public SurfaceGL
 
     const FunctionsGL *mFunctions;
     StateManagerGL *mStateManager;
-    const WorkaroundsGL &mWorkarounds;
+    RendererGL *mRenderer;
 
     GLuint mFramebuffer;
     GLuint mColorRenderbuffer;

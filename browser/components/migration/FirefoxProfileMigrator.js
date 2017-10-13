@@ -16,7 +16,7 @@
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
+Cu.import("resource:///modules/MigrationUtils.jsm"); /* globals MigratorPrototype */
 Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
@@ -29,6 +29,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
                                   "resource://gre/modules/ProfileAge.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
 
 
 function FirefoxProfileMigrator() {
@@ -37,7 +39,7 @@ function FirefoxProfileMigrator() {
 
 FirefoxProfileMigrator.prototype = Object.create(MigratorPrototype);
 
-FirefoxProfileMigrator.prototype._getAllProfiles = function () {
+FirefoxProfileMigrator.prototype._getAllProfiles = function() {
   let allProfiles = new Map();
   let profiles =
     Components.classes["@mozilla.org/toolkit/profile-service;1"]
@@ -61,7 +63,7 @@ function sorter(a, b) {
 
 Object.defineProperty(FirefoxProfileMigrator.prototype, "sourceProfiles", {
   get: function() {
-    return [{id: x, name: x} for (x of this._getAllProfiles().keys())].sort(sorter);
+    return [...this._getAllProfiles().keys()].map(x => ({id: x, name: x})).sort(sorter);
   }
 });
 
@@ -92,10 +94,17 @@ FirefoxProfileMigrator.prototype.getResources = function(aProfile) {
   if (sourceProfileDir.equals(currentProfileDir))
     return null;
 
-  return this._getResourcesInternal(sourceProfileDir, currentProfileDir, aProfile);
+  return this._getResourcesInternal(sourceProfileDir, currentProfileDir);
 };
 
-FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileDir, currentProfileDir, aProfile) {
+FirefoxProfileMigrator.prototype.getLastUsedDate = function() {
+  // We always pretend we're really old, so that we don't mess
+  // up the determination of which browser is the most 'recent'
+  // to import from.
+  return Promise.resolve(new Date(0));
+};
+
+FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileDir, currentProfileDir) {
   let getFileResource = function(aMigrationType, aFileNames) {
     let files = [];
     for (let fileName of aFileNames) {
@@ -118,8 +127,8 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
   }.bind(this);
 
   let types = MigrationUtils.resourceTypes;
-  let places = getFileResource(types.HISTORY, ["places.sqlite"]);
-  let cookies = getFileResource(types.COOKIES, ["cookies.sqlite"]);
+  let places = getFileResource(types.HISTORY, ["places.sqlite", "places.sqlite-wal"]);
+  let cookies = getFileResource(types.COOKIES, ["cookies.sqlite", "cookies.sqlite-wal"]);
   let passwords = getFileResource(types.PASSWORDS,
                                   ["signons.sqlite", "logins.json", "key3.db",
                                    "signedInUser.json"]);
@@ -132,7 +141,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
   let sessionFile = this._getFileObject(sourceProfileDir, "sessionstore.js");
   let session;
   if (sessionFile) {
-    session = aProfile ? getFileResource(types.SESSION, ["sessionstore.js"]) : {
+    session = {
       type: types.SESSION,
       migrate: function(aCallback) {
         sessionCheckpoints.copyTo(currentProfileDir, "sessionCheckpoints.json");
@@ -158,10 +167,10 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
           aCallback(false);
         });
       }
-    }
+    };
   }
 
-  // FHR related migrations.
+  // Telemetry related migrations.
   let times = {
     name: "times", // name is used only by tests.
     type: types.OTHERDATA,
@@ -178,69 +187,60 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
       );
     }
   };
-  let healthReporter = {
-    name: "healthreporter", // name is used only by tests...
+  let telemetry = {
+    name: "telemetry", // name is used only by tests...
     type: types.OTHERDATA,
     migrate: aCallback => {
-      // the health-reporter can't have been initialized yet so it's safe to
-      // copy the SQL file.
+      let createSubDir = (name) => {
+        let dir = currentProfileDir.clone();
+        dir.append(name);
+        dir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+        return dir;
+      };
 
-      // We only support the default database name - copied from healthreporter.jsm
-      const DEFAULT_DATABASE_NAME = "healthreport.sqlite";
-      let path = OS.Path.join(sourceProfileDir.path, DEFAULT_DATABASE_NAME);
-      let sqliteFile = FileUtils.File(path);
-      if (sqliteFile.exists()) {
-        sqliteFile.copyTo(currentProfileDir, "");
-      }
-      // In unusual cases there may be 2 additional files - a "write ahead log"
-      // (-wal) file and a "shared memory file" (-shm).  The wal file contains
-      // data that will be replayed when the DB is next opened, while the shm
-      // file is ignored in that case - the replay happens using only the wal.
-      // So we *do* copy a wal if it exists, but not a shm.
-      // See https://www.sqlite.org/tempfiles.html for more.
-      // (Note also we attempt these copies even if we can't find the DB, and
-      // rely on FHR itself to do the right thing if it can)
-      path = OS.Path.join(sourceProfileDir.path, DEFAULT_DATABASE_NAME + "-wal");
-      let sqliteWal = FileUtils.File(path);
-      if (sqliteWal.exists()) {
-        sqliteWal.copyTo(currentProfileDir, "");
-      }
+      // If the 'datareporting' directory exists we migrate files from it.
+      let haveStateFile = false;
+      let dataReportingDir = this._getFileObject(sourceProfileDir, "datareporting");
+      if (dataReportingDir && dataReportingDir.isDirectory()) {
+        // Copy only specific files.
+        let toCopy = ["state.json", "session-state.json"];
 
-      // If the 'healthreport' directory exists we copy everything from it.
-      let subdir = this._getFileObject(sourceProfileDir, "healthreport");
-      if (subdir && subdir.isDirectory()) {
-        // Copy all regular files.
-        let dest = currentProfileDir.clone();
-        dest.append("healthreport");
-        dest.create(Components.interfaces.nsIFile.DIRECTORY_TYPE,
-                    FileUtils.PERMS_DIRECTORY);
-        let enumerator = subdir.directoryEntries;
+        let dest = createSubDir("datareporting");
+        let enumerator = dataReportingDir.directoryEntries;
         while (enumerator.hasMoreElements()) {
-          let file = enumerator.getNext().QueryInterface(Components.interfaces.nsIFile);
-          if (file.isDirectory()) {
+          let file = enumerator.getNext().QueryInterface(Ci.nsIFile);
+          if (file.isDirectory() || toCopy.indexOf(file.leafName) == -1) {
             continue;
+          }
+
+          if (file.leafName == "state.json") {
+            haveStateFile = true;
           }
           file.copyTo(dest, "");
         }
       }
-      // If the 'datareporting' directory exists we copy just state.json
-      subdir = this._getFileObject(sourceProfileDir, "datareporting");
-      if (subdir && subdir.isDirectory()) {
-        let stateFile = this._getFileObject(subdir, "state.json");
-        if (stateFile) {
-          let dest = currentProfileDir.clone();
-          dest.append("datareporting");
-          dest.create(Components.interfaces.nsIFile.DIRECTORY_TYPE,
-                      FileUtils.PERMS_DIRECTORY);
-          stateFile.copyTo(dest, "");
+
+      if (!haveStateFile) {
+        // Fall back to migrating the state file that contains the client id from healthreport/.
+        // We first moved the client id management from the FHR implementation to the datareporting
+        // service.
+        // Consequently, we try to migrate an existing FHR state file here as a fallback.
+        let healthReportDir = this._getFileObject(sourceProfileDir, "healthreport");
+        if (healthReportDir && healthReportDir.isDirectory()) {
+          let stateFile = this._getFileObject(healthReportDir, "state.json");
+          if (stateFile) {
+            let dest = createSubDir("healthreport");
+            stateFile.copyTo(dest, "");
+          }
         }
       }
+
       aCallback(true);
     }
-  }
+  };
 
   return [places, cookies, passwords, formData, dictionary, bookmarksBackups,
-          session, times, healthReporter].filter(r => r);
+          session, times, telemetry].filter(r => r);
 };
 
 Object.defineProperty(FirefoxProfileMigrator.prototype, "startupOnlyMigrator", {

@@ -1,9 +1,12 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Make sure we can attach to addon actors.
 
-const ADDON3_URL = EXAMPLE_URL + "addon3.xpi";
+const ADDON3_PATH = "addon3.xpi";
+const ADDON3_ID = "jid1-ami3akps3baaeg@jetpack";
 const ADDON_MODULE_URL = "resource://jid1-ami3akps3baaeg-at-jetpack/browser_dbg_addon3/lib/main.js";
 
 var gAddon, gClient, gThreadClient;
@@ -16,16 +19,16 @@ function test() {
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
-  gClient.connect((aType, aTraits) => {
+  gClient.connect().then(([aType, aTraits]) => {
     is(aType, "browser",
       "Root actor should identify itself as a browser.");
 
     installAddon()
-      .then(attachAddonActorForUrl.bind(null, gClient, ADDON3_URL))
+      .then(attachAddonActorForId.bind(null, gClient, ADDON3_ID))
       .then(attachAddonThread)
       .then(testDebugger)
       .then(testSources)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(uninstallAddon)
       .then(finish)
       .then(null, aError => {
@@ -34,14 +37,14 @@ function test() {
   });
 }
 
-function installAddon () {
-  return addAddon(ADDON3_URL).then(aAddon => {
+function installAddon() {
+  return addTemporaryAddon(ADDON3_PATH).then(aAddon => {
     gAddon = aAddon;
   });
 }
 
-function attachAddonThread ([aGrip, aResponse]) {
-  info("attached addon actor for URL");
+function attachAddonThread([aGrip, aResponse]) {
+  info("attached addon actor for Addon ID");
   let deferred = promise.defer();
 
   gClient.attachThread(aResponse.threadActor, (aResponse, aThreadClient) => {
@@ -53,12 +56,12 @@ function attachAddonThread ([aGrip, aResponse]) {
 }
 
 function testDebugger() {
-  info('Entering testDebugger');
+  info("Entering testDebugger");
   let deferred = promise.defer();
 
   once(gClient, "paused").then(() => {
     ok(true, "Should be able to attach to addon actor");
-    gThreadClient.resume(deferred.resolve)
+    gThreadClient.resume(deferred.resolve);
   });
 
   Services.obs.notifyObservers(null, "debuggerAttached", null);
@@ -85,13 +88,7 @@ function uninstallAddon() {
   return removeAddon(gAddon);
 }
 
-function closeConnection () {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
   gAddon = null;
   gThreadClient = null;

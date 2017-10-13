@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
+
+from __future__ import print_function
+
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -13,17 +17,65 @@ import uuid
 from collections import defaultdict, OrderedDict
 from multiprocessing import Process, Event
 
-from .. import localpaths
+from ..localpaths import repo_root
 
 import sslutils
+from manifest.sourcefile import meta_re
 from wptserve import server as wptserve, handlers
 from wptserve import stash
 from wptserve.logger import set_logger
+from wptserve.handlers import filesystem_path
 from mod_pywebsocket import standalone as pywebsocket
 
-repo_root = localpaths.repo_root
+def replace_end(s, old, new):
+    """
+    Given a string `s` that ends with `old`, replace that occurrence of `old`
+    with `new`.
+    """
+    assert s.endswith(old)
+    return s[:-len(old)] + new
+
 
 class WorkersHandler(object):
+    def __init__(self, base_path=None, url_base="/"):
+        self.base_path = base_path
+        self.url_base = url_base
+        self.handler = handlers.handler(self.handle_request)
+
+    def __call__(self, request, response):
+        return self.handler(request, response)
+
+    def handle_request(self, request, response):
+        worker_path = replace_end(request.url_parts.path, ".worker", ".worker.js")
+        meta = self._get_meta(request)
+        return """<!doctype html>
+<meta charset=utf-8>
+%(meta)s
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<div id=log></div>
+<script>
+fetch_tests_from_worker(new Worker("%(worker_path)s"));
+</script>
+""" % {"meta": meta, "worker_path": worker_path}
+
+    def _get_meta(self, request):
+        path = filesystem_path(self.base_path, request, self.url_base)
+        path = path.replace(".worker", ".worker.js")
+        meta_values = []
+        with open(path) as f:
+            for line in f:
+                m = meta_re.match(line)
+                if m:
+                    name, content = m.groups()
+                    name = name.replace('"', '\\"').replace(">", "&gt;")
+                    content = content.replace('"', '\\"').replace(">", "&gt;")
+                    meta_values.append((name, content))
+        return "\n".join('<meta name="%s" content="%s">' % item for item in meta_values)
+
+
+
+class AnyHtmlHandler(object):
     def __init__(self):
         self.handler = handlers.handler(self.handle_request)
 
@@ -31,16 +83,42 @@ class WorkersHandler(object):
         return self.handler(request, response)
 
     def handle_request(self, request, response):
-        worker_path = request.url_parts.path.replace(".worker", ".worker.js")
-        return """<!doctype html>
+        test_path = replace_end(request.url_parts.path, ".any.html", ".any.js")
+        return """\
+<!doctype html>
 <meta charset=utf-8>
+<script>
+self.GLOBAL = {
+  isWindow: function() { return true; },
+  isWorker: function() { return false; },
+};
+</script>
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <div id=log></div>
-<script>
-fetch_tests_from_worker(new Worker("%s"));
-</script>
-""" % (worker_path,)
+<script src="%s"></script>
+""" % (test_path,)
+
+
+class AnyWorkerHandler(object):
+    def __init__(self):
+        self.handler = handlers.handler(self.handle_request)
+
+    def __call__(self, request, response):
+        return self.handler(request, response)
+
+    def handle_request(self, request, response):
+        test_path = replace_end(request.url_parts.path, ".any.worker.js", ".any.js")
+        return """\
+self.GLOBAL = {
+  isWindow: function() { return false; },
+  isWorker: function() { return true; },
+};
+importScripts("/resources/testharness.js");
+importScripts("%s");
+done();
+""" % (test_path,)
+
 
 rewrites = [("GET", "/resources/WebIDLParser.js", "/resources/webidl2/lib/webidl2.js")]
 
@@ -61,7 +139,11 @@ class RoutesBuilder(object):
                           ("*", "{spec}/tools/*", handlers.ErrorHandler(404)),
                           ("*", "/serve.py", handlers.ErrorHandler(404))]
 
-        self.static = [("GET", "*.worker", WorkersHandler())]
+        self.static = [
+            ("GET", "*.worker", WorkersHandler()),
+            ("GET", "*.any.html", AnyHtmlHandler()),
+            ("GET", "*.any.worker.js", AnyWorkerHandler()),
+        ]
 
         self.mountpoint_routes = OrderedDict()
 
@@ -145,10 +227,10 @@ class ServerProc(object):
             self.daemon = init_func(host, port, paths, routes, bind_hostname, external_config,
                                     ssl_config, **kwargs)
         except socket.error:
-            print >> sys.stderr, "Socket error on port %s" % port
+            print("Socket error on port %s" % port, file=sys.stderr)
             raise
         except:
-            print >> sys.stderr, traceback.format_exc()
+            print(traceback.format_exc(), file=sys.stderr)
             raise
 
         if self.daemon:
@@ -159,7 +241,7 @@ class ServerProc(object):
                 except KeyboardInterrupt:
                     pass
             except:
-                print >> sys.stderr, traceback.format_exc()
+                print(traceback.format_exc(), file=sys.stderr)
                 raise
 
     def wait(self):
@@ -284,7 +366,7 @@ class WebSocketDaemon(object):
             elif pywebsocket._import_pyopenssl():
                 tls_module = pywebsocket._TLS_BY_PYOPENSSL
             else:
-                print "No SSL module available"
+                print("No SSL module available")
                 sys.exit(1)
 
             cmd_args += ["--tls",

@@ -16,23 +16,12 @@ contract @mozilla.org/updates/update-prompt;1 {88b3eb21-d072-4e3b-886d-f89d8c49f
 category system-update-provider MozillaProvider @mozilla.org/updates/update-prompt;1,{88b3eb21-d072-4e3b-886d-f89d8c49fe59}
 #endif
 
-# On b2gdroid we want to use the android implementation of the directory service.
-#ifndef MOZ_B2GDROID
 #ifdef MOZ_B2G
 # DirectoryProvider.js
 component {9181eb7c-6f87-11e1-90b1-4f59d80dd2e5} DirectoryProvider.js
 contract @mozilla.org/b2g/directory-provider;1 {9181eb7c-6f87-11e1-90b1-4f59d80dd2e5}
 category xpcom-directory-providers b2g-directory-provider @mozilla.org/b2g/directory-provider;1
 #endif
-#endif
-
-# ActivitiesGlue.js
-component {3a54788b-48cc-4ab4-93d6-0d6a8ef74f8e} ActivitiesGlue.js
-contract @mozilla.org/dom/activities/ui-glue;1 {3a54788b-48cc-4ab4-93d6-0d6a8ef74f8e}
-
-# InterAppCommUIGlue.js
-component {879ee66c-e246-11e3-9910-74d02b97e723} InterAppCommUIGlue.js
-contract @mozilla.org/dom/apps/inter-app-comm-ui-glue;1 {879ee66c-e246-11e3-9910-74d02b97e723}
 
 # SystemMessageGlue.js
 component {2846f034-e614-11e3-93cd-74d02b97e723} SystemMessageGlue.js
@@ -47,12 +36,6 @@ category app-startup ProcessGlobal service,@mozilla.org/b2g-process-global;1
 component {a6b2ab13-9037-423a-9897-dde1081be323} OMAContentHandler.js
 contract @mozilla.org/uriloader/content-handler;1?type=application/vnd.oma.drm.message {a6b2ab13-9037-423a-9897-dde1081be323}
 contract @mozilla.org/uriloader/content-handler;1?type=application/vnd.oma.dd+xml {a6b2ab13-9037-423a-9897-dde1081be323}
-
-# Payments
-component {8b83eabc-7929-47f4-8b48-4dea8d887e4b} PaymentGlue.js
-contract @mozilla.org/payment/ui-glue;1 {8b83eabc-7929-47f4-8b48-4dea8d887e4b}
-component {4834b2e1-2c91-44ea-b020-e2581ed279a4} PaymentProviderStrategy.js
-contract @mozilla.org/payment/provider-strategy;1 {4834b2e1-2c91-44ea-b020-e2581ed279a4}
 
 # TelProtocolHandler.js
 component {782775dd-7351-45ea-aff1-0ffa872cfdd2} TelProtocolHandler.js
@@ -81,11 +64,6 @@ component {436ff8f9-0acc-4b11-8ec7-e293efba3141} FilePicker.js
 contract @mozilla.org/filepicker;1 {436ff8f9-0acc-4b11-8ec7-e293efba3141}
 #endif
 
-# WebappsUpdateTimer.js
-component {637b0f77-2429-49a0-915f-abf5d0db8b9a} WebappsUpdateTimer.js
-contract @mozilla.org/b2g/webapps-update-timer;1 {637b0f77-2429-49a0-915f-abf5d0db8b9a}
-category update-timer WebappsUpdateTimer @mozilla.org/b2g/webapps-update-timer;1,getService,background-update-timer,webapps.update.interval,86400
-
 # FxAccountsUIGlue.js
 component {51875c14-91d7-4b8c-b65d-3549e101228c} FxAccountsUIGlue.js
 contract @mozilla.org/fxaccounts/fxaccounts-ui-glue;1 {51875c14-91d7-4b8c-b65d-3549e101228c}
@@ -94,7 +72,6 @@ contract @mozilla.org/fxaccounts/fxaccounts-ui-glue;1 {51875c14-91d7-4b8c-b65d-3
 component {710322af-e6ae-4b0c-b2c9-1474a87b077e} HelperAppDialog.js
 contract @mozilla.org/helperapplauncherdialog;1 {710322af-e6ae-4b0c-b2c9-1474a87b077e}
 
-#ifndef MOZ_B2GDROID
 #ifndef MOZ_WIDGET_GONK
 component {c83c02c0-5d43-4e3e-987f-9173b313e880} SimulatorScreen.js
 contract @mozilla.org/simulator-screen;1 {c83c02c0-5d43-4e3e-987f-9173b313e880}
@@ -108,16 +85,11 @@ component {385993fe-8710-4621-9fb1-00a09d8bec37} CommandLine.js
 contract @mozilla.org/commandlinehandler/general-startup;1?type=b2gcmds {385993fe-8710-4621-9fb1-00a09d8bec37}
 category command-line-handler m-b2gcmds @mozilla.org/commandlinehandler/general-startup;1?type=b2gcmds
 #endif
-#endif
 
 # BootstrapCommandLine.js
 component {fd663ec8-cf3f-4c2b-aacb-17a6915ccb44} BootstrapCommandLine.js
 contract @mozilla.org/commandlinehandler/general-startup;1?type=b2gbootstrap {fd663ec8-cf3f-4c2b-aacb-17a6915ccb44}
 category command-line-handler m-b2gbootstrap @mozilla.org/commandlinehandler/general-startup;1?type=b2gbootstrap
-
-# MobileIdentityUIGlue.js
-component {83dbe26a-81f3-4a75-9541-3d0b7ca496b5} MobileIdentityUIGlue.js
-contract @mozilla.org/services/mobileid-ui-glue;1 {83dbe26a-81f3-4a75-9541-3d0b7ca496b5}
 
 # B2GAppMigrator.js
 component {7211ece0-b458-4635-9afc-f8d7f376ee95} B2GAppMigrator.js
@@ -131,6 +103,6 @@ contract @mozilla.org/presentation-device/prompt;1 {4a300c26-e99b-4018-ab9b-c48c
 component {ccc8a839-0b64-422b-8a60-fb2af0e376d0} PresentationRequestUIGlue.js
 contract @mozilla.org/presentation/requestuiglue;1 {ccc8a839-0b64-422b-8a60-fb2af0e376d0}
 
-# KillSwitch.js
-component {b6eae5c6-971c-4772-89e5-5df626bf3f09} KillSwitch.js
-contract @mozilla.org/moz-kill-switch;1 {b6eae5c6-971c-4772-89e5-5df626bf3f09}
+# SystemMessageInternal.js
+component {70589ca5-91ac-4b9e-b839-d6a88167d714} SystemMessageInternal.js
+contract @mozilla.org/system-message-internal;1 {70589ca5-91ac-4b9e-b839-d6a88167d714}

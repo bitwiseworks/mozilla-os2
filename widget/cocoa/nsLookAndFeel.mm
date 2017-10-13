@@ -9,6 +9,7 @@
 #include "nsNativeThemeColors.h"
 #include "nsStyleConsts.h"
 #include "nsCocoaFeatures.h"
+#include "nsIContent.h"
 #include "gfxFont.h"
 #include "gfxFontConstants.h"
 #include "gfxPlatformMac.h"
@@ -49,6 +50,15 @@ static nscolor GetColorFromNSColor(NSColor* aColor)
   return NS_RGB((unsigned int)([deviceColor redComponent] * 255.0),
                 (unsigned int)([deviceColor greenComponent] * 255.0),
                 (unsigned int)([deviceColor blueComponent] * 255.0));
+}
+
+static nscolor GetColorFromNSColorWithAlpha(NSColor* aColor, float alpha)
+{
+  NSColor* deviceColor = [aColor colorUsingColorSpaceName:NSDeviceRGBColorSpace];
+  return NS_RGBA((unsigned int)([deviceColor redComponent] * 255.0),
+                 (unsigned int)([deviceColor greenComponent] * 255.0),
+                 (unsigned int)([deviceColor blueComponent] * 255.0),
+                 (unsigned int)(alpha * 255.0));
 }
 
 nsresult
@@ -169,7 +179,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       aColor = GetColorFromNSColor([NSColor gridColor]);
       break;
     case eColorID_activeborder:
-      aColor = NS_RGB(0x00,0x00,0x00);
+      aColor = GetColorFromNSColor([NSColor keyboardFocusIndicatorColor]);
       break;
      case eColorID_appworkspace:
       aColor = NS_RGB(0xFF,0xFF,0xFF);
@@ -253,7 +263,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
     }
       break;
     case eColorID__moz_mac_focusring:
-      aColor = GetColorFromNSColor([NSColor keyboardFocusIndicatorColor]);
+      aColor = GetColorFromNSColorWithAlpha([NSColor keyboardFocusIndicatorColor], 0.48);
       break;
     case eColorID__moz_mac_menushadow:
       aColor = NS_RGB(0xA3,0xA3,0xA3);
@@ -346,21 +356,7 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       aResult = 4;
       break;
     case eIntID_ScrollArrowStyle:
-      if (nsCocoaFeatures::OnLionOrLater()) {
-        // OS X Lion's scrollbars have no arrows
-        aResult = eScrollArrow_None;
-      } else {
-        NSString *buttonPlacement = [[NSUserDefaults standardUserDefaults] objectForKey:@"AppleScrollBarVariant"];
-        if ([buttonPlacement isEqualToString:@"Single"]) {
-          aResult = eScrollArrowStyle_Single;
-        } else if ([buttonPlacement isEqualToString:@"DoubleMin"]) {
-          aResult = eScrollArrowStyle_BothAtTop;
-        } else if ([buttonPlacement isEqualToString:@"DoubleBoth"]) {
-          aResult = eScrollArrowStyle_BothAtEachEnd;
-        } else {
-          aResult = eScrollArrowStyle_BothAtBottom; // The default is BothAtBottom.
-        }
-      }
+      aResult = eScrollArrow_None;
       break;
     case eIntID_ScrollSliderStyle:
       aResult = eScrollThumbStyle_Proportional;
@@ -415,9 +411,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_MacGraphiteTheme:
       aResult = [NSColor currentControlTint] == NSGraphiteControlTint;
       break;
-    case eIntID_MacLionTheme:
-      aResult = nsCocoaFeatures::OnLionOrLater();
-      break;
     case eIntID_MacYosemiteTheme:
       aResult = nsCocoaFeatures::OnYosemiteOrLater();
       break;
@@ -425,24 +418,8 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       aResult = NS_ALERT_TOP;
       break;
     case eIntID_TabFocusModel:
-    {
-      // we should probably cache this
-      CFPropertyListRef fullKeyboardAccessProperty;
-      fullKeyboardAccessProperty = ::CFPreferencesCopyValue(CFSTR("AppleKeyboardUIMode"),
-                                                            kCFPreferencesAnyApplication,
-                                                            kCFPreferencesCurrentUser,
-                                                            kCFPreferencesAnyHost);
-      aResult = 1;    // default to just textboxes
-      if (fullKeyboardAccessProperty) {
-        int32_t fullKeyboardAccessPrefVal;
-        if (::CFNumberGetValue((CFNumberRef) fullKeyboardAccessProperty, kCFNumberIntType, &fullKeyboardAccessPrefVal)) {
-          // the second bit means  "Full keyboard access" is on
-          if (fullKeyboardAccessPrefVal & (1 << 1))
-            aResult = 7; // everything that can be focused
-        }
-        ::CFRelease(fullKeyboardAccessProperty);
-      }
-    }
+      aResult = [NSApp isFullKeyboardAccessEnabled] ?
+                  nsIContent::eTabFocus_any : nsIContent::eTabFocus_textControlsMask;
       break;
     case eIntID_ScrollToClick:
     {
@@ -525,7 +502,7 @@ bool nsLookAndFeel::SystemWantsOverlayScrollbars()
 
 bool nsLookAndFeel::AllowOverlayScrollbarsOverlap()
 {
-  return (UseOverlayScrollbars() && nsCocoaFeatures::OnMountainLionOrLater());
+  return (UseOverlayScrollbars());
 }
 
 bool

@@ -19,7 +19,8 @@ add_task(function* test_execute()
 
   let notcount_visited_URIs = ["http://www.test-embed.com/",
                                "http://www.test-download.com/",
-                               "http://www.test-framed.com/"];
+                               "http://www.test-framed.com/",
+                               "http://www.test-reload.com/"];
 
   // add visits, one for each transition type
   yield PlacesTestUtils.addVisits([
@@ -39,15 +40,17 @@ add_task(function* test_execute()
       transition: TRANSITION_REDIRECT_TEMPORARY },
     { uri: uri("http://www.test-download.com/"),
       transition: TRANSITION_DOWNLOAD },
+    { uri: uri("http://www.test-reload.com/"),
+      transition: TRANSITION_RELOAD },
   ]);
 
   // check that all links are marked as visited
-  count_visited_URIs.forEach(function (visited_uri) {
+  for (let visited_uri of count_visited_URIs) {
     do_check_true(yield promiseIsURIVisited(uri(visited_uri)));
-  });
-  notcount_visited_URIs.forEach(function (visited_uri) {
+  }
+  for (let visited_uri of notcount_visited_URIs) {
     do_check_true(yield promiseIsURIVisited(uri(visited_uri)));
-  });
+  }
 
   // check that visit_count does not take in count embed and downloads
   // maxVisits query are directly binded to visit_count

@@ -29,43 +29,36 @@ var MockServices = (function () {
   });
 
   var mockAlertsService = {
-    showAlertNotification: function(imageUrl, title, text, textClickable,
-                                    cookie, alertListener, name) {
+    showPersistentNotification: function(persistentData, alert, alertListener) {
+      this.showAlert(alert, alertListener);
+    },
+
+    showAlert: function(alert, alertListener) {
       var listener = SpecialPowers.wrap(alertListener);
-      activeAlertNotifications[name] = {
+      activeAlertNotifications[alert.name] = {
         listener: listener,
-        cookie: cookie,
-        title: title
+        cookie: alert.cookie,
+        title: alert.title
       };
 
       // fake async alert show event
       if (listener) {
         setTimeout(function () {
-          listener.observe(null, "alertshow", cookie);
+          listener.observe(null, "alertshow", alert.cookie);
         }, 100);
         setTimeout(function () {
-          listener.observe(null, "alertclickcallback", cookie);
+          listener.observe(null, "alertclickcallback", alert.cookie);
         }, 100);
       }
     },
 
-    showAppNotification: function(aImageUrl, aTitle, aText, aAlertListener, aDetails) {
-      var listener = aAlertListener || (activeAlertNotifications[aDetails.id] ? activeAlertNotifications[aDetails.id].listener : undefined);
-      activeAppNotifications[aDetails.id] = {
-        observer: listener,
-        title: aTitle,
-        text: aText,
-        manifestURL: aDetails.manifestURL,
-        imageURL: aImageUrl,
-        lang: aDetails.lang || undefined,
-        id: aDetails.id || undefined,
-        dbId: aDetails.dbId || undefined,
-        dir: aDetails.dir || undefined,
-        tag: aDetails.tag || undefined,
-        timestamp: aDetails.timestamp || undefined,
-        data: aDetails.data || undefined
-      };
-      this.showAlertNotification(aImageUrl, aTitle, aText, true, "", listener, aDetails.id);
+    showAlertNotification: function(imageUrl, title, text, textClickable,
+                                    cookie, alertListener, name) {
+      this.showAlert({
+        name: name,
+        cookie: cookie,
+        title: title
+      }, alertListener);
     },
 
     closeAlert: function(name) {
@@ -85,8 +78,7 @@ var MockServices = (function () {
 
     QueryInterface: function(aIID) {
       if (SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsISupports) ||
-          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAlertsService) ||
-          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAppNotificationService)) {
+          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAlertsService)) {
         return this;
       }
       throw SpecialPowers.Components.results.NS_ERROR_NO_INTERFACE;

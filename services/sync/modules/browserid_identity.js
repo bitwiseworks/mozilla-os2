@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["BrowserIDManager"];
+this.EXPORTED_SYMBOLS = ["BrowserIDManager", "AuthenticationError"];
 
 var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
@@ -45,6 +45,7 @@ Cu.import("resource://gre/modules/FxAccountsCommon.js", fxAccountsCommon);
 const OBSERVER_TOPICS = [
   fxAccountsCommon.ONLOGIN_NOTIFICATION,
   fxAccountsCommon.ONLOGOUT_NOTIFICATION,
+  fxAccountsCommon.ON_ACCOUNT_STATE_CHANGE_NOTIFICATION,
 ];
 
 const PREF_SYNC_SHOW_CUSTOMIZATION = "services.sync-setup.ui.showCustomizationDialog";
@@ -65,8 +66,9 @@ function deriveKeyBundle(kB) {
   some other error object (which should do the right thing when toString() is
   called on it)
 */
-function AuthenticationError(details) {
+function AuthenticationError(details, source) {
   this.details = details;
+  this.source = source;
 }
 
 AuthenticationError.prototype = {
@@ -110,6 +112,17 @@ this.BrowserIDManager.prototype = {
     } catch (e) {
       return false;
     }
+  },
+
+  hashedUID() {
+    if (!this._token) {
+      throw new Error("hashedUID: Don't have token");
+    }
+    return this._token.hashed_fxa_uid
+  },
+
+  deviceID() {
+    return this._signedInUser && this._signedInUser.deviceId;
   },
 
   initialize: function() {
@@ -245,22 +258,11 @@ this.BrowserIDManager.prototype = {
           Services.obs.notifyObservers(null, "weave:service:setup-complete", null);
           Weave.Utils.nextTick(Weave.Service.sync, Weave.Service);
         }
-      }).catch(err => {
-        let authErr = err; // note that we must reject with this error and not a
-                           // subsequent one
+      }).catch(authErr => {
         // report what failed...
         this._log.error("Background fetch for key bundle failed", authErr);
-        // check if the account still exists
-        this._fxaService.accountStatus().then(exists => {
-          if (!exists) {
-            return fxAccounts.signOut(true);
-          }
-        }).catch(err => {
-          this._log.error("Error while trying to determine FXA existence", err);
-        }).then(() => {
-          this._shouldHaveSyncKeyBundle = true; // but we probably don't have one...
-          this.whenReadyToAuthenticate.reject(authErr)
-        });
+        this._shouldHaveSyncKeyBundle = true; // but we probably don't have one...
+        this.whenReadyToAuthenticate.reject(authErr);
       });
       // and we are done - the fetch continues on in the background...
     }).catch(err => {
@@ -308,6 +310,13 @@ this.BrowserIDManager.prototype = {
       Weave.Service.startOver();
       // startOver will cause this instance to be thrown away, so there's
       // nothing else to do.
+      break;
+
+    case fxAccountsCommon.ON_ACCOUNT_STATE_CHANGE_NOTIFICATION:
+      // throw away token and fetch a new one
+      this.resetCredentials();
+      this._ensureValidToken().catch(err =>
+        this._log.error("Error while fetching a new token", err));
       break;
     }
   },
@@ -404,6 +413,9 @@ this.BrowserIDManager.prototype = {
   resetCredentials: function() {
     this.resetSyncKey();
     this._token = null;
+    // The cluster URL comes from the token, so resetting it to empty will
+    // force Sync to not accidentally use a value from an earlier token.
+    Weave.Service.clusterURL = null;
   },
 
   /**
@@ -475,7 +487,6 @@ this.BrowserIDManager.prototype = {
   unlockAndVerifyAuthState: function() {
     if (this._canFetchKeys()) {
       log.debug("unlockAndVerifyAuthState already has (or can fetch) sync keys");
-      Services.telemetry.getHistogramById("WEAVE_CAN_FETCH_KEYS").add(1);
       return Promise.resolve(STATUS_OK);
     }
     // so no keys - ensure MP unlocked.
@@ -494,10 +505,6 @@ this.BrowserIDManager.prototype = {
         // lost them - the user will need to reauth before continuing.
         let result;
         if (this._canFetchKeys()) {
-          // A ternary would be more compact, but adding 0 to a flag histogram
-          // crashes the process with a C++ assertion error. See
-          // FlagHistogram::Accumulate in ipc/chromium/src/base/histogram.cc.
-          Services.telemetry.getHistogramById("WEAVE_CAN_FETCH_KEYS").add(1);
           result = STATUS_OK;
         } else {
           result = LOGIN_FAILED_LOGIN_REJECTED;
@@ -582,7 +589,7 @@ this.BrowserIDManager.prototype = {
       );
     }
 
-    let getToken = (tokenServerURI, assertion) => {
+    let getToken = assertion => {
       log.debug("Getting a token");
       let deferred = Promise.defer();
       let cb = function (err, token) {
@@ -610,7 +617,18 @@ this.BrowserIDManager.prototype = {
     return fxa.whenVerified(this._signedInUser)
       .then(() => maybeFetchKeys())
       .then(() => getAssertion())
-      .then(assertion => getToken(tokenServerURI, assertion))
+      .then(assertion => getToken(assertion))
+      .catch(err => {
+        // If we get a 401 fetching the token it may be that our certificate
+        // needs to be regenerated.
+        if (!err.response || err.response.status !== 401) {
+          return Promise.reject(err);
+        }
+        log.warn("Token server returned 401, refreshing certificate and retrying token fetch");
+        return fxa.invalidateCertificate()
+          .then(() => getAssertion())
+          .then(assertion => getToken(assertion))
+      })
       .then(token => {
         // TODO: Make it be only 80% of the duration, so refresh the token
         // before it actually expires. This is to avoid sync storage errors
@@ -627,12 +645,14 @@ this.BrowserIDManager.prototype = {
         // both tokenserverclient and hawkclient.
         // A tokenserver error thrown based on a bad response.
         if (err.response && err.response.status === 401) {
-          err = new AuthenticationError(err);
+          err = new AuthenticationError(err, "tokenserver");
         // A hawkclient error.
         } else if (err.code && err.code === 401) {
-          err = new AuthenticationError(err);
+          err = new AuthenticationError(err, "hawkclient");
+        // An FxAccounts.jsm error.
+        } else if (err.message == fxAccountsCommon.ERROR_AUTH_ERROR) {
+          err = new AuthenticationError(err, "fxaccounts");
         }
-        Services.telemetry.getHistogramById("WEAVE_FXA_KEY_FETCH_ERRORS").add();
 
         // TODO: write tests to make sure that different auth error cases are handled here
         // properly: auth error getting assertion, auth error getting token (invalid generation
@@ -664,12 +684,19 @@ this.BrowserIDManager.prototype = {
       this._log.debug("_ensureValidToken already has one");
       return Promise.resolve();
     }
+    const notifyStateChanged =
+      () => Services.obs.notifyObservers(null, "weave:service:login:change", null);
     // reset this._token as a safety net to reduce the possibility of us
     // repeatedly attempting to use an invalid token if _fetchTokenForUser throws.
     this._token = null;
     return this._fetchTokenForUser().then(
       token => {
         this._token = token;
+        notifyStateChanged();
+      },
+      error => {
+        notifyStateChanged();
+        throw error
       }
     );
   },
@@ -698,7 +725,10 @@ this.BrowserIDManager.prototype = {
     // expected.
     try {
       cb.wait();
-    } catch (ex if !Async.isShutdownException(ex)) {
+    } catch (ex) {
+      if (Async.isShutdownException(ex)) {
+        throw ex;
+      }
       this._log.error("Failed to fetch a token for authentication", ex);
       return null;
     }

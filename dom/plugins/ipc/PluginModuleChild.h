@@ -19,7 +19,6 @@
 #include "npapi.h"
 #include "npfunctions.h"
 
-#include "nsAutoPtr.h"
 #include "nsDataHashtable.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
@@ -63,11 +62,6 @@ class PCrashReporterChild;
 
 namespace plugins {
 
-#ifdef MOZ_WIDGET_QT
-class NestedLoopTimer;
-static const int kNestedLoopDetectorIntervalMs = 90;
-#endif
-
 class PluginInstanceChild;
 
 class PluginModuleChild : public PPluginModuleChild
@@ -75,7 +69,8 @@ class PluginModuleChild : public PPluginModuleChild
     typedef mozilla::dom::PCrashReporterChild PCrashReporterChild;
 protected:
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) override
+    MediateInterruptRace(const MessageInfo& parent,
+                         const MessageInfo& child) override
     {
         return MediateRace(parent, child);
     }
@@ -152,8 +147,6 @@ protected:
     virtual void
     ActorDestroy(ActorDestroyReason why) override;
 
-    MOZ_NORETURN void QuickExit();
-
     virtual bool
     RecvProcessNativeEventsInInterruptCall() override;
 
@@ -161,6 +154,8 @@ protected:
     virtual bool RecvStopProfiler() override;
     virtual bool RecvGatherProfile() override;
 
+    virtual bool
+    AnswerModuleSupportsAsyncRender(bool* aResult) override;
 public:
     explicit PluginModuleChild(bool aIsChrome);
     virtual ~PluginModuleChild();
@@ -254,6 +249,11 @@ public:
 
     const PluginSettings& Settings() const { return mCachedSettings; }
 
+    NPError PluginRequiresAudioDeviceChanges(PluginInstanceChild* aInstance,
+                                             NPBool aShouldRegister);
+    bool RecvNPP_SetValue_NPNVaudioDeviceChangeDetails(
+                    const NPAudioDeviceChangeDetailsIPC& detailsIPC) override;
+
 private:
     NPError DoNP_Initialize(const PluginSettings& aSettings);
     void AddQuirk(PluginQuirks quirk) {
@@ -272,10 +272,6 @@ private:
 #if defined(MOZ_WIDGET_GTK)
     static gboolean DetectNestedEventLoop(gpointer data);
     static gboolean ProcessBrowserEvents(gpointer data);
-
-    virtual void EnteredCxxStack() override;
-    virtual void ExitedCxxStack() override;
-#elif defined(MOZ_WIDGET_QT)
 
     virtual void EnteredCxxStack() override;
     virtual void ExitedCxxStack() override;
@@ -340,8 +336,13 @@ private:
     // MessagePumpForUI.
     int mTopLoopDepth;
 #  endif
-#elif defined (MOZ_WIDGET_QT)
-    NestedLoopTimer *mNestedLoopTimerObject;
+#endif
+
+#if defined(XP_WIN)
+  typedef nsTHashtable<nsPtrHashKey<PluginInstanceChild>> PluginInstanceSet;
+  // Set of plugins that have registered to be notified when the audio device
+  // changes.
+  PluginInstanceSet mAudioNotificationSet;
 #endif
 
 public: // called by PluginInstanceChild
@@ -373,7 +374,7 @@ private:
         bool _savedNestableTasksAllowed;
     };
 
-    nsAutoTArray<IncallFrame, 8> mIncallPumpingStack;
+    AutoTArray<IncallFrame, 8> mIncallPumpingStack;
 
     static LRESULT CALLBACK NestedInputEventHook(int code,
                                                  WPARAM wParam,
@@ -385,6 +386,8 @@ private:
     void ResetEventHooks();
     HHOOK mNestedEventHook;
     HHOOK mGlobalCallWndProcHook;
+public:
+    bool mAsyncRenderSupport;
 #endif
 };
 

@@ -8,7 +8,6 @@
 
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 
 #include <stdlib.h>
@@ -41,7 +40,6 @@ using mozilla::Forward;
 using mozilla::Maybe;
 using mozilla::Move;
 using mozilla::Nothing;
-using mozilla::UniquePtr;
 
 /* static */ DebuggerMemory*
 DebuggerMemory::create(JSContext* cx, Debugger* dbg)
@@ -68,8 +66,8 @@ DebuggerMemory::getDebugger()
 /* static */ bool
 DebuggerMemory::construct(JSContext* cx, unsigned argc, Value* vp)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
-                         "Debugger.Memory");
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
+                              "Debugger.Source");
     return false;
 }
 
@@ -85,14 +83,15 @@ DebuggerMemory::checkThis(JSContext* cx, CallArgs& args, const char* fnName)
     const Value& thisValue = args.thisv();
 
     if (!thisValue.isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, InformalValueTypeName(thisValue));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT,
+                                  InformalValueTypeName(thisValue));
         return nullptr;
     }
 
     JSObject& thisObject = thisValue.toObject();
     if (!thisObject.is<DebuggerMemory>()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             class_.name, fnName, thisObject.getClass()->name);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  class_.name, fnName, thisObject.getClass()->name);
         return nullptr;
     }
 
@@ -101,8 +100,8 @@ DebuggerMemory::checkThis(JSContext* cx, CallArgs& args, const char* fnName)
     // of Debugger.Memory. It is the only object that is<DebuggerMemory>() but
     // doesn't have a Debugger instance.
     if (thisObject.as<DebuggerMemory>().getReservedSlot(JSSLOT_DEBUGGER).isUndefined()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             class_.name, fnName, "prototype object");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  class_.name, fnName, "prototype object");
         return nullptr;
     }
 
@@ -180,8 +179,8 @@ DebuggerMemory::drainAllocationsLog(JSContext* cx, unsigned argc, Value* vp)
     Debugger* dbg = memory->getDebugger();
 
     if (!dbg->trackingAllocationSites) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_TRACKING_ALLOCATIONS,
-                             "drainAllocationsLog");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_TRACKING_ALLOCATIONS,
+                                  "drainAllocationsLog");
         return false;
     }
 
@@ -235,8 +234,8 @@ DebuggerMemory::drainAllocationsLog(JSContext* cx, unsigned argc, Value* vp)
         result->setDenseElement(i, ObjectValue(*obj));
 
         // Pop the front queue entry, and delete it immediately, so that the GC
-        // sees the AllocationsLogEntry's RelocatablePtr barriers run atomically
-        // with the change to the graph (the queeue link).
+        // sees the AllocationsLogEntry's HeapPtr barriers run atomically with
+        // the change to the graph (the queue link).
         if (!dbg->allocationsLog.popFront()) {
             ReportOutOfMemory(cx);
             return false;
@@ -268,9 +267,9 @@ DebuggerMemory::setMaxAllocationsLogLength(JSContext* cx, unsigned argc, Value* 
         return false;
 
     if (max < 1) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
-                             "(set maxAllocationsLogLength)'s parameter",
-                             "not a positive integer");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+                                  "(set maxAllocationsLogLength)'s parameter",
+                                  "not a positive integer");
         return false;
     }
 
@@ -309,9 +308,9 @@ DebuggerMemory::setAllocationSamplingProbability(JSContext* cx, unsigned argc, V
 
     // Careful!  This must also reject NaN.
     if (!(0.0 <= probability && probability <= 1.0)) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
-                             "(set allocationSamplingProbability)'s parameter",
-                             "not a number between 0 and 1");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+                                  "(set allocationSamplingProbability)'s parameter",
+                                  "not a number between 0 and 1");
         return false;
     }
 
@@ -340,142 +339,6 @@ DebuggerMemory::getAllocationsLogOverflowed(JSContext* cx, unsigned argc, Value*
 }
 
 /* static */ bool
-DebuggerMemory::setTrackingTenurePromotions(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "(set trackingTenurePromotions)", args, memory);
-    if (!args.requireAtLeast(cx, "(set trackingTenurePromotions)", 1))
-        return false;
-
-    Debugger* dbg = memory->getDebugger();
-    dbg->trackingTenurePromotions = ToBoolean(args[0]);
-    return undefined(args);
-}
-
-/* static */ bool
-DebuggerMemory::getTrackingTenurePromotions(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "(get trackingTenurePromotions)", args, memory);
-    args.rval().setBoolean(memory->getDebugger()->trackingTenurePromotions);
-    return true;
-}
-
-/* static */ bool
-DebuggerMemory::drainTenurePromotionsLog(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "drainTenurePromotionsLog", args, memory);
-    Debugger* dbg = memory->getDebugger();
-
-    if (!dbg->trackingTenurePromotions) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_TRACKING_TENURINGS,
-                             "drainTenurePromotionsLog");
-        return false;
-    }
-
-    size_t length = dbg->tenurePromotionsLog.length();
-
-    RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, length));
-    if (!result)
-        return false;
-    result->ensureDenseInitializedLength(cx, 0, length);
-
-    for (size_t i = 0; i < length; i++) {
-        RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-        if (!obj)
-            return false;
-
-        // Don't pop the TenurePromotionsEntry yet. The queue's links are
-        // followed by the GC to find the TenurePromotionsEntry, but are not
-        // barriered, so we must edit them with great care. Use the queue entry
-        // in place, and then pop and delete together.
-        auto& entry = dbg->tenurePromotionsLog.front();
-
-        RootedValue frame(cx, ObjectOrNullValue(entry.frame));
-        if (!cx->compartment()->wrap(cx, &frame) ||
-            !DefineProperty(cx, obj, cx->names().frame, frame))
-        {
-            return false;
-        }
-
-        RootedValue timestampValue(cx, NumberValue(entry.when));
-        if (!DefineProperty(cx, obj, cx->names().timestamp, timestampValue))
-            return false;
-
-        RootedString className(cx, Atomize(cx, entry.className, strlen(entry.className)));
-        if (!className)
-            return false;
-        RootedValue classNameValue(cx, StringValue(className));
-        if (!DefineProperty(cx, obj, cx->names().class_, classNameValue))
-            return false;
-
-        RootedValue sizeValue(cx, NumberValue(entry.size));
-        if (!DefineProperty(cx, obj, cx->names().size, sizeValue))
-            return false;
-
-        result->setDenseElement(i, ObjectValue(*obj));
-
-        // Pop the front queue entry, and delete it immediately, so that the GC
-        // sees the TenurePromotionsEntry's RelocatablePtr barriers run
-        // atomically with the change to the graph (the queue link).
-        if (!dbg->tenurePromotionsLog.popFront()) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-    }
-
-    dbg->tenurePromotionsLogOverflowed = false;
-    args.rval().setObject(*result);
-    return true;
-}
-
-/* static */ bool
-DebuggerMemory::getMaxTenurePromotionsLogLength(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "(get maxTenurePromotionsLogLength)", args, memory);
-    args.rval().setInt32(memory->getDebugger()->maxTenurePromotionsLogLength);
-    return true;
-}
-
-/* static */ bool
-DebuggerMemory::setMaxTenurePromotionsLogLength(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "(set maxTenurePromotionsLogLength)", args, memory);
-    if (!args.requireAtLeast(cx, "(set maxTenurePromotionsLogLength)", 1))
-        return false;
-
-    int32_t max;
-    if (!ToInt32(cx, args[0], &max))
-        return false;
-
-    if (max < 1) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
-                             "(set maxTenurePromotionsLogLength)'s parameter",
-                             "not a positive integer");
-        return false;
-    }
-
-    Debugger* dbg = memory->getDebugger();
-    dbg->maxTenurePromotionsLogLength = max;
-
-    while (dbg->tenurePromotionsLog.length() > dbg->maxAllocationsLogLength) {
-        if (!dbg->tenurePromotionsLog.popFront()) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-    }
-
-    args.rval().setUndefined();
-    return true;
-}
-
-/* static */ bool
-DebuggerMemory::getTenurePromotionsLogOverflowed(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGGER_MEMORY(cx, argc, vp, "(get tenurePromotionsLogOverflowed)", args, memory);
-    args.rval().setBoolean(memory->getDebugger()->tenurePromotionsLogOverflowed);
-    return true;
-}
-
-/* static */ bool
 DebuggerMemory::getOnGarbageCollection(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER_MEMORY(cx, argc, vp, "(get onGarbageCollection)", args, memory);
@@ -493,15 +356,15 @@ DebuggerMemory::setOnGarbageCollection(JSContext* cx, unsigned argc, Value* vp)
 /* Debugger.Memory.prototype.takeCensus */
 
 JS_PUBLIC_API(void)
-JS::dbg::SetDebuggerMallocSizeOf(JSRuntime* rt, mozilla::MallocSizeOf mallocSizeOf)
+JS::dbg::SetDebuggerMallocSizeOf(JSContext* cx, mozilla::MallocSizeOf mallocSizeOf)
 {
-    rt->debuggerMallocSizeOf = mallocSizeOf;
+    cx->debuggerMallocSizeOf = mallocSizeOf;
 }
 
 JS_PUBLIC_API(mozilla::MallocSizeOf)
-JS::dbg::GetDebuggerMallocSizeOf(JSRuntime* rt)
+JS::dbg::GetDebuggerMallocSizeOf(JSContext* cx)
 {
-    return rt->debuggerMallocSizeOf;
+    return cx->debuggerMallocSizeOf;
 }
 
 using JS::ubi::Census;
@@ -539,7 +402,7 @@ DebuggerMemory::takeCensus(JSContext* cx, unsigned argc, Value* vp)
     JS::ubi::RootedCount rootCount(cx, rootType->makeCount());
     if (!rootCount)
         return false;
-    JS::ubi::CensusHandler handler(census, rootCount);
+    JS::ubi::CensusHandler handler(census, rootCount, cx->runtime()->debuggerMallocSizeOf);
 
     Debugger* dbg = memory->getDebugger();
     RootedObject dbgObj(cx, dbg->object);
@@ -552,13 +415,13 @@ DebuggerMemory::takeCensus(JSContext* cx, unsigned argc, Value* vp)
 
     {
         Maybe<JS::AutoCheckCannotGC> maybeNoGC;
-        JS::ubi::RootList rootList(cx->runtime(), maybeNoGC);
+        JS::ubi::RootList rootList(cx, maybeNoGC);
         if (!rootList.init(dbgObj)) {
             ReportOutOfMemory(cx);
             return false;
         }
 
-        JS::ubi::CensusTraversal traversal(cx->runtime(), handler, maybeNoGC.ref());
+        JS::ubi::CensusTraversal traversal(cx, handler, maybeNoGC.ref());
         if (!traversal.init()) {
             ReportOutOfMemory(cx);
             return false;
@@ -573,7 +436,7 @@ DebuggerMemory::takeCensus(JSContext* cx, unsigned argc, Value* vp)
         }
     }
 
-    return handler.report(args.rval());
+    return handler.report(cx, args.rval());
 }
 
 
@@ -586,17 +449,12 @@ DebuggerMemory::takeCensus(JSContext* cx, unsigned argc, Value* vp)
     JS_PSGS("allocationSamplingProbability", getAllocationSamplingProbability, setAllocationSamplingProbability, 0),
     JS_PSG("allocationsLogOverflowed", getAllocationsLogOverflowed, 0),
 
-    JS_PSGS("trackingTenurePromotions", getTrackingTenurePromotions, setTrackingTenurePromotions, 0),
-    JS_PSGS("maxTenurePromotionsLogLength", getMaxTenurePromotionsLogLength, setMaxTenurePromotionsLogLength, 0),
-    JS_PSG("tenurePromotionsLogOverflowed", getTenurePromotionsLogOverflowed, 0),
-
     JS_PSGS("onGarbageCollection", getOnGarbageCollection, setOnGarbageCollection, 0),
     JS_PS_END
 };
 
 /* static */ const JSFunctionSpec DebuggerMemory::methods[] = {
     JS_FN("drainAllocationsLog", DebuggerMemory::drainAllocationsLog, 0, 0),
-    JS_FN("drainTenurePromotionsLog", DebuggerMemory::drainTenurePromotionsLog, 0, 0),
     JS_FN("takeCensus", takeCensus, 0, 0),
     JS_FS_END
 };

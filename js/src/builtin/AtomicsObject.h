@@ -7,8 +7,13 @@
 #ifndef builtin_AtomicsObject_h
 #define builtin_AtomicsObject_h
 
-#include "jslock.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/TimeStamp.h"
+
 #include "jsobj.h"
+
+#include "threading/ConditionVariable.h"
+#include "vm/MutexIDs.h"
 
 namespace js {
 
@@ -17,53 +22,45 @@ class AtomicsObject : public JSObject
   public:
     static const Class class_;
     static JSObject* initClass(JSContext* cx, Handle<GlobalObject*> global);
-    static bool toString(JSContext* cx, unsigned int argc, Value* vp);
-
-    // Defined return values for futexWait.
-    // The error values must be negative because APIs such as futexWaitOrRequeue
-    // return a value that is either the number of tasks woken or an error code.
-    enum FutexWaitResult : int32_t {
-        FutexOK = 0,
-        FutexNotequal = -1,
-        FutexTimedout = -2
-    };
+    static MOZ_MUST_USE bool toString(JSContext* cx, unsigned int argc, Value* vp);
 };
 
-bool atomics_compareExchange(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_exchange(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_load(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_store(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_fence(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_add(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_sub(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_and(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_or(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_xor(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_isLockFree(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_futexWait(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_futexWake(JSContext* cx, unsigned argc, Value* vp);
-bool atomics_futexWakeOrRequeue(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_compareExchange(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_exchange(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_load(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_store(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_add(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_sub(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_and(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_or(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_xor(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_isLockFree(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_wait(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool atomics_wake(JSContext* cx, unsigned argc, Value* vp);
 
 /* asm.js callouts */
-int32_t atomics_add_asm_callout(int32_t vt, int32_t offset, int32_t value);
-int32_t atomics_sub_asm_callout(int32_t vt, int32_t offset, int32_t value);
-int32_t atomics_and_asm_callout(int32_t vt, int32_t offset, int32_t value);
-int32_t atomics_or_asm_callout(int32_t vt, int32_t offset, int32_t value);
-int32_t atomics_xor_asm_callout(int32_t vt, int32_t offset, int32_t value);
-int32_t atomics_cmpxchg_asm_callout(int32_t vt, int32_t offset, int32_t oldval, int32_t newval);
-int32_t atomics_xchg_asm_callout(int32_t vt, int32_t offset, int32_t value);
+namespace wasm { class Instance; }
+int32_t atomics_add_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
+int32_t atomics_sub_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
+int32_t atomics_and_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
+int32_t atomics_or_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
+int32_t atomics_xor_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
+int32_t atomics_cmpxchg_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t oldval, int32_t newval);
+int32_t atomics_xchg_asm_callout(wasm::Instance* i, int32_t vt, int32_t offset, int32_t value);
 
 class FutexRuntime
 {
+    friend class AutoLockFutexAPI;
+
 public:
-    static bool initialize();
+    static MOZ_MUST_USE bool initialize();
     static void destroy();
 
     static void lock();
     static void unlock();
 
     FutexRuntime();
-    bool initInstance();
+    MOZ_MUST_USE bool initInstance();
     void destroyInstance();
 
     // Parameters to wake().
@@ -72,37 +69,55 @@ public:
         WakeForJSInterrupt      // Interrupt requested
     };
 
+    // Result code from wait().
+    enum WaitResult {
+        FutexOK,
+        FutexTimedOut
+    };
+
     // Block the calling thread and wait.
     //
     // The futex lock must be held around this call.
     //
     // The timeout is the number of milliseconds, with fractional
-    // times allowed; specify positive infinity for an indefinite wait.
+    // times allowed; specify mozilla::Nothing() for an indefinite
+    // wait.
     //
     // wait() will not wake up spuriously.  It will return true and
     // set *result to a return code appropriate for
-    // Atomics.futexWait() on success, and return false on error.
-    bool wait(JSContext* cx, double timeout, AtomicsObject::FutexWaitResult* result);
+    // Atomics.wait() on success, and return false on error.
+    MOZ_MUST_USE bool wait(JSContext* cx, js::UniqueLock<js::Mutex>& locked,
+                           mozilla::Maybe<mozilla::TimeDuration>& timeout, WaitResult* result);
 
     // Wake the thread represented by this Runtime.
     //
     // The futex lock must be held around this call.  (The sleeping
-    // thread will not wake up until the caller of futexWake()
+    // thread will not wake up until the caller of Atomics.wake()
     // releases the lock.)
     //
     // If the thread is not waiting then this method does nothing.
     //
-    // If the thread is waiting in a call to futexWait() and the
-    // reason is WakeExplicit then the futexWait() call will return
+    // If the thread is waiting in a call to wait() and the
+    // reason is WakeExplicit then the wait() call will return
     // with Woken.
     //
-    // If the thread is waiting in a call to futexWait() and the
-    // reason is WakeForJSInterrupt then the futexWait() will return
+    // If the thread is waiting in a call to wait() and the
+    // reason is WakeForJSInterrupt then the wait() will return
     // with WaitingNotifiedForInterrupt; in the latter case the caller
-    // of futexWait() must handle the interrupt.
+    // of wait() must handle the interrupt.
     void wake(WakeReason reason);
 
     bool isWaiting();
+
+    // If canWait() returns false (the default) then wait() is disabled
+    // on the runtime to which the FutexRuntime belongs.
+    bool canWait() {
+        return canWait_;
+    }
+
+    void setCanWait(bool flag) {
+        canWait_ = flag;
+    }
 
   private:
     enum FutexState {
@@ -113,11 +128,11 @@ public:
                                      //   interrupt handler
         WaitingInterrupted,          // We are waiting, but have been interrupted
                                      //   and are running the interrupt handler
-        Woken                        // Woken by a script call to futexWake
+        Woken                        // Woken by a script call to Atomics.wake
     };
 
     // Condition variable that this runtime will wait on.
-    PRCondVar* cond_;
+    js::ConditionVariable* cond_;
 
     // Current futex state for this runtime.  When not in a wait this
     // is Idle; when in a wait it is Waiting or the reason the futex
@@ -127,12 +142,10 @@ public:
     // Shared futex lock for all runtimes.  We can perhaps do better,
     // but any lock will need to be per-domain (consider SharedWorker)
     // or coarser.
-    static mozilla::Atomic<PRLock*> lock_;
+    static mozilla::Atomic<js::Mutex*> lock_;
 
-#ifdef DEBUG
-    // Null or the thread holding the lock.
-    static mozilla::Atomic<PRThread*> lockHolder_;
-#endif
+    // A flag that controls whether waiting is allowed.
+    bool canWait_;
 };
 
 JSObject*

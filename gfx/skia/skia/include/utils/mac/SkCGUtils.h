@@ -11,6 +11,8 @@
 #include "SkSize.h"
 #include "SkImageInfo.h"
 
+#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+
 #ifdef SK_BUILD_FOR_MAC
 #include <ApplicationServices/ApplicationServices.h>
 #endif
@@ -21,7 +23,7 @@
 
 class SkBitmap;
 class SkData;
-class SkStream;
+class SkStreamRewindable;
 
 /**
  *  Given a CGImage, allocate an SkBitmap and copy the image's pixels into it. If scaleToFit is not
@@ -62,23 +64,13 @@ static inline CGImageRef SkCreateCGImageRef(const SkBitmap& bm) {
  */
 void SkCGDrawBitmap(CGContextRef, const SkBitmap&, float x, float y);
 
-bool SkPDFDocumentToBitmap(SkStream* stream, SkBitmap* output);
-
 /**
- *  Return a provider that wraps the specified stream. It will become an
- *  owner of the stream, so the caller must still manage its ownership.
- *
- *  To hand-off ownership of the stream to the provider, the caller must do
- *  something like the following:
- *
- *  SkStream* stream = new ...;
- *  CGDataProviderRef provider = SkStreamToDataProvider(stream);
- *  stream->unref();
- *
- *  Now when the provider is finally deleted, it will delete the stream.
+ *  Return a provider that wraps the specified stream.
+ *  When the provider is finally deleted, it will delete the stream.
  */
-CGDataProviderRef SkCreateDataProviderFromStream(SkStream*);
+CGDataProviderRef SkCreateDataProviderFromStream(std::unique_ptr<SkStreamRewindable>);
 
-CGDataProviderRef SkCreateDataProviderFromData(SkData*);
+CGDataProviderRef SkCreateDataProviderFromData(sk_sp<SkData>);
 
-#endif
+#endif  // defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+#endif  // SkCGUtils_DEFINED

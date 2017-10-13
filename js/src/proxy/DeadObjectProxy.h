@@ -14,23 +14,24 @@ namespace js {
 class DeadObjectProxy : public BaseProxyHandler
 {
   public:
-    explicit MOZ_CONSTEXPR DeadObjectProxy()
+    explicit constexpr DeadObjectProxy()
       : BaseProxyHandler(&family)
     { }
 
     /* Standard internal methods. */
     virtual bool getOwnPropertyDescriptor(JSContext* cx, HandleObject wrapper, HandleId id,
-                                          MutableHandle<JSPropertyDescriptor> desc) const override;
+                                          MutableHandle<PropertyDescriptor> desc) const override;
     virtual bool defineProperty(JSContext* cx, HandleObject wrapper, HandleId id,
-                                Handle<JSPropertyDescriptor> desc,
+                                Handle<PropertyDescriptor> desc,
                                 ObjectOpResult& result) const override;
     virtual bool ownPropertyKeys(JSContext* cx, HandleObject wrapper,
                                  AutoIdVector& props) const override;
     virtual bool delete_(JSContext* cx, HandleObject wrapper, HandleId id,
                          ObjectOpResult& result) const override;
-    virtual bool enumerate(JSContext* cx, HandleObject wrapper, MutableHandleObject objp) const override;
     virtual bool getPrototype(JSContext* cx, HandleObject proxy,
                               MutableHandleObject protop) const override;
+    virtual bool getPrototypeIfOrdinary(JSContext* cx, HandleObject proxy, bool* isOrdinary,
+                                        MutableHandleObject protop) const override;
     virtual bool preventExtensions(JSContext* cx, HandleObject proxy,
                                    ObjectOpResult& result) const override;
     virtual bool isExtensible(JSContext* cx, HandleObject proxy, bool* extensible) const override;
@@ -39,16 +40,19 @@ class DeadObjectProxy : public BaseProxyHandler
 
     /* SpiderMonkey extensions. */
     // BaseProxyHandler::getPropertyDescriptor will throw by calling getOwnPropertyDescriptor.
+    // BaseProxyHandler::enumerate will throw by calling ownKeys.
     virtual bool nativeCall(JSContext* cx, IsAcceptableThis test, NativeImpl impl,
                             const CallArgs& args) const override;
     virtual bool hasInstance(JSContext* cx, HandleObject proxy, MutableHandleValue v,
                              bool* bp) const override;
-    virtual bool getBuiltinClass(JSContext* cx, HandleObject proxy,
-                                 ESClassValue* classValue) const override;
+    virtual bool getBuiltinClass(JSContext* cx, HandleObject proxy, ESClass* cls) const override;
     virtual bool isArray(JSContext* cx, HandleObject proxy, JS::IsArrayAnswer* answer) const override;
     virtual const char* className(JSContext* cx, HandleObject proxy) const override;
     virtual JSString* fun_toString(JSContext* cx, HandleObject proxy, unsigned indent) const override;
     virtual bool regexp_toShared(JSContext* cx, HandleObject proxy, RegExpGuard* g) const override;
+
+    virtual bool isCallable(JSObject* obj) const override;
+    virtual bool isConstructor(JSObject* obj) const override;
 
     static const char family;
     static const DeadObjectProxy singleton;

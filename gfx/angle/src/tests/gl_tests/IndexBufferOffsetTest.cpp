@@ -136,7 +136,7 @@ TEST_P(IndexBufferOffsetTest, UInt16Index)
 // Test using an offset for an UInt32 index buffer
 TEST_P(IndexBufferOffsetTest, UInt32Index)
 {
-    if (getClientVersion() < 3 && !extensionEnabled("GL_OES_element_index_uint"))
+    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_OES_element_index_uint"))
     {
         std::cout << "Test skipped because ES3 or GL_OES_element_index_uint is not available." << std::endl;
         return;
@@ -151,5 +151,6 @@ ANGLE_INSTANTIATE_TEST(IndexBufferOffsetTest,
                        ES2_D3D11(),
                        ES3_D3D11(),
                        ES2_OPENGL(),
-                       ES3_OPENGL());
-
+                       ES3_OPENGL(),
+                       ES2_OPENGLES(),
+                       ES3_OPENGLES());

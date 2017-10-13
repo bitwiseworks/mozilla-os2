@@ -45,7 +45,8 @@ nsIFrame* NS_NewPlaceholderFrame(nsIPresShell* aPresShell,
 #define PLACEHOLDER_TYPE_MASK    (PLACEHOLDER_FOR_FLOAT | \
                                   PLACEHOLDER_FOR_ABSPOS | \
                                   PLACEHOLDER_FOR_FIXEDPOS | \
-                                  PLACEHOLDER_FOR_POPUP)
+                                  PLACEHOLDER_FOR_POPUP | \
+                                  PLACEHOLDER_FOR_TOPLAYER)
 
 /**
  * Implementation of a frame that's used as a placeholder for a frame that
@@ -72,7 +73,8 @@ public:
     NS_PRECONDITION(aTypeBit == PLACEHOLDER_FOR_FLOAT ||
                     aTypeBit == PLACEHOLDER_FOR_ABSPOS ||
                     aTypeBit == PLACEHOLDER_FOR_FIXEDPOS ||
-                    aTypeBit == PLACEHOLDER_FOR_POPUP,
+                    aTypeBit == PLACEHOLDER_FOR_POPUP ||
+                    aTypeBit == PLACEHOLDER_FOR_TOPLAYER,
                     "Unexpected type bit");
     AddStateBits(aTypeBit);
   }
@@ -86,19 +88,19 @@ public:
              }
 
   // nsIFrame overrides
-  // We need to override GetMinSize and GetPrefSize because XUL uses
+  // We need to override GetXULMinSize and GetXULPrefSize because XUL uses
   // placeholders not within lines.
   virtual void AddInlineMinISize(nsRenderingContext* aRenderingContext,
                                  InlineMinISizeData* aData) override;
   virtual void AddInlinePrefISize(nsRenderingContext* aRenderingContext,
                                   InlinePrefISizeData* aData) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
@@ -136,6 +138,15 @@ public:
 #endif
 
   virtual nsStyleContext* GetParentStyleContext(nsIFrame** aProviderFrame) const override;
+
+  bool RenumberFrameAndDescendants(int32_t* aOrdinal,
+                                   int32_t aDepth,
+                                   int32_t aIncrement,
+                                   bool aForCounting) override
+  {
+    return mOutOfFlowFrame->
+      RenumberFrameAndDescendants(aOrdinal, aDepth, aIncrement, aForCounting);
+  }
 
   /**
    * @return the out-of-flow for aFrame if aFrame is a placeholder; otherwise

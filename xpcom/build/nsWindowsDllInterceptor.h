@@ -6,6 +6,13 @@
 
 #ifndef NS_WINDOWS_DLL_INTERCEPTOR_H_
 #define NS_WINDOWS_DLL_INTERCEPTOR_H_
+
+#include "mozilla/Assertions.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/UniquePtr.h"
+#include "nsWindowsHelpers.h"
+
+#include <wchar.h>
 #include <windows.h>
 #include <winternl.h>
 
@@ -86,6 +93,9 @@ public:
   {
     mSuccess = !!VirtualProtectEx(GetCurrentProcess(), mFunc, mSize,
                                   mNewProtect, &mOldProtect);
+    if (!mSuccess) {
+      // printf("VirtualProtectEx failed! %d\n", GetLastError());
+    }
     return mSuccess;
   }
 
@@ -99,7 +109,7 @@ private:
 
 class WindowsDllNopSpacePatcher
 {
-  typedef unsigned char* byteptr_t;
+  typedef uint8_t* byteptr_t;
   HMODULE mModule;
 
   // Dumb array for remembering the addresses of functions we've patched.
@@ -114,6 +124,7 @@ public:
     , mPatchedFnsLen(0)
   {}
 
+#if defined(_M_IX86)
   ~WindowsDllNopSpacePatcher()
   {
     // Restore the mov edi, edi to the beginning of each function we patched.
@@ -124,7 +135,6 @@ public:
       // Ensure we can write to the code.
       AutoVirtualProtect protect(fn, 2, PAGE_EXECUTE_READWRITE);
       if (!protect.Protect()) {
-        // printf("VirtualProtectEx failed! %d\n", GetLastError());
         continue;
       }
 
@@ -140,6 +150,13 @@ public:
 
   void Init(const char* aModuleName)
   {
+    if (!IsCompatible()) {
+#if defined(MOZILLA_INTERNAL_API)
+      NS_WARNING("NOP space patching is unavailable for compatibility reasons");
+#endif
+      return;
+    }
+
     mModule = LoadLibraryExA(aModuleName, nullptr, 0);
     if (!mModule) {
       //printf("LoadLibraryEx for '%s' failed\n", aModuleName);
@@ -147,10 +164,90 @@ public:
     }
   }
 
-#if defined(_M_IX86)
+  /**
+   * NVIDIA Optimus drivers utilize Microsoft Detours 2.x to patch functions
+   * in our address space. There is a bug in Detours 2.x that causes it to
+   * patch at the wrong address when attempting to detour code that is already
+   * NOP space patched. This function is an effort to detect the presence of
+   * this NVIDIA code in our address space and disable NOP space patching if it
+   * is. We also check AppInit_DLLs since this is the mechanism that the Optimus
+   * drivers use to inject into our process.
+   */
+  static bool IsCompatible()
+  {
+    // These DLLs are known to have bad interactions with this style of patching
+    const wchar_t* kIncompatibleDLLs[] = {
+      L"detoured.dll",
+      L"_etoured.dll",
+      L"nvd3d9wrap.dll",
+      L"nvdxgiwrap.dll"
+    };
+    // See if the infringing DLLs are already loaded
+    for (unsigned int i = 0; i < mozilla::ArrayLength(kIncompatibleDLLs); ++i) {
+      if (GetModuleHandleW(kIncompatibleDLLs[i])) {
+        return false;
+      }
+    }
+    if (GetModuleHandleW(L"user32.dll")) {
+      // user32 is loaded but the infringing DLLs are not, assume we're safe to
+      // proceed.
+      return true;
+    }
+    // If user32 has not loaded yet, check AppInit_DLLs to ensure that Optimus
+    // won't be loaded once user32 is initialized.
+    HKEY hkey = NULL;
+    if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+          L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
+          0, KEY_QUERY_VALUE, &hkey)) {
+      nsAutoRegKey key(hkey);
+      DWORD numBytes = 0;
+      const wchar_t kAppInitDLLs[] = L"AppInit_DLLs";
+      // Query for required buffer size
+      LONG status = RegQueryValueExW(hkey, kAppInitDLLs, nullptr,
+                                     nullptr, nullptr, &numBytes);
+      mozilla::UniquePtr<wchar_t[]> data;
+      if (!status) {
+        // Allocate the buffer and query for the actual data
+        data = mozilla::MakeUnique<wchar_t[]>(numBytes / sizeof(wchar_t));
+        status = RegQueryValueExW(hkey, kAppInitDLLs, nullptr,
+                                  nullptr, (LPBYTE)data.get(), &numBytes);
+      }
+      if (!status) {
+        // For each token, split up the filename components and then check the
+        // name of the file.
+        const wchar_t kDelimiters[] = L", ";
+        wchar_t* tokenContext = nullptr;
+        wchar_t* token = wcstok_s(data.get(), kDelimiters, &tokenContext);
+        while (token) {
+          wchar_t fname[_MAX_FNAME] = {0};
+          if (!_wsplitpath_s(token, nullptr, 0, nullptr, 0,
+                             fname, mozilla::ArrayLength(fname),
+                             nullptr, 0)) {
+            // nvinit.dll is responsible for bootstrapping the DLL injection, so
+            // that is the library that we check for here
+            const wchar_t kNvInitName[] = L"nvinit";
+            if (!_wcsnicmp(fname, kNvInitName,
+                           mozilla::ArrayLength(kNvInitName))) {
+              return false;
+            }
+          }
+          token = wcstok_s(nullptr, kDelimiters, &tokenContext);
+        }
+      }
+    }
+    return true;
+  }
+
   bool AddHook(const char* aName, intptr_t aHookDest, void** aOrigFunc)
   {
     if (!mModule) {
+      return false;
+    }
+
+    if (!IsCompatible()) {
+#if defined(MOZILLA_INTERNAL_API)
+      NS_WARNING("NOP space patching is unavailable for compatibility reasons");
+#endif
       return false;
     }
 
@@ -173,7 +270,6 @@ public:
     AutoVirtualProtect protectBefore(fn - 5, 5, PAGE_EXECUTE_READWRITE);
     AutoVirtualProtect protectAfter(fn, 2, PAGE_EXECUTE_READWRITE);
     if (!protectBefore.Protect() || !protectAfter.Protect()) {
-      //printf ("VirtualProtectEx failed! %d\n", GetLastError());
       return false;
     }
 
@@ -243,6 +339,11 @@ private:
     return aOriginalFunction;
   }
 #else
+  void Init(const char* aModuleName)
+  {
+    // Not implemented except on x86-32.
+  }
+
   bool AddHook(const char* aName, intptr_t aHookDest, void** aOrigFunc)
   {
     // Not implemented except on x86-32.
@@ -272,12 +373,11 @@ public:
 #else
 #error "Unknown processor type"
 #endif
-      byteptr_t origBytes = *((byteptr_t*)p);
+      byteptr_t origBytes = (byteptr_t)DecodePointer(*((byteptr_t*)p));
 
       // ensure we can modify the original code
       AutoVirtualProtect protect(origBytes, nBytes, PAGE_EXECUTE_READWRITE);
       if (!protect.Protect()) {
-        //printf ("VirtualProtectEx failed! %d\n", GetLastError());
         continue;
       }
 
@@ -285,9 +385,15 @@ public:
       // in the trampoline.
       intptr_t dest = (intptr_t)(p + sizeof(void*));
 #if defined(_M_IX86)
+      // Ensure the JMP from CreateTrampoline is where we expect it to be.
+      if (origBytes[0] != 0xE9)
+        continue;
       *((intptr_t*)(origBytes + 1)) =
         dest - (intptr_t)(origBytes + 5); // target displacement
 #elif defined(_M_X64)
+      // Ensure the MOV R11 from CreateTrampoline is where we expect it to be.
+      if (origBytes[0] != 0x49 || origBytes[1] != 0xBB)
+        continue;
       *((intptr_t*)(origBytes + 2)) = dest;
 #else
 #error "Unknown processor type"
@@ -317,7 +423,7 @@ public:
     mHookPage = (byteptr_t)VirtualAllocEx(GetCurrentProcess(), nullptr,
                                           mMaxHooks * kHookSize,
                                           MEM_COMMIT | MEM_RESERVE,
-                                          PAGE_EXECUTE_READWRITE);
+                                          PAGE_EXECUTE_READ);
     if (!mHookPage) {
       mModule = 0;
       return;
@@ -325,19 +431,6 @@ public:
   }
 
   bool Initialized() { return !!mModule; }
-
-  void LockHooks()
-  {
-    if (!mModule) {
-      return;
-    }
-
-    DWORD op;
-    VirtualProtectEx(GetCurrentProcess(), mHookPage, mMaxHooks * kHookSize,
-                     PAGE_EXECUTE_READ, &op);
-
-    mModule = 0;
-  }
 
   bool AddHook(const char* aName, intptr_t aHookDest, void** aOrigFunc)
   {
@@ -371,9 +464,210 @@ protected:
   int mMaxHooks;
   int mCurHooks;
 
+  // rex bits
+  static const BYTE kMaskHighNibble = 0xF0;
+  static const BYTE kRexOpcode = 0x40;
+  static const BYTE kMaskRexW = 0x08;
+  static const BYTE kMaskRexR = 0x04;
+  static const BYTE kMaskRexX = 0x02;
+  static const BYTE kMaskRexB = 0x01;
+
+  // mod r/m bits
+  static const BYTE kRegFieldShift = 3;
+  static const BYTE kMaskMod = 0xC0;
+  static const BYTE kMaskReg = 0x38;
+  static const BYTE kMaskRm = 0x07;
+  static const BYTE kRmNeedSib = 0x04;
+  static const BYTE kModReg = 0xC0;
+  static const BYTE kModDisp32 = 0x80;
+  static const BYTE kModDisp8 = 0x40;
+  static const BYTE kModNoRegDisp = 0x00;
+  static const BYTE kRmNoRegDispDisp32 = 0x05;
+
+  // sib bits
+  static const BYTE kMaskSibScale = 0xC0;
+  static const BYTE kMaskSibIndex = 0x38;
+  static const BYTE kMaskSibBase = 0x07;
+  static const BYTE kSibBaseEbp = 0x05;
+
+  int CountModRmSib(const BYTE *aModRm, BYTE* aSubOpcode = nullptr)
+  {
+    if (!aModRm) {
+      return -1;
+    }
+    int numBytes = 1; // Start with 1 for mod r/m byte itself
+    switch (*aModRm & kMaskMod) {
+      case kModReg:
+        return numBytes;
+      case kModDisp8:
+        numBytes += 1;
+        break;
+      case kModDisp32:
+        numBytes += 4;
+        break;
+      case kModNoRegDisp:
+        if ((*aModRm & kMaskRm) == kRmNoRegDispDisp32) {
+#if defined(_M_X64)
+          // RIP-relative on AMD64, currently unsupported
+          return -1;
+#else
+          // On IA-32, all ModR/M instruction modes address memory relative to 0
+          numBytes += 4;
+#endif
+        } else if (((*aModRm & kMaskRm) == kRmNeedSib &&
+             (*(aModRm + 1) & kMaskSibBase) == kSibBaseEbp)) {
+          numBytes += 4;
+        }
+        break;
+      default:
+        // This should not be reachable
+        MOZ_ASSERT_UNREACHABLE("Impossible value for modr/m byte mod bits");
+        return -1;
+    }
+    if ((*aModRm & kMaskRm) == kRmNeedSib) {
+      // SIB byte
+      numBytes += 1;
+    }
+    if (aSubOpcode) {
+      *aSubOpcode = (*aModRm & kMaskReg) >> kRegFieldShift;
+    }
+    return numBytes;
+  }
+
+#if defined(_M_X64)
+  // To patch for JMP and JE
+
+  enum JumpType {
+   Je,
+   Jmp
+  };
+
+  struct JumpPatch {
+    JumpPatch()
+      : mHookOffset(0), mJumpAddress(0), mType(JumpType::Jmp)
+    {
+    }
+
+    JumpPatch(size_t aOffset, intptr_t aAddress, JumpType aType = JumpType::Jmp)
+      : mHookOffset(aOffset), mJumpAddress(aAddress), mType(aType)
+    {
+    }
+
+    void AddJumpPatch(size_t aHookOffset, intptr_t aAbsJumpAddress,
+                     JumpType aType = JumpType::Jmp)
+    {
+      mHookOffset = aHookOffset;
+      mJumpAddress = aAbsJumpAddress;
+      mType = aType;
+    }
+
+    size_t GenerateJump(uint8_t* aCode)
+    {
+      size_t offset = mHookOffset;
+      if (mType == JumpType::Je) {
+        // JNE RIP+14
+        aCode[offset]     = 0x75;
+        aCode[offset + 1] = 14;
+        offset += 2;
+      }
+
+      // JMP [RIP+0]
+      aCode[offset] = 0xff;
+      aCode[offset + 1] = 0x25;
+      *reinterpret_cast<int32_t*>(aCode + offset + 2) = 0;
+
+      // Jump table
+      *reinterpret_cast<int64_t*>(aCode + offset + 2 + 4) = mJumpAddress;
+
+      return offset + 2 + 4 + 8;
+    }
+
+    bool HasJumpPatch() const
+    {
+      return !!mJumpAddress;
+    }
+
+    size_t mHookOffset;
+    intptr_t mJumpAddress;
+    JumpType mType;
+  };
+
+#endif
+
+  enum ePrefixGroupBits
+  {
+    eNoPrefixes = 0,
+    ePrefixGroup1 = (1 << 0),
+    ePrefixGroup2 = (1 << 1),
+    ePrefixGroup3 = (1 << 2),
+    ePrefixGroup4 = (1 << 3)
+  };
+
+  int CountPrefixBytes(byteptr_t aBytes, const int aBytesIndex,
+                       unsigned char* aOutGroupBits)
+  {
+    unsigned char& groupBits = *aOutGroupBits;
+    groupBits = eNoPrefixes;
+    int index = aBytesIndex;
+    while (true) {
+      switch (aBytes[index]) {
+        // Group 1
+        case 0xF0: // LOCK
+        case 0xF2: // REPNZ
+        case 0xF3: // REP / REPZ
+          if (groupBits & ePrefixGroup1) {
+            return -1;
+          }
+          groupBits |= ePrefixGroup1;
+          ++index;
+          break;
+
+        // Group 2
+        case 0x2E: // CS override / branch not taken
+        case 0x36: // SS override
+        case 0x3E: // DS override / branch taken
+        case 0x64: // FS override
+        case 0x65: // GS override
+          if (groupBits & ePrefixGroup2) {
+            return -1;
+          }
+          groupBits |= ePrefixGroup2;
+          ++index;
+          break;
+
+        // Group 3
+        case 0x66: // operand size override
+          if (groupBits & ePrefixGroup3) {
+            return -1;
+          }
+          groupBits |= ePrefixGroup3;
+          ++index;
+          break;
+
+        // Group 4
+        case 0x67: // Address size override
+          if (groupBits & ePrefixGroup4) {
+            return -1;
+          }
+          groupBits |= ePrefixGroup4;
+          ++index;
+          break;
+
+        default:
+          return index - aBytesIndex;
+      }
+    }
+  }
+
   void CreateTrampoline(void* aOrigFunction, intptr_t aDest, void** aOutTramp)
   {
     *aOutTramp = nullptr;
+
+    AutoVirtualProtect protectHookPage(mHookPage, mMaxHooks * kHookSize,
+                                       PAGE_EXECUTE_READWRITE);
+    if (!protectHookPage.Protect()) {
+      return;
+    }
 
     byteptr_t tramp = FindTrampolineSpace();
     if (!tramp) {
@@ -383,35 +677,34 @@ protected:
     byteptr_t origBytes = (byteptr_t)aOrigFunction;
 
     int nBytes = 0;
-    int pJmp32 = -1;
 
 #if defined(_M_IX86)
+    int pJmp32 = -1;
     while (nBytes < 5) {
       // Understand some simple instructions that might be found in a
       // prologue; we might need to extend this as necessary.
       //
       // Note!  If we ever need to understand jump instructions, we'll
       // need to rewrite the displacement argument.
+      unsigned char prefixGroups;
+      int numPrefixBytes = CountPrefixBytes(origBytes, nBytes, &prefixGroups);
+      if (numPrefixBytes < 0 || (prefixGroups & (ePrefixGroup3 | ePrefixGroup4))) {
+        // Either the prefix sequence was bad, or there are prefixes that
+        // we don't currently support (groups 3 and 4)
+        return;
+      }
+      nBytes += numPrefixBytes;
       if (origBytes[nBytes] >= 0x88 && origBytes[nBytes] <= 0x8B) {
         // various MOVs
-        unsigned char b = origBytes[nBytes + 1];
-        if (((b & 0xc0) == 0xc0) ||
-            (((b & 0xc0) == 0x00) &&
-             ((b & 0x07) != 0x04) && ((b & 0x07) != 0x05))) {
-          // REG=r, R/M=r or REG=r, R/M=[r]
-          nBytes += 2;
-        } else if ((b & 0xc0) == 0x40) {
-          if ((b & 0x07) == 0x04) {
-            // REG=r, R/M=[SIB + disp8]
-            nBytes += 4;
-          } else {
-            // REG=r, R/M=[r + disp8]
-            nBytes += 3;
-          }
-        } else {
-          // complex MOV, bail
+        ++nBytes;
+        int len = CountModRmSib(origBytes + nBytes);
+        if (len < 0) {
           return;
         }
+        nBytes += len;
+      } else if (origBytes[nBytes] == 0xA1) {
+        // MOV eax, [seg:offset]
+        nBytes += 5;
       } else if (origBytes[nBytes] == 0xB8) {
         // MOV 0xB8: http://ref.x86asm.net/coder32.html#xB8
         nBytes += 5;
@@ -447,12 +740,12 @@ protected:
       }
     }
 #elif defined(_M_X64)
-    byteptr_t directJmpAddr;
+    JumpPatch jump;
 
     while (nBytes < 13) {
 
       // if found JMP 32bit offset, next bytes must be NOP or INT3
-      if (pJmp32 >= 0) {
+      if (jump.HasJumpPatch()) {
         if (origBytes[nBytes] == 0x90 || origBytes[nBytes] == 0xcc) {
           nBytes++;
           continue;
@@ -473,6 +766,15 @@ protected:
         } else if (origBytes[nBytes] == 0x05) {
           // syscall
           nBytes++;
+        } else if (origBytes[nBytes] == 0x84) {
+          // je rel32
+          jump.AddJumpPatch(nBytes - 1,
+                            (intptr_t)
+                              origBytes + nBytes + 5 +
+                            *(reinterpret_cast<int32_t*>(origBytes +
+                                                         nBytes + 1)),
+                            JumpType::Je);
+          nBytes += 5;
         } else {
           return;
         }
@@ -516,26 +818,21 @@ protected:
                    (origBytes[nBytes + 1] & 0xf8) == 0x60) {
           // and [r+d], imm8
           nBytes += 5;
-        } else if ((origBytes[nBytes] & 0xfd) == 0x89) {
-          // MOV r/m64, r64 | MOV r64, r/m64
-          if ((origBytes[nBytes + 1] & 0xc0) == 0x40) {
-            if ((origBytes[nBytes + 1] & 0x7) == 0x04) {
-              // R/M=[SIB+disp8], REG=r64
-              nBytes += 4;
-            } else {
-              // R/M=[r64+disp8], REG=r64
-              nBytes += 3;
-            }
-          } else if (((origBytes[nBytes + 1] & 0xc0) == 0xc0) ||
-                     (((origBytes[nBytes + 1] & 0xc0) == 0x00) &&
-                      ((origBytes[nBytes + 1] & 0x07) != 0x04) &&
-                      ((origBytes[nBytes + 1] & 0x07) != 0x05))) {
-            // REG=r64, R/M=r64 or REG=r64, R/M=[r64]
+        } else if (origBytes[nBytes] == 0x85) {
+          // 85 /r => TEST r/m32, r32
+          if ((origBytes[nBytes + 1] & 0xc0) == 0xc0) {
             nBytes += 2;
           } else {
-            // complex MOV
             return;
           }
+        } else if ((origBytes[nBytes] & 0xfd) == 0x89) {
+          ++nBytes;
+          // MOV r/m64, r64 | MOV r64, r/m64
+          int len = CountModRmSib(origBytes + nBytes);
+          if (len < 0) {
+            return;
+          }
+          nBytes += len;
         } else if (origBytes[nBytes] == 0xc7) {
           // MOV r/m64, imm32
           if (origBytes[nBytes + 1] == 0x44) {
@@ -546,15 +843,16 @@ protected:
             return;
           }
         } else if (origBytes[nBytes] == 0xff) {
-          pJmp32 = nBytes - 1;
           // JMP /4
           if ((origBytes[nBytes + 1] & 0xc0) == 0x0 &&
               (origBytes[nBytes + 1] & 0x07) == 0x5) {
             // [rip+disp32]
             // convert JMP 32bit offset to JMP 64bit direct
-            directJmpAddr =
-              (byteptr_t)*((uint64_t*)(origBytes + nBytes + 6 +
-                                       (*((int32_t*)(origBytes + nBytes + 2)))));
+            jump.AddJumpPatch(nBytes - 1,
+                              *reinterpret_cast<intptr_t*>(
+                                origBytes + nBytes + 6 +
+                              *reinterpret_cast<int32_t*>(origBytes + nBytes +
+                                                          2)));
             nBytes += 6;
           } else {
             // not support yet!
@@ -564,23 +862,85 @@ protected:
           // not support yet!
           return;
         }
+      } else if (origBytes[nBytes] == 0x66) {
+        // operand override prefix
+        nBytes += 1;
+        // This is the same as the x86 version
+        if (origBytes[nBytes] >= 0x88 && origBytes[nBytes] <= 0x8B) {
+          // various MOVs
+          unsigned char b = origBytes[nBytes + 1];
+          if (((b & 0xc0) == 0xc0) ||
+              (((b & 0xc0) == 0x00) &&
+               ((b & 0x07) != 0x04) && ((b & 0x07) != 0x05))) {
+            // REG=r, R/M=r or REG=r, R/M=[r]
+            nBytes += 2;
+          } else if ((b & 0xc0) == 0x40) {
+            if ((b & 0x07) == 0x04) {
+              // REG=r, R/M=[SIB + disp8]
+              nBytes += 4;
+            } else {
+              // REG=r, R/M=[r + disp8]
+              nBytes += 3;
+            }
+          } else {
+            // complex MOV, bail
+            return;
+          }
+        }
       } else if ((origBytes[nBytes] & 0xf0) == 0x50) {
         // 1-byte push/pop
         nBytes++;
+      } else if (origBytes[nBytes] == 0x65) {
+        // GS prefix
+        //
+        // The entry of GetKeyState on Windows 10 has the following code.
+        // 65 48 8b 04 25 30 00 00 00    mov   rax,qword ptr gs:[30h]
+        // (GS prefix + REX + MOV (0x8b) ...)
+        if (origBytes[nBytes + 1] == 0x48 &&
+            (origBytes[nBytes + 2] >= 0x88 && origBytes[nBytes + 2] <= 0x8b)) {
+          nBytes += 3;
+          int len = CountModRmSib(origBytes + nBytes);
+          if (len < 0) {
+            // no way to support this yet.
+            return;
+          }
+          nBytes += len;
+        } else {
+          return;
+        }
       } else if (origBytes[nBytes] == 0x90) {
         // nop
         nBytes++;
       } else if (origBytes[nBytes] == 0xb8) {
         // MOV 0xB8: http://ref.x86asm.net/coder32.html#xB8
         nBytes += 5;
+      } else if (origBytes[nBytes] == 0x33) {
+        // xor r32, r/m32
+        nBytes += 2;
+      } else if (origBytes[nBytes] == 0xf6) {
+        // test r/m8, imm8 (used by ntdll on Windows 10 x64)
+        // (no flags are affected by near jmp since there is no task switch,
+        // so it is ok for a jmp to be written immediately after a test)
+        BYTE subOpcode = 0;
+        int nModRmSibBytes = CountModRmSib(&origBytes[nBytes + 1], &subOpcode);
+        if (nModRmSibBytes < 0 || subOpcode != 0) {
+          // Unsupported
+          return;
+        }
+        nBytes += 2 + nModRmSibBytes;
       } else if (origBytes[nBytes] == 0xc3) {
         // ret
         nBytes++;
+      } else if (origBytes[nBytes] == 0xcc) {
+        // int 3
+        nBytes++;
       } else if (origBytes[nBytes] == 0xe9) {
-        pJmp32 = nBytes;
-        // convert JMP 32bit offset to JMP 64bit direct
-        directJmpAddr = origBytes + pJmp32 + 5 + (*((int32_t*)(origBytes + pJmp32 + 1)));
         // jmp 32bit offset
+        jump.AddJumpPatch(nBytes,
+                          // convert JMP 32bit offset to JMP 64bit direct
+                          (intptr_t)
+                            origBytes + nBytes + 5 +
+                          *(reinterpret_cast<int32_t*>(origBytes + nBytes + 1)));
         nBytes += 5;
       } else if (origBytes[nBytes] == 0xff) {
         nBytes++;
@@ -605,7 +965,7 @@ protected:
 
     // We keep the address of the original function in the first bytes of
     // the trampoline buffer
-    *((void**)tramp) = aOrigFunction;
+    *((void**)tramp) = EncodePointer(aOrigFunction);
     tramp += sizeof(void*);
 
     memcpy(tramp, aOrigFunction, nBytes);
@@ -625,27 +985,16 @@ protected:
         (intptr_t)trampDest - (intptr_t)(tramp + nBytes + 5); // target displacement
     }
 #elif defined(_M_X64)
-    // If JMP32 opcode found, we don't insert to trampoline jump
-    if (pJmp32 >= 0) {
-      // mov r11, address
-      tramp[pJmp32]   = 0x49;
-      tramp[pJmp32 + 1] = 0xbb;
-      *((intptr_t*)(tramp + pJmp32 + 2)) = (intptr_t)directJmpAddr;
-
-      // jmp r11
-      tramp[pJmp32 + 10] = 0x41;
-      tramp[pJmp32 + 11] = 0xff;
-      tramp[pJmp32 + 12] = 0xe3;
+    // If JMP/JE opcode found, we don't insert to trampoline jump
+    if (jump.HasJumpPatch()) {
+      size_t offset = jump.GenerateJump(tramp);
+      if (jump.mType != JumpType::Jmp) {
+        JumpPatch patch(offset, reinterpret_cast<intptr_t>(trampDest));
+        patch.GenerateJump(tramp);
+      }
     } else {
-      // mov r11, address
-      tramp[nBytes] = 0x49;
-      tramp[nBytes + 1] = 0xbb;
-      *((intptr_t*)(tramp + nBytes + 2)) = (intptr_t)trampDest;
-
-      // jmp r11
-      tramp[nBytes + 10] = 0x41;
-      tramp[nBytes + 11] = 0xff;
-      tramp[nBytes + 12] = 0xe3;
+      JumpPatch patch(nBytes, reinterpret_cast<intptr_t>(trampDest));
+      patch.GenerateJump(tramp);
     }
 #endif
 
@@ -655,7 +1004,6 @@ protected:
     // ensure we can modify the original code
     AutoVirtualProtect protect(aOrigFunction, nBytes, PAGE_EXECUTE_READWRITE);
     if (!protect.Protect()) {
-      //printf ("VirtualProtectEx failed! %d\n", GetLastError());
       return;
     }
 
@@ -739,13 +1087,6 @@ public:
 
     // Lazily initialize mDetourPatcher, since it allocates memory and we might
     // not need it.
-  }
-
-  void LockHooks()
-  {
-    if (mDetourPatcher.Initialized()) {
-      mDetourPatcher.LockHooks();
-    }
   }
 
   bool AddHook(const char* aName, intptr_t aHookDest, void** aOrigFunc)

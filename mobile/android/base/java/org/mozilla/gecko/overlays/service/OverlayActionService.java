@@ -11,9 +11,7 @@ import android.content.Intent;
 import android.os.IBinder;
 import android.util.Log;
 
-import org.mozilla.gecko.Assert;
 import org.mozilla.gecko.overlays.service.sharemethods.AddBookmark;
-import org.mozilla.gecko.overlays.service.sharemethods.AddToReadingList;
 import org.mozilla.gecko.overlays.service.sharemethods.SendTab;
 import org.mozilla.gecko.overlays.service.sharemethods.ShareMethod;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -31,7 +29,6 @@ import static org.mozilla.gecko.overlays.OverlayConstants.ACTION_SHARE;
  * Currently supported operations are:
  *
  * Add bookmark*
- * Add to reading list*
  * Send tab (delegates to Sync's existing handler)
  * Future: Load page in background.
  *
@@ -90,7 +87,6 @@ public class OverlayActionService extends Service {
                 shareTypes.clear();
 
                 shareTypes.put(ShareMethod.Type.ADD_BOOKMARK, new AddBookmark(context));
-                shareTypes.put(ShareMethod.Type.ADD_TO_READING_LIST, new AddToReadingList(context));
                 shareTypes.put(ShareMethod.Type.SEND_TAB, new SendTab(context));
             }
         });
@@ -122,8 +118,7 @@ public class OverlayActionService extends Service {
                         Log.e(LOGTAG, "Share failed: " + result);
                         break;
                     default:
-                        Assert.fail("Unknown share method result code: " + result);
-                        break;
+                        throw new IllegalStateException("Unknown share method result code: " + result);
                 }
             }
         });

@@ -10,6 +10,7 @@
 
 #include "libANGLE/renderer/d3d/ImageD3D.h"
 
+#include "libANGLE/formatutils.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/renderer/d3d/FramebufferD3D.h"
@@ -29,20 +30,13 @@ ImageD3D::ImageD3D()
 {
 }
 
-gl::Error ImageD3D::copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea, const gl::Framebuffer *source)
+GLenum
+ImageD3D::getSizedInputFormat(GLenum inputType) const
 {
-    const gl::FramebufferAttachment *srcAttachment = source->getReadColorbuffer();
-    ASSERT(srcAttachment);
-
-    RenderTargetD3D *renderTarget = NULL;
-    gl::Error error = srcAttachment->getRenderTarget(&renderTarget);
-    if (error.isError())
-    {
-        return error;
-    }
-
-    ASSERT(renderTarget);
-    return copy(destOffset, sourceArea, renderTarget);
+    const auto &internalFormat = gl::GetInternalFormatInfo(mInternalFormat);
+    const auto &unsizedInternalFormat = internalFormat.format;
+    const auto &sizedInputFormat = gl::GetSizedInternalFormat(unsizedInternalFormat, inputType);
+    return sizedInputFormat;
 }
 
-}
+}  // namespace rx

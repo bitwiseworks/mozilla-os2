@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -9,6 +11,7 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/Atomics.h"
 
 typedef union _GdkEvent GdkEvent;
 typedef struct _GMainContext GMainContext;
@@ -130,6 +133,8 @@ class MessagePumpForUI : public MessagePump {
   int wakeup_pipe_write_;
   // Use an autoptr to avoid needing the definition of GPollFD in the header.
   mozilla::UniquePtr<GPollFD> wakeup_gpollfd_;
+
+  mozilla::Atomic<bool> pipe_full_;
 
   // List of observers.
   ObserverList<Observer> observers_;

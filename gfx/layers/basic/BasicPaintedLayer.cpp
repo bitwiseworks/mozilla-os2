@@ -19,7 +19,6 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float, etc
 #include "mozilla/layers/LayersTypes.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -37,10 +36,9 @@ static nsIntRegion
 IntersectWithClip(const nsIntRegion& aRegion, gfxContext* aContext)
 {
   gfxRect clip = aContext->GetClipExtents();
-  clip.RoundOut();
-  IntRect r(clip.X(), clip.Y(), clip.Width(), clip.Height());
   nsIntRegion result;
-  result.And(aRegion, r);
+  result.And(aRegion, IntRect::RoundOut(clip.X(), clip.Y(),
+                                        clip.Width(), clip.Height()));
   return result;
 }
 
@@ -63,7 +61,7 @@ BasicPaintedLayer::PaintThebes(gfxContext* aContext,
     mValidRegion.SetEmpty();
     mContentClient->Clear();
 
-    nsIntRegion toDraw = IntersectWithClip(GetEffectiveVisibleRegion().ToUnknownRegion(), aContext);
+    nsIntRegion toDraw = IntersectWithClip(GetLocalVisibleRegion().ToUnknownRegion(), aContext);
 
     RenderTraceInvalidateStart(this, "FFFF00", toDraw.GetBounds());
 
@@ -78,19 +76,25 @@ BasicPaintedLayer::PaintThebes(gfxContext* aContext,
       bool needsGroup = opacity != 1.0 ||
                         effectiveOperator != CompositionOp::OP_OVER ||
                         aMaskLayer;
-      RefPtr<gfxContext> groupContext;
+      RefPtr<gfxContext> context = nullptr;
       BasicLayerManager::PushedGroup group;
+      bool availableGroup = false;
+
       if (needsGroup) {
-        group =
-          BasicManager()->PushGroupForLayer(aContext, this, toDraw);
-        groupContext = group.mGroupTarget;
+        availableGroup =
+            BasicManager()->PushGroupForLayer(aContext, this, toDraw, group);
+        if (availableGroup) {
+          context = group.mGroupTarget;
+        }
       } else {
-        groupContext = aContext;
+        context = aContext;
       }
-      SetAntialiasingFlags(this, groupContext->GetDrawTarget());
-      aCallback(this, groupContext, toDraw, toDraw,
-                DrawRegionClip::NONE, nsIntRegion(), aCallbackData);
-      if (needsGroup) {
+      if (context) {
+        SetAntialiasingFlags(this, context->GetDrawTarget());
+        aCallback(this, context, toDraw, toDraw, DrawRegionClip::NONE,
+                  nsIntRegion(), aCallbackData);
+      }
+      if (needsGroup && availableGroup) {
         BasicManager()->PopGroupForLayer(group);
       }
 
@@ -132,7 +136,7 @@ BasicPaintedLayer::Validate(LayerManager::DrawPaintedLayerCallback aCallback,
   if (!mContentClient) {
     // This client will have a null Forwarder, which means it will not have
     // a ContentHost on the other side.
-    mContentClient = new ContentClientBasic();
+    mContentClient = new ContentClientBasic(mBackend);
   }
 
   if (!BasicManager()->IsRetained()) {
@@ -169,12 +173,14 @@ BasicPaintedLayer::Validate(LayerManager::DrawPaintedLayerCallback aCallback,
     // from RGB to RGBA, because we might need to repaint with
     // subpixel AA)
     state.mRegionToInvalidate.And(state.mRegionToInvalidate,
-                                  GetEffectiveVisibleRegion().ToUnknownRegion());
+                                  GetLocalVisibleRegion().ToUnknownRegion());
     SetAntialiasingFlags(this, target);
 
     RenderTraceInvalidateStart(this, "FFFF00", state.mRegionToDraw.GetBounds());
 
-    RefPtr<gfxContext> ctx = gfxContext::ContextForDrawTarget(target);
+    RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
+    MOZ_ASSERT(ctx); // already checked the target above
+
     PaintBuffer(ctx,
                 state.mRegionToDraw, state.mRegionToDraw, state.mRegionToInvalidate,
                 state.mDidSelfCopy,
@@ -196,23 +202,24 @@ BasicPaintedLayer::Validate(LayerManager::DrawPaintedLayerCallback aCallback,
     // It's possible that state.mRegionToInvalidate is nonempty here,
     // if we are shrinking the valid region to nothing. So use mRegionToDraw
     // instead.
-    NS_WARN_IF_FALSE(state.mRegionToDraw.IsEmpty(),
-                     "No context when we have something to draw, resource exhaustion?");
+    NS_WARNING_ASSERTION(
+      state.mRegionToDraw.IsEmpty(),
+      "No context when we have something to draw, resource exhaustion?");
   }
 
   for (uint32_t i = 0; i < readbackUpdates.Length(); ++i) {
     ReadbackProcessor::Update& update = readbackUpdates[i];
     nsIntPoint offset = update.mLayer->GetBackgroundLayerOffset();
-    RefPtr<gfxContext> ctx =
+    RefPtr<DrawTarget> dt =
       update.mLayer->GetSink()->BeginUpdate(update.mUpdateRect + offset,
                                             update.mSequenceCounter);
-    if (ctx) {
+    if (dt) {
       NS_ASSERTION(GetEffectiveOpacity() == 1.0, "Should only read back opaque layers");
       NS_ASSERTION(!GetMaskLayer(), "Should only read back layers without masks");
-      ctx->SetMatrix(ctx->CurrentMatrix().Translate(offset.x, offset.y));
-      mContentClient->DrawTo(this, ctx->GetDrawTarget(), 1.0,
-                             ctx->CurrentOp(), nullptr, nullptr);
-      update.mLayer->GetSink()->EndUpdate(ctx, update.mUpdateRect + offset);
+      dt->SetTransform(dt->GetTransform().PreTranslate(offset.x, offset.y));
+      mContentClient->DrawTo(this, dt, 1.0, CompositionOp::OP_OVER,
+                             nullptr, nullptr);
+      update.mLayer->GetSink()->EndUpdate(update.mUpdateRect + offset);
     }
   }
 }
@@ -221,7 +228,16 @@ already_AddRefed<PaintedLayer>
 BasicLayerManager::CreatePaintedLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<PaintedLayer> layer = new BasicPaintedLayer(this);
+
+  BackendType backend = gfxPlatform::GetPlatform()->GetDefaultContentBackend();
+
+  if (mDefaultTarget) {
+    backend = mDefaultTarget->GetDrawTarget()->GetBackendType();
+  } else if (mType == BLM_WIDGET) {
+    backend = gfxPlatform::GetPlatform()->GetContentBackendFor(LayersBackend::LAYERS_BASIC);
+  }
+
+  RefPtr<PaintedLayer> layer = new BasicPaintedLayer(this, backend);
   return layer.forget();
 }
 

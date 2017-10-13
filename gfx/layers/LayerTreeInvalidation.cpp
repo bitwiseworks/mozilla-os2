@@ -15,15 +15,16 @@
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr, etc
 #include "nsDataHashtable.h"            // for nsDataHashtable
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsHashKeys.h"                 // for nsPtrHashKey
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsRect.h"                     // for IntRect
-#include "nsTArray.h"                   // for nsAutoTArray, nsTArray_Impl
+#include "nsTArray.h"                   // for AutoTArray, nsTArray_Impl
+#include "mozilla/Poison.h"
 #include "mozilla/layers/ImageHost.h"
 #include "mozilla/layers/LayerManagerComposite.h"
+#include "TreeTraversal.h"              // for ForEachNode
 
 using namespace mozilla::gfx;
 
@@ -32,6 +33,34 @@ namespace layers {
 
 struct LayerPropertiesBase;
 UniquePtr<LayerPropertiesBase> CloneLayerTreePropertiesInternal(Layer* aRoot, bool aIsMask = false);
+
+/**
+ * Get accumulated transform of from the context creating layer to the
+ * given layer.
+ */
+static Matrix4x4
+GetTransformIn3DContext(Layer* aLayer) {
+  Matrix4x4 transform = aLayer->GetLocalTransform();
+  for (Layer* layer = aLayer->GetParent();
+       layer && layer->Extend3DContext();
+       layer = layer->GetParent()) {
+    transform = transform * layer->GetLocalTransform();
+  }
+  return transform;
+}
+
+/**
+ * Get a transform for the given layer depending on extending 3D
+ * context.
+ *
+ * @return local transform for layers not participating 3D rendering
+ * context, or the accmulated transform in the context for else.
+ */
+static Matrix4x4
+GetTransformForInvalidation(Layer* aLayer) {
+  return (!aLayer->Is3DContextLeaf() && !aLayer->Extend3DContext() ?
+          aLayer->GetLocalTransform() : GetTransformIn3DContext(aLayer));
+}
 
 static IntRect
 TransformRect(const IntRect& aRect, const Matrix4x4& aTransform)
@@ -55,10 +84,8 @@ TransformRect(const IntRect& aRect, const Matrix4x4& aTransform)
 static void
 AddTransformedRegion(nsIntRegion& aDest, const nsIntRegion& aSource, const Matrix4x4& aTransform)
 {
-  nsIntRegionRectIterator iter(aSource);
-  const IntRect *r;
-  while ((r = iter.Next())) {
-    aDest.Or(aDest, TransformRect(*r, aTransform));
+  for (auto iter = aSource.RectIter(); !iter.Done(); iter.Next()) {
+    aDest.Or(aDest, TransformRect(iter.Get(), aTransform));
   }
   aDest.SimplifyOutward(20);
 }
@@ -76,28 +103,28 @@ AddRegion(nsIntRegion& aDest, const nsIntRegion& aSource)
  * then report that the entire bounds have changed.
  */
 static void
-NotifySubdocumentInvalidationRecursive(Layer* aLayer, NotifySubDocInvalidationFunc aCallback)
+NotifySubdocumentInvalidation(Layer* aLayer, NotifySubDocInvalidationFunc aCallback)
 {
-  aLayer->ClearInvalidRect();
-  ContainerLayer* container = aLayer->AsContainerLayer();
-
-  if (aLayer->GetMaskLayer()) {
-    NotifySubdocumentInvalidationRecursive(aLayer->GetMaskLayer(), aCallback);
-  }
-  for (size_t i = 0; i < aLayer->GetAncestorMaskLayerCount(); i++) {
-    Layer* maskLayer = aLayer->GetAncestorMaskLayerAt(i);
-    NotifySubdocumentInvalidationRecursive(maskLayer, aCallback);
-  }
-
-  if (!container) {
-    return;
-  }
-
-  for (Layer* child = container->GetFirstChild(); child; child = child->GetNextSibling()) {
-    NotifySubdocumentInvalidationRecursive(child, aCallback);
-  }
-
-  aCallback(container, container->GetVisibleRegion().ToUnknownRegion());
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [aCallback] (Layer* layer)
+      {
+        layer->ClearInvalidRect();
+        if (layer->GetMaskLayer()) {
+          NotifySubdocumentInvalidation(layer->GetMaskLayer(), aCallback);
+        }
+        for (size_t i = 0; i < layer->GetAncestorMaskLayerCount(); i++) {
+          Layer* maskLayer = layer->GetAncestorMaskLayerAt(i);
+          NotifySubdocumentInvalidation(maskLayer, aCallback);
+        }
+      },
+      [aCallback] (Layer* layer)
+      {
+        ContainerLayer* container = layer->AsContainerLayer();
+        if (container) {
+          aCallback(container, container->GetLocalVisibleRegion().ToUnknownRegion());
+        }
+      });
 }
 
 struct LayerPropertiesBase : public LayerProperties
@@ -105,12 +132,11 @@ struct LayerPropertiesBase : public LayerProperties
   explicit LayerPropertiesBase(Layer* aLayer)
     : mLayer(aLayer)
     , mMaskLayer(nullptr)
-    , mVisibleRegion(aLayer->GetVisibleRegion().ToUnknownRegion())
-    , mInvalidRegion(aLayer->GetInvalidRegion())
+    , mVisibleRegion(mLayer->GetLocalVisibleRegion().ToUnknownRegion())
     , mPostXScale(aLayer->GetPostXScale())
     , mPostYScale(aLayer->GetPostYScale())
     , mOpacity(aLayer->GetLocalOpacity())
-    , mUseClipRect(!!aLayer->GetEffectiveClipRect())
+    , mUseClipRect(!!aLayer->GetLocalClipRect())
   {
     MOZ_COUNT_CTOR(LayerPropertiesBase);
     if (aLayer->GetMaskLayer()) {
@@ -121,9 +147,9 @@ struct LayerPropertiesBase : public LayerProperties
       mAncestorMaskLayers.AppendElement(CloneLayerTreePropertiesInternal(maskLayer, true));
     }
     if (mUseClipRect) {
-      mClipRect = *aLayer->GetEffectiveClipRect();
+      mClipRect = *aLayer->GetLocalClipRect();
     }
-    mTransform = aLayer->GetLocalTransform();
+    mTransform = GetTransformForInvalidation(aLayer);
   }
   LayerPropertiesBase()
     : mLayer(nullptr)
@@ -136,6 +162,11 @@ struct LayerPropertiesBase : public LayerProperties
     MOZ_COUNT_DTOR(LayerPropertiesBase);
   }
 
+protected:
+  LayerPropertiesBase(const LayerPropertiesBase& a) = delete;
+  LayerPropertiesBase& operator=(const LayerPropertiesBase& a) = delete;
+
+public:
   virtual nsIntRegion ComputeDifferences(Layer* aRoot,
                                          NotifySubDocInvalidationFunc aCallback,
                                          bool* aGeometryChanged);
@@ -145,10 +176,12 @@ struct LayerPropertiesBase : public LayerProperties
   nsIntRegion ComputeChange(NotifySubDocInvalidationFunc aCallback,
                             bool& aGeometryChanged)
   {
-    bool transformChanged = !mTransform.FuzzyEqualsMultiplicative(mLayer->GetLocalTransform()) ||
-                            mLayer->GetPostXScale() != mPostXScale ||
-                            mLayer->GetPostYScale() != mPostYScale;
-    const Maybe<ParentLayerIntRect>& otherClip = mLayer->GetEffectiveClipRect();
+    // Bug 1251615: This canary is sometimes hit. We're still not sure why.
+    mCanary.Check();
+    bool transformChanged = !mTransform.FuzzyEqual(GetTransformForInvalidation(mLayer)) ||
+                             mLayer->GetPostXScale() != mPostXScale ||
+                             mLayer->GetPostYScale() != mPostYScale;
+    const Maybe<ParentLayerIntRect>& otherClip = mLayer->GetLocalClipRect();
     nsIntRegion result;
 
     bool ancestorMaskChanged = mAncestorMaskLayers.Length() != mLayer->GetAncestorMaskLayerCount();
@@ -166,7 +199,7 @@ struct LayerPropertiesBase : public LayerProperties
         ancestorMaskChanged ||
         (mUseClipRect != !!otherClip) ||
         mLayer->GetLocalOpacity() != mOpacity ||
-        transformChanged) 
+        transformChanged)
     {
       aGeometryChanged = true;
       result = OldTransformedBounds();
@@ -176,7 +209,7 @@ struct LayerPropertiesBase : public LayerProperties
     }
 
     AddRegion(result, ComputeChangeInternal(aCallback, aGeometryChanged));
-    AddTransformedRegion(result, mLayer->GetInvalidRegion(), mTransform);
+    AddTransformedRegion(result, mLayer->GetInvalidRegion().GetRegion(), mTransform);
 
     if (mMaskLayer && otherMask) {
       AddTransformedRegion(result, mMaskLayer->ComputeChange(aCallback, aGeometryChanged),
@@ -195,7 +228,7 @@ struct LayerPropertiesBase : public LayerProperties
     if (mUseClipRect && otherClip) {
       if (!mClipRect.IsEqualInterior(*otherClip)) {
         aGeometryChanged = true;
-        nsIntRegion tmp; 
+        nsIntRegion tmp;
         tmp.Xor(mClipRect.ToUnknownRect(), otherClip->ToUnknownRect());
         AddRegion(result, tmp);
       }
@@ -205,13 +238,19 @@ struct LayerPropertiesBase : public LayerProperties
     return result;
   }
 
-  IntRect NewTransformedBounds()
+  void CheckCanary()
   {
-    return TransformRect(mLayer->GetVisibleRegion().ToUnknownRegion().GetBounds(),
-                         mLayer->GetLocalTransform());
+    mCanary.Check();
+    mLayer->CheckCanary();
   }
 
-  IntRect OldTransformedBounds()
+  virtual IntRect NewTransformedBounds()
+  {
+    return TransformRect(mLayer->GetLocalVisibleRegion().ToUnknownRegion().GetBounds(),
+                         GetTransformForInvalidation(mLayer));
+  }
+
+  virtual IntRect OldTransformedBounds()
   {
     return TransformRect(mVisibleRegion.ToUnknownRegion().GetBounds(), mTransform);
   }
@@ -226,13 +265,13 @@ struct LayerPropertiesBase : public LayerProperties
   UniquePtr<LayerPropertiesBase> mMaskLayer;
   nsTArray<UniquePtr<LayerPropertiesBase>> mAncestorMaskLayers;
   nsIntRegion mVisibleRegion;
-  nsIntRegion mInvalidRegion;
   Matrix4x4 mTransform;
   float mPostXScale;
   float mPostYScale;
   float mOpacity;
   ParentLayerIntRect mClipRect;
   bool mUseClipRect;
+  mozilla::CorruptionCanary mCanary;
 };
 
 struct ContainerLayerProperties : public LayerPropertiesBase
@@ -243,23 +282,34 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     , mPreYScale(aLayer->GetPreYScale())
   {
     for (Layer* child = aLayer->GetFirstChild(); child; child = child->GetNextSibling()) {
+      child->CheckCanary();
       mChildren.AppendElement(Move(CloneLayerTreePropertiesInternal(child)));
     }
   }
 
-  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
-                                            bool& aGeometryChanged)
+protected:
+  ContainerLayerProperties(const ContainerLayerProperties& a) = delete;
+  ContainerLayerProperties& operator=(const ContainerLayerProperties& a) = delete;
+
+public:
+  nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
+                                    bool& aGeometryChanged) override
   {
+    // Make sure we got our virtual call right
+    mSubtypeCanary.Check();
     ContainerLayer* container = mLayer->AsContainerLayer();
-    nsIntRegion result;
+    nsIntRegion invalidOfLayer; // Invalid regions of this layer.
+    nsIntRegion result;         // Invliad regions for children only.
+
+    container->CheckCanary();
 
     bool childrenChanged = false;
 
     if (mPreXScale != container->GetPreXScale() ||
         mPreYScale != container->GetPreYScale()) {
       aGeometryChanged = true;
-      result = OldTransformedBounds();
-      AddRegion(result, NewTransformedBounds());
+      invalidOfLayer = OldTransformedBounds();
+      AddRegion(invalidOfLayer, NewTransformedBounds());
       childrenChanged = true;
 
       // Can't bail out early, we need to update the child container layers
@@ -276,6 +326,7 @@ struct ContainerLayerProperties : public LayerPropertiesBase
 
     nsDataHashtable<nsPtrHashKey<Layer>, uint32_t> oldIndexMap(mChildren.Length());
     for (uint32_t i = 0; i < mChildren.Length(); ++i) {
+      mChildren[i]->CheckCanary();
       oldIndexMap.Put(mChildren[i]->mLayer, i);
     }
 
@@ -294,6 +345,9 @@ struct ContainerLayerProperties : public LayerPropertiesBase
             for (uint32_t j = i; j < childsOldIndex; ++j) {
               AddRegion(result, mChildren[j]->OldTransformedBounds());
               childrenChanged |= true;
+            }
+            if (childsOldIndex >= mChildren.Length()) {
+              MOZ_CRASH("Out of bounds");
             }
             // Invalidate any regions of the child that have changed:
             nsIntRegion region = mChildren[childsOldIndex]->ComputeChange(aCallback, aGeometryChanged);
@@ -318,10 +372,10 @@ struct ContainerLayerProperties : public LayerPropertiesBase
       }
       if (invalidateChildsCurrentArea) {
         aGeometryChanged = true;
-        AddTransformedRegion(result, child->GetVisibleRegion().ToUnknownRegion(),
-                             child->GetLocalTransform());
+        AddTransformedRegion(result, child->GetLocalVisibleRegion().ToUnknownRegion(),
+                             GetTransformForInvalidation(child));
         if (aCallback) {
-          NotifySubdocumentInvalidationRecursive(child, aCallback);
+          NotifySubdocumentInvalidation(child, aCallback);
         } else {
           ClearInvalidations(child);
         }
@@ -344,13 +398,45 @@ struct ContainerLayerProperties : public LayerPropertiesBase
       container->SetChildrenChanged(true);
     }
 
-    result.Transform(mLayer->GetLocalTransform());
+    if (!mLayer->Extend3DContext()) {
+      // |result| contains invalid regions only of children.
+      result.Transform(GetTransformForInvalidation(mLayer));
+    }
+    // else, effective transforms have applied on children.
+
+    result.OrWith(invalidOfLayer);
 
     return result;
   }
 
+  IntRect NewTransformedBounds() override
+  {
+    if (mLayer->Extend3DContext()) {
+      IntRect result;
+      for (UniquePtr<LayerPropertiesBase>& child : mChildren) {
+        result = result.Union(child->NewTransformedBounds());
+      }
+      return result;
+    }
+
+    return LayerPropertiesBase::NewTransformedBounds();
+  }
+
+  IntRect OldTransformedBounds() override
+  {
+    if (mLayer->Extend3DContext()) {
+      IntRect result;
+      for (UniquePtr<LayerPropertiesBase>& child : mChildren) {
+        result = result.Union(child->OldTransformedBounds());
+      }
+      return result;
+    }
+    return LayerPropertiesBase::OldTransformedBounds();
+  }
+
   // The old list of children:
-  nsAutoTArray<UniquePtr<LayerPropertiesBase>,1> mChildren;
+  mozilla::CorruptionCanary mSubtypeCanary;
+  nsTArray<UniquePtr<LayerPropertiesBase>> mChildren;
   float mPreXScale;
   float mPreYScale;
 };
@@ -363,6 +449,11 @@ struct ColorLayerProperties : public LayerPropertiesBase
     , mBounds(aLayer->GetBounds())
   { }
 
+protected:
+  ColorLayerProperties(const ColorLayerProperties& a) = delete;
+  ColorLayerProperties& operator=(const ColorLayerProperties& a) = delete;
+
+public:
   virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
                                             bool& aGeometryChanged)
   {
@@ -401,7 +492,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
     : LayerPropertiesBase(aImage)
     , mContainer(aImage->GetContainer())
     , mImageHost(GetImageHost(aImage))
-    , mFilter(aImage->GetFilter())
+    , mSamplingFilter(aImage->GetSamplingFilter())
     , mScaleToSize(aImage->GetScaleToSize())
     , mScaleMode(aImage->GetScaleMode())
     , mLastProducerID(-1)
@@ -418,8 +509,8 @@ struct ImageLayerProperties : public LayerPropertiesBase
                                             bool& aGeometryChanged)
   {
     ImageLayer* imageLayer = static_cast<ImageLayer*>(mLayer.get());
-    
-    if (!imageLayer->GetVisibleRegion().ToUnknownRegion().IsEqual(mVisibleRegion)) {
+
+    if (!imageLayer->GetLocalVisibleRegion().ToUnknownRegion().IsEqual(mVisibleRegion)) {
       aGeometryChanged = true;
       IntRect result = NewTransformedBounds();
       result = result.Union(OldTransformedBounds());
@@ -429,7 +520,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
     ImageContainer* container = imageLayer->GetContainer();
     ImageHost* host = GetImageHost(imageLayer);
     if (mContainer != container ||
-        mFilter != imageLayer->GetFilter() ||
+        mSamplingFilter != imageLayer->GetSamplingFilter() ||
         mScaleToSize != imageLayer->GetScaleToSize() ||
         mScaleMode != imageLayer->GetScaleMode() ||
         host != mImageHost ||
@@ -448,7 +539,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
           size = host->GetImageSize();
         }
         IntRect rect(0, 0, size.width, size.height);
-        return TransformRect(rect, mLayer->GetLocalTransform());
+        return TransformRect(rect, GetTransformForInvalidation(mLayer));
       }
       return NewTransformedBounds();
     }
@@ -458,7 +549,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
 
   RefPtr<ImageContainer> mContainer;
   RefPtr<ImageHost> mImageHost;
-  Filter mFilter;
+  SamplingFilter mSamplingFilter;
   gfx::IntSize mScaleToSize;
   ScaleMode mScaleMode;
   int32_t mLastProducerID;
@@ -503,6 +594,8 @@ CloneLayerTreePropertiesInternal(Layer* aRoot, bool aIsMask /* = false */)
 
   MOZ_ASSERT(!aIsMask || aRoot->GetType() == Layer::TYPE_IMAGE);
 
+  aRoot->CheckCanary();
+
   switch (aRoot->GetType()) {
     case Layer::TYPE_CONTAINER:
     case Layer::TYPE_REF:
@@ -529,25 +622,23 @@ LayerProperties::CloneFrom(Layer* aRoot)
   return CloneLayerTreePropertiesInternal(aRoot);
 }
 
-/* static */ void 
+/* static */ void
 LayerProperties::ClearInvalidations(Layer *aLayer)
 {
-  aLayer->ClearInvalidRect();
-  if (aLayer->GetMaskLayer()) {
-    ClearInvalidations(aLayer->GetMaskLayer());
-  }
-  for (size_t i = 0; i < aLayer->GetAncestorMaskLayerCount(); i++) {
-    ClearInvalidations(aLayer->GetAncestorMaskLayerAt(i));
-  }
+  ForEachNode<ForwardIterator>(
+        aLayer,
+        [] (Layer* layer)
+        {
+          layer->ClearInvalidRect();
+          if (layer->GetMaskLayer()) {
+            ClearInvalidations(layer->GetMaskLayer());
+          }
+          for (size_t i = 0; i < layer->GetAncestorMaskLayerCount(); i++) {
+            ClearInvalidations(layer->GetAncestorMaskLayerAt(i));
+          }
 
-  ContainerLayer* container = aLayer->AsContainerLayer();
-  if (!container) {
-    return;
-  }
-
-  for (Layer* child = container->GetFirstChild(); child; child = child->GetNextSibling()) {
-    ClearInvalidations(child);
-  }
+        }
+      );
 }
 
 nsIntRegion
@@ -557,11 +648,11 @@ LayerPropertiesBase::ComputeDifferences(Layer* aRoot, NotifySubDocInvalidationFu
   NS_ASSERTION(aRoot, "Must have a layer tree to compare against!");
   if (mLayer != aRoot) {
     if (aCallback) {
-      NotifySubdocumentInvalidationRecursive(aRoot, aCallback);
+      NotifySubdocumentInvalidation(aRoot, aCallback);
     } else {
       ClearInvalidations(aRoot);
     }
-    IntRect result = TransformRect(aRoot->GetVisibleRegion().ToUnknownRegion().GetBounds(),
+    IntRect result = TransformRect(aRoot->GetLocalVisibleRegion().ToUnknownRegion().GetBounds(),
                                      aRoot->GetLocalTransform());
     result = result.Union(OldTransformedBounds());
     if (aGeometryChanged != nullptr) {

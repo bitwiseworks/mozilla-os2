@@ -6,6 +6,19 @@
 #include "nsISupports.idl"
 #include "mozIStorageAsyncConnection.idl"
 
+%{C++
+namespace mozilla {
+namespace dom {
+namespace quota {
+class QuotaObject;
+}
+}
+}
+
+%}
+
+[ptr] native QuotaObject(mozilla::dom::quota::QuotaObject);
+
 interface mozIStorageAggregateFunction;
 interface mozIStorageCompletionCallback;
 interface mozIStorageFunction;
@@ -45,6 +58,7 @@ interface mozIStorageConnection : mozIStorageAsyncConnection {
 
   /**
    * Clones a database connection and makes the clone read only if needed.
+   * SQL Functions and attached on-disk databases are applied to the new clone.
    *
    * @param aReadOnly
    *        If true, the returned database should be put into read-only mode.
@@ -238,4 +252,17 @@ interface mozIStorageConnection : mozIStorageAsyncConnection {
    *         For unknown module names.
    */
   [noscript] void enableModule(in ACString aModuleName);
+
+  /**
+   * Get quota objects.
+   *
+   * @param[out] aDatabaseQuotaObject
+   *             The QuotaObject associated with the database file.
+   * @param[out] aJournalQuotaObject
+   *             The QuotaObject associated with the journal file.
+   *
+   * @throws NS_ERROR_NOT_INITIALIZED.
+   */
+  [noscript] void getQuotaObjects(out QuotaObject aDatabaseQuotaObject,
+                                  out QuotaObject aJournalQuotaObject);
 };

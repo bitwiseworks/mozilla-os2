@@ -27,7 +27,7 @@
 
 #include "mozilla/Logging.h"
 
-extern PRLogModuleInfo *gStorageLog;
+extern mozilla::LazyLogModule gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -44,17 +44,17 @@ NS_IMPL_CI_INTERFACE_GETTER(AsyncStatement,
 class AsyncStatementClassInfo : public nsIClassInfo
 {
 public:
-  MOZ_CONSTEXPR AsyncStatementClassInfo() {}
+  constexpr AsyncStatementClassInfo() {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetInterfaces(uint32_t *_count, nsIID ***_array) override
   {
     return NS_CI_INTERFACE_GETTER_NAME(AsyncStatement)(_count, _array);
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetScriptableHelper(nsIXPCScriptable **_helper) override
   {
     static AsyncStatementJSHelper sJSHelper;
@@ -62,35 +62,35 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetContractID(char **_contractID) override
   {
     *_contractID = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassDescription(char **_desc) override
   {
     *_desc = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassID(nsCID **_id) override
   {
     *_id = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetFlags(uint32_t *_flags) override
   {
     *_flags = 0;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassIDNoAlloc(nsCID *_cid) override
   {
     return NS_ERROR_NOT_AVAILABLE;
@@ -220,10 +220,8 @@ AsyncStatement::~AsyncStatement()
   if (!onCallingThread) {
     // NS_ProxyRelase only magic forgets for us if mDBConnection is an
     // nsCOMPtr.  Which it is not; it's an nsRefPtr.
-    Connection *forgottenConn = nullptr;
-    mDBConnection.swap(forgottenConn);
-    (void)::NS_ProxyRelease(forgottenConn->threadOpenedOn,
-                            static_cast<mozIStorageConnection *>(forgottenConn));
+    nsCOMPtr<nsIThread> targetThread(mDBConnection->threadOpenedOn);
+    NS_ProxyRelease(targetThread, mDBConnection.forget());
   }
 }
 

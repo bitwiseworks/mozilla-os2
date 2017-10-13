@@ -19,21 +19,23 @@
 #include "jit/ExecutableAllocator.h"
 #include "jit/JitCompartment.h"
 
+#include "gc/StoreBuffer-inl.h"
+
 using namespace js;
 using namespace js::jit;
 
 using mozilla::CountLeadingZeroes32;
 using mozilla::DebugOnly;
 
-// Note this is used for inter-AsmJS calls and may pass arguments and results
+// Note this is used for inter-wasm calls and may pass arguments and results
 // in floating point registers even if the system ABI does not.
 
 ABIArg
 ABIArgGenerator::next(MIRType type)
 {
     switch (type) {
-      case MIRType_Int32:
-      case MIRType_Pointer:
+      case MIRType::Int32:
+      case MIRType::Pointer:
         if (intRegIndex_ == NumIntArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uintptr_t);
@@ -43,15 +45,15 @@ ABIArgGenerator::next(MIRType type)
         intRegIndex_++;
         break;
 
-      case MIRType_Float32:
-      case MIRType_Double:
+      case MIRType::Float32:
+      case MIRType::Double:
         if (floatRegIndex_ == NumFloatArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(double);
             break;
         }
         current_ = ABIArg(FloatRegister(floatRegIndex_,
-                                        type == MIRType_Double ? FloatRegisters::Double
+                                        type == MIRType::Double ? FloatRegisters::Double
                                                                : FloatRegisters::Single));
         floatRegIndex_++;
         break;
@@ -61,13 +63,6 @@ ABIArgGenerator::next(MIRType type)
     }
     return current_;
 }
-
-const Register ABIArgGenerator::NonArgReturnReg0 = r8;
-const Register ABIArgGenerator::NonArgReturnReg1 = r9;
-const Register ABIArgGenerator::NonVolatileReg = r1;
-const Register ABIArgGenerator::NonArg_VolatileReg = r13;
-const Register ABIArgGenerator::NonReturn_VolatileReg0 = r2;
-const Register ABIArgGenerator::NonReturn_VolatileReg1 = r3;
 
 namespace js {
 namespace jit {
@@ -569,11 +564,13 @@ TraceDataRelocations(JSTracer* trc, uint8_t* buffer, CompactBufferReader& reader
         // All pointers on AArch64 will have the top bits cleared.
         // If those bits are not cleared, this must be a Value.
         if (literal >> JSVAL_TAG_SHIFT) {
-            jsval_layout layout;
-            layout.asBits = literal;
-            Value v = IMPL_TO_JSVAL(layout);
+            Value v = Value::fromRawBits(literal);
             TraceManuallyBarrieredEdge(trc, &v, "ion-masm-value");
-            *literalAddr = JSVAL_TO_IMPL(v).asBits;
+            if (*literalAddr != v.asRawBits()) {
+                // Only update the code if the value changed, because the code
+                // is not writable if we're not moving objects.
+                *literalAddr = v.asRawBits();
+            }
 
             // TODO: When we can, flush caches here if a pointer was moved.
             continue;
@@ -635,19 +632,6 @@ void
 Assembler::PatchInstructionImmediate(uint8_t* code, PatchedImmPtr imm)
 {
     MOZ_CRASH("PatchInstructionImmediate()");
-}
-
-void
-Assembler::UpdateBoundsCheck(uint32_t heapSize, Instruction* inst)
-{
-    int32_t mask = ~(heapSize - 1);
-    unsigned n, imm_s, imm_r;
-    if (!IsImmLogical(mask, 32, &n, &imm_s, &imm_r))
-        MOZ_CRASH("Could not encode immediate!?");
-
-    inst->SetImmR(imm_r);
-    inst->SetImmS(imm_s);
-    inst->SetBitN(n);
 }
 
 void

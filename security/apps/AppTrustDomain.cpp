@@ -5,17 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AppTrustDomain.h"
-#include "certdb.h"
-#include "pkix/pkixnss.h"
-#include "mozilla/ArrayUtils.h"
 #include "MainThreadUtils.h"
+#include "certdb.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/Casting.h"
 #include "mozilla/Preferences.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
 #include "nsIX509CertDB.h"
-#include "nsNetUtil.h"
 #include "nsNSSCertificate.h"
+#include "nsNetUtil.h"
+#include "pkix/pkixnss.h"
 #include "prerror.h"
 #include "secerr.h"
 
@@ -37,7 +38,7 @@
 
 using namespace mozilla::pkix;
 
-extern PRLogModuleInfo* gPIPNSSLog;
+extern mozilla::LazyLogModule gPIPNSSLog;
 
 static const unsigned int DEFAULT_MIN_RSA_BITS = 2048;
 static char kDevImportedDER[] =
@@ -46,10 +47,10 @@ static char kDevImportedDER[] =
 namespace mozilla { namespace psm {
 
 StaticMutex AppTrustDomain::sMutex;
-nsAutoArrayPtr<unsigned char> AppTrustDomain::sDevImportedDERData(nullptr);
+UniquePtr<unsigned char[]> AppTrustDomain::sDevImportedDERData;
 unsigned int AppTrustDomain::sDevImportedDERLen = 0;
 
-AppTrustDomain::AppTrustDomain(ScopedCERTCertList& certChain, void* pinArg)
+AppTrustDomain::AppTrustDomain(UniqueCERTCertList& certChain, void* pinArg)
   : mCertChain(certChain)
   , mPinArg(pinArg)
   , mMinRSABits(DEFAULT_MIN_RSA_BITS)
@@ -144,18 +145,19 @@ AppTrustDomain::SetTrustedRoot(AppTrustedRoot trustedRoot)
           return SECFailure;
         }
 
-        char* data = new char[length];
-        rv = inputStream->Read(data, length, &sDevImportedDERLen);
+        auto data = MakeUnique<char[]>(length);
+        rv = inputStream->Read(data.get(), length, &sDevImportedDERLen);
         if (NS_FAILED(rv)) {
           PR_SetError(SEC_ERROR_IO, 0);
           return SECFailure;
         }
 
         MOZ_ASSERT(length == sDevImportedDERLen);
-        sDevImportedDERData = reinterpret_cast<unsigned char*>(data);
+        sDevImportedDERData.reset(
+          BitwiseCast<unsigned char*, char*>(data.release()));
       }
 
-      trustedDER.data = sDevImportedDERData;
+      trustedDER.data = sDevImportedDERData.get();
       trustedDER.len = sDevImportedDERLen;
       break;
     }
@@ -165,8 +167,8 @@ AppTrustDomain::SetTrustedRoot(AppTrustedRoot trustedRoot)
       return SECFailure;
   }
 
-  mTrustedRoot = CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
-                                         &trustedDER, nullptr, false, true);
+  mTrustedRoot.reset(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
+                                             &trustedDER, nullptr, false, true));
   if (!mTrustedRoot) {
     return SECFailure;
   }
@@ -194,7 +196,7 @@ AppTrustDomain::FindIssuer(Input encodedIssuerName, IssuerChecker& checker,
   //    message, passing each one to checker.Check.
   SECItem encodedIssuerNameSECItem =
     UnsafeMapInputToSECItem(encodedIssuerName);
-  ScopedCERTCertList
+  UniqueCERTCertList
     candidates(CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
                                           &encodedIssuerNameSECItem, 0,
                                           false));
@@ -244,7 +246,7 @@ AppTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   // expose it in any other easy-to-use fashion.
   SECItem candidateCertDERSECItem =
     UnsafeMapInputToSECItem(candidateCertDER);
-  ScopedCERTCertificate candidateCert(
+  UniqueCERTCertificate candidateCert(
     CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &candidateCertDERSECItem,
                             nullptr, false, true));
   if (!candidateCert) {
@@ -366,6 +368,20 @@ AppTrustDomain::CheckValidityIsAcceptable(Time /*notBefore*/, Time /*notAfter*/,
                                           KeyPurposeId /*keyPurpose*/)
 {
   return Success;
+}
+
+Result
+AppTrustDomain::NetscapeStepUpMatchesServerAuth(Time /*notBefore*/,
+                                                /*out*/ bool& matches)
+{
+  matches = false;
+  return Success;
+}
+
+void
+AppTrustDomain::NoteAuxiliaryExtension(AuxiliaryExtension /*extension*/,
+                                       Input /*extensionData*/)
+{
 }
 
 } } // namespace mozilla::psm

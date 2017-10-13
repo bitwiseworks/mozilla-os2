@@ -100,7 +100,7 @@ mai_atk_hyperlink_get_type(void)
     return type;
 }
 
-MaiHyperlink::MaiHyperlink(uintptr_t aHyperLink) :
+MaiHyperlink::MaiHyperlink(AccessibleOrProxy aHyperLink) :
     mHyperlink(aHyperLink),
     mMaiAtkHyperlink(nullptr)
 {
@@ -188,18 +188,19 @@ AtkObject *
 getObjectCB(AtkHyperlink *aLink, gint aLinkIndex)
 {
   MaiHyperlink* maiLink = GetMaiHyperlink(aLink);
-  if (!maiLink)
+  if (!maiLink) {
     return nullptr;
+  }
 
-    if (Accessible* hyperlink = maiLink->GetAccHyperlink()) {
-      Accessible* anchor = hyperlink->AnchorAt(aLinkIndex);
-      NS_ENSURE_TRUE(anchor, nullptr);
+  if (Accessible* hyperlink = maiLink->GetAccHyperlink()) {
+    Accessible* anchor = hyperlink->AnchorAt(aLinkIndex);
+    NS_ENSURE_TRUE(anchor, nullptr);
 
-      return AccessibleWrap::GetAtkObject(anchor);
-    }
+    return AccessibleWrap::GetAtkObject(anchor);
+  }
 
-    ProxyAccessible* anchor = maiLink->Proxy()->AnchorAt(aLinkIndex);
-    return anchor ? GetWrapperFor(anchor) : nullptr;
+  ProxyAccessible* anchor = maiLink->Proxy()->AnchorAt(aLinkIndex);
+  return anchor ? GetWrapperFor(anchor) : nullptr;
 }
 
 gint

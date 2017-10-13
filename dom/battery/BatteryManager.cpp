@@ -29,7 +29,7 @@ namespace mozilla {
 namespace dom {
 namespace battery {
 
-BatteryManager::BatteryManager(nsPIDOMWindow* aWindow)
+BatteryManager::BatteryManager(nsPIDOMWindowInner* aWindow)
   : DOMEventTargetHelper(aWindow)
   , mLevel(kDefaultLevel)
   , mCharging(kDefaultCharging)
@@ -134,20 +134,28 @@ BatteryManager::UpdateFromBatteryInfo(const hal::BatteryInformation& aBatteryInf
   mLevel = aBatteryInfo.level();
 
   // Round to the nearest ten percent for non-chrome and non-certified apps
-  nsIDocument* doc = GetOwner()->GetDoc();
+  nsIDocument* doc = GetOwner() ? GetOwner()->GetDoc() : nullptr;
   uint16_t status = nsIPrincipal::APP_STATUS_NOT_INSTALLED;
   if (doc) {
-    doc->NodePrincipal()->GetAppStatus(&status);
+    status = doc->NodePrincipal()->GetAppStatus();
   }
+
+  mCharging = aBatteryInfo.charging();
+  mRemainingTime = aBatteryInfo.remainingTime();
 
   if (!nsContentUtils::IsChromeDoc(doc) &&
       status != nsIPrincipal::APP_STATUS_CERTIFIED)
   {
     mLevel = lround(mLevel * 10.0) / 10.0;
+    if (mLevel == 1.0) {
+      mRemainingTime = mCharging ? kDefaultRemainingTime : kUnknownRemainingTime;
+    } else if (mRemainingTime != kUnknownRemainingTime) {
+      // Round the remaining time to a multiple of 15 minutes and never zero
+      const double MINUTES_15 = 15.0 * 60.0;
+      mRemainingTime = fmax(lround(mRemainingTime / MINUTES_15) * MINUTES_15,
+                            MINUTES_15);
+    }
   }
-
-  mCharging = aBatteryInfo.charging();
-  mRemainingTime = aBatteryInfo.remainingTime();
 
   // Add some guards to make sure the values are coherent.
   if (mLevel == 1.0 && mCharging == true &&

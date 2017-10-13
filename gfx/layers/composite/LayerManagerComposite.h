@@ -61,6 +61,7 @@ class PaintedLayerComposite;
 class TextRenderer;
 class CompositingRenderTarget;
 struct FPSState;
+class PaintCounter;
 
 static const int kVisualWarningDuration = 150; // ms
 
@@ -75,11 +76,6 @@ public:
   ~LayerManagerComposite();
 
   virtual void Destroy() override;
-
-  /**
-   * return True if initialization was succesful, false when it was not.
-   */
-  bool Initialize();
 
   /**
    * Sets the clipping region for this layer manager. This is important on
@@ -105,24 +101,25 @@ public:
 
   void UpdateRenderBounds(const gfx::IntRect& aRect);
 
-  virtual void BeginTransaction() override;
-  virtual void BeginTransactionWithTarget(gfxContext* aTarget) override
+  virtual bool BeginTransaction() override;
+  virtual bool BeginTransactionWithTarget(gfxContext* aTarget) override
   {
-    MOZ_CRASH("Use BeginTransactionWithDrawTarget");
+    MOZ_CRASH("GFX: Use BeginTransactionWithDrawTarget");
+    return false;
   }
   void BeginTransactionWithDrawTarget(gfx::DrawTarget* aTarget,
                                       const gfx::IntRect& aRect);
 
   virtual bool EndEmptyTransaction(EndTransactionFlags aFlags = END_DEFAULT) override
   {
-    MOZ_CRASH("Use EndTransaction(aTimeStamp)");
+    MOZ_CRASH("GFX: Use EndTransaction(aTimeStamp)");
     return false;
   }
   virtual void EndTransaction(DrawPaintedLayerCallback aCallback,
                               void* aCallbackData,
                               EndTransactionFlags aFlags = END_DEFAULT) override
   {
-    MOZ_CRASH("Use EndTransaction(aTimeStamp)");
+    MOZ_CRASH("GFX: Use EndTransaction(aTimeStamp)");
   }
   void EndTransaction(const TimeStamp& aTimeStamp,
                       EndTransactionFlags aFlags = END_DEFAULT);
@@ -135,7 +132,7 @@ public:
 
   virtual int32_t GetMaxTextureSize() const override
   {
-    MOZ_CRASH("Call on compositor, not LayerManagerComposite");
+    MOZ_CRASH("GFX: Call on compositor, not LayerManagerComposite");
   }
 
   virtual void ClearCachedResources(Layer* aSubtree = nullptr) override;
@@ -154,11 +151,11 @@ public:
 
   virtual LayersBackend GetBackendType() override
   {
-    MOZ_CRASH("Shouldn't be called for composited layer manager");
+    MOZ_CRASH("GFX: Shouldn't be called for composited layer manager");
   }
   virtual void GetBackendName(nsAString& name) override
   {
-    MOZ_CRASH("Shouldn't be called for composited layer manager");
+    MOZ_CRASH("GFX: Shouldn't be called for composited layer manager");
   }
 
   virtual bool AreComponentAlphaLayersEnabled() override;
@@ -182,7 +179,8 @@ public:
    */
   void PostProcessLayers(Layer* aLayer,
                          nsIntRegion& aOpaqueRegion,
-                         LayerIntRegion& aVisibleRegion);
+                         LayerIntRegion& aVisibleRegion,
+                         const Maybe<ParentLayerIntRect>& aClipFromAncestors);
 
   /**
    * RAII helper class to add a mask effect with the compositable from aMaskLayer
@@ -192,8 +190,7 @@ public:
   {
   public:
     AutoAddMaskEffect(Layer* aMaskLayer,
-                      EffectChain& aEffect,
-                      bool aIs3D = false);
+                      EffectChain& aEffect);
     ~AutoAddMaskEffect();
 
     bool Failed() const { return mFailed; }
@@ -201,15 +198,6 @@ public:
     CompositableHost* mCompositable;
     bool mFailed;
   };
-
-  /**
-   * Calculates the 'completeness' of the rendering that intersected with the
-   * screen on the last render. This is only useful when progressive tile
-   * drawing is enabled, otherwise this will always return 1.0.
-   * This function's expense scales with the size of the layer tree and the
-   * complexity of individual layers' valid regions.
-   */
-  float ComputeRenderIntegrity();
 
   /**
    * returns true if PlatformAllocBuffer will return a buffer that supports
@@ -224,10 +212,41 @@ public:
     mInvalidRegion.Or(mInvalidRegion, aRegion);
   }
 
+  void ClearApproximatelyVisibleRegions(uint64_t aLayersId,
+                                        const Maybe<uint32_t>& aPresShellId)
+  {
+    for (auto iter = mVisibleRegions.Iter(); !iter.Done(); iter.Next()) {
+      if (iter.Key().mLayersId == aLayersId &&
+          (!aPresShellId || iter.Key().mPresShellId == *aPresShellId)) {
+        iter.Remove();
+      }
+    }
+  }
+
+  void UpdateApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                        const CSSIntRegion& aRegion)
+  {
+    CSSIntRegion* regionForScrollFrame = mVisibleRegions.LookupOrAdd(aGuid);
+    MOZ_ASSERT(regionForScrollFrame);
+
+    *regionForScrollFrame = aRegion;
+  }
+
+  CSSIntRegion* GetApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid)
+  {
+    return mVisibleRegions.Get(aGuid);
+  }
+
   Compositor* GetCompositor() const
   {
     return mCompositor;
   }
+
+  // Called by CompositorBridgeParent when a new compositor has been created due
+  // to a device reset. The layer manager must clear any cached resources
+  // attached to the old compositor, and make a best effort at ignoring
+  // layer or texture updates against the old compositor.
+  void ChangeCompositor(Compositor* aNewCompositor);
 
   /**
    * LayerManagerComposite provides sophisticated debug overlays
@@ -258,6 +277,9 @@ public:
   void UnusedApzTransformWarning() {
     mUnusedApzTransformWarning = true;
   }
+  void DisabledApzWarning() {
+    mDisabledApzWarning = true;
+  }
 
   bool LastFrameMissedHWC() { return mLastFrameMissedHWC; }
 
@@ -284,6 +306,10 @@ public:
   // overlay.
   void SetWindowOverlayChanged() { mWindowOverlayChanged = true; }
 
+  void ForcePresent() { mCompositor->ForcePresent(); }
+
+  void SetPaintTime(const TimeDuration& aPaintTime) { mLastPaintTime = aPaintTime; }
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -293,17 +319,6 @@ private:
   LayerComposite* RootLayer() const;
 
   /**
-   * Recursive helper method for use by ComputeRenderIntegrity. Subtracts
-   * any incomplete rendering on aLayer from aScreenRegion. Any low-precision
-   * rendering is included in aLowPrecisionScreenRegion. aTransform is the
-   * accumulated transform of intermediate surfaces beneath aLayer.
-   */
-  static void ComputeRenderIntegrityInternal(Layer* aLayer,
-                                             nsIntRegion& aScreenRegion,
-                                             nsIntRegion& aLowPrecisionScreenRegion,
-                                             const gfx::Matrix4x4& aTransform);
-
-  /**
    * Update the invalid region and render it.
    */
   void UpdateAndRender();
@@ -311,20 +326,20 @@ private:
   /**
    * Render the current layer tree to the active target.
    */
-  void Render(const nsIntRegion& aInvalidRegion);
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+  void Render(const nsIntRegion& aInvalidRegion, const nsIntRegion& aOpaqueRegion);
+#if defined(MOZ_WIDGET_ANDROID)
   void RenderToPresentationSurface();
 #endif
 
   /**
    * We need to know our invalid region before we're ready to render.
    */
-  void InvalidateDebugOverlay(const gfx::IntRect& aBounds);
+  void InvalidateDebugOverlay(nsIntRegion& aInvalidRegion, const gfx::IntRect& aBounds);
 
   /**
    * Render debug overlays such as the FPS/FrameCounter above the frame.
    */
-  void RenderDebugOverlay(const gfx::Rect& aBounds);
+  void RenderDebugOverlay(const gfx::IntRect& aBounds);
 
 
   RefPtr<CompositingRenderTarget> PushGroupForLayerEffects();
@@ -334,9 +349,12 @@ private:
                                bool aInvertEffect,
                                float aContrastEffect);
 
+  void ChangeCompositorInternal(Compositor* aNewCompositor);
+
   float mWarningLevel;
   mozilla::TimeStamp mWarnTime;
   bool mUnusedApzTransformWarning;
+  bool mDisabledApzWarning;
   RefPtr<Compositor> mCompositor;
   UniquePtr<LayerProperties> mClonedLayerTreeProperties;
 
@@ -349,6 +367,11 @@ private:
   gfx::IntRect mTargetBounds;
 
   nsIntRegion mInvalidRegion;
+
+  typedef nsClassHashtable<nsGenericHashKey<ScrollableLayerGuid>,
+                           CSSIntRegion> VisibleRegions;
+  VisibleRegions mVisibleRegions;
+
   UniquePtr<FPSState> mFPS;
 
   bool mInTransaction;
@@ -364,6 +387,16 @@ private:
   bool mLastFrameMissedHWC;
 
   bool mWindowOverlayChanged;
+  TimeDuration mLastPaintTime;
+  TimeStamp mRenderStartTime;
+
+#ifdef USE_SKIA
+  /**
+   * Render paint and composite times above the frame.
+   */
+  void DrawPaintTimes(Compositor* aCompositor);
+  RefPtr<PaintCounter> mPaintCounter;
+#endif
 };
 
 /**
@@ -450,13 +483,17 @@ public:
   {
     mShadowOpacity = aOpacity;
   }
+  void SetShadowOpacitySetByAnimation(bool aSetByAnimation)
+  {
+    mShadowOpacitySetByAnimation = aSetByAnimation;
+  }
 
   void SetShadowClipRect(const Maybe<ParentLayerIntRect>& aRect)
   {
     mShadowClipRect = aRect;
   }
 
-  void SetShadowTransform(const gfx::Matrix4x4& aMatrix)
+  void SetShadowBaseTransform(const gfx::Matrix4x4& aMatrix)
   {
     mShadowTransform = aMatrix;
   }
@@ -479,17 +516,28 @@ public:
   float GetShadowOpacity() { return mShadowOpacity; }
   const Maybe<ParentLayerIntRect>& GetShadowClipRect() { return mShadowClipRect; }
   const LayerIntRegion& GetShadowVisibleRegion() { return mShadowVisibleRegion; }
-  const gfx::Matrix4x4& GetShadowTransform() { return mShadowTransform; }
+  const gfx::Matrix4x4& GetShadowBaseTransform() { return mShadowTransform; }
+  gfx::Matrix4x4 GetShadowTransform();
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
+  bool GetShadowOpacitySetByAnimation() { return mShadowOpacitySetByAnimation; }
   bool HasLayerBeenComposited() { return mLayerComposited; }
   gfx::IntRect GetClearRect() { return mClearRect; }
+
+  // Returns false if the layer is attached to an older compositor.
+  bool HasStaleCompositor() const;
 
   /**
    * Return the part of the visible region that has been fully rendered.
    * While progressive drawing is in progress this region will be
    * a subset of the shadow visible region.
    */
-  nsIntRegion GetFullyRenderedRegion();
+  virtual nsIntRegion GetFullyRenderedRegion();
+
+  /**
+   * Return true if a checkerboarding background color needs to be drawn
+   * for this layer.
+   */
+  bool NeedToDrawCheckerboarding(gfx::Color* aOutCheckerboardingColor = nullptr);
 
 protected:
   gfx::Matrix4x4 mShadowTransform;
@@ -499,6 +547,7 @@ protected:
   RefPtr<Compositor> mCompositor;
   float mShadowOpacity;
   bool mShadowTransformSetByAnimation;
+  bool mShadowOpacitySetByAnimation;
   bool mDestroyed;
   bool mLayerComposited;
   gfx::IntRect mClearRect;
@@ -543,18 +592,13 @@ RenderWithAllMasks(Layer* aLayer, Compositor* aCompositor,
     // no mask layers at all
   }
 
-  bool firstMaskIs3D = false;
-  if (ContainerLayer* container = aLayer->AsContainerLayer()) {
-    firstMaskIs3D = !container->GetTransform().CanDraw2D();
-  }
-
   if (maskLayerCount <= 1) {
     // This is the common case. Render in one pass and return.
     EffectChain effectChain(aLayer);
     LayerManagerComposite::AutoAddMaskEffect
-      autoMaskEffect(firstMask, effectChain, firstMaskIs3D);
+      autoMaskEffect(firstMask, effectChain);
     aLayer->AsLayerComposite()->AddBlendModeEffect(effectChain);
-    aRenderCallback(effectChain, gfx::Rect(aClipRect));
+    aRenderCallback(effectChain, aClipRect);
     return;
   }
 
@@ -568,7 +612,7 @@ RenderWithAllMasks(Layer* aLayer, Compositor* aCompositor,
   // into. The final mask gets rendered into the original render target.
 
   // Calculate the size of the intermediate surfaces.
-  gfx::Rect visibleRect(aLayer->GetEffectiveVisibleRegion().ToUnknownRegion().GetBounds());
+  gfx::Rect visibleRect(aLayer->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
   gfx::Matrix4x4 transform = aLayer->GetEffectiveTransform();
   // TODO: Use RenderTargetIntRect and TransformBy here
   gfx::IntRect surfaceRect =
@@ -591,14 +635,14 @@ RenderWithAllMasks(Layer* aLayer, Compositor* aCompositor,
   {
     EffectChain firstEffectChain(aLayer);
     LayerManagerComposite::AutoAddMaskEffect
-      firstMaskEffect(firstMask, firstEffectChain, firstMaskIs3D);
-    aRenderCallback(firstEffectChain, gfx::Rect(aClipRect - surfaceRect.TopLeft()));
+      firstMaskEffect(firstMask, firstEffectChain);
+    aRenderCallback(firstEffectChain, aClipRect - surfaceRect.TopLeft());
     // firstTarget now contains the transformed source with the first mask and
     // opacity already applied.
   }
 
   // Apply the intermediate masks.
-  gfx::Rect intermediateClip(surfaceRect - surfaceRect.TopLeft());
+  gfx::IntRect intermediateClip(surfaceRect - surfaceRect.TopLeft());
   RefPtr<CompositingRenderTarget> previousTarget = firstTarget;
   for (size_t i = nextAncestorMaskLayer; i < ancestorMaskLayerCount - 1; i++) {
     Layer* intermediateMask = aLayer->GetAncestorMaskLayerAt(i);
@@ -632,7 +676,7 @@ RenderWithAllMasks(Layer* aLayer, Compositor* aCompositor,
   aLayer->AsLayerComposite()->AddBlendModeEffect(finalEffectChain);
   LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(finalMask, finalEffectChain);
   if (!autoMaskEffect.Failed()) {
-    aCompositor->DrawQuad(gfx::Rect(surfaceRect), gfx::Rect(aClipRect),
+    aCompositor->DrawQuad(gfx::Rect(surfaceRect), aClipRect,
                           finalEffectChain, 1.0, gfx::Matrix4x4());
   }
 }

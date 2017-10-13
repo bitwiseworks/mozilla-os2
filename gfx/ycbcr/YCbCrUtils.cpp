@@ -118,7 +118,7 @@ ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
                         aData.mCbCrStride,
                         aStride,
                         yuvtype,
-                        ROTATE_0,
+                        aData.mYUVColorSpace,
                         FILTER_BILINEAR);
   } else { // no prescale
 #if defined(HAVE_YCBCR_TO_RGB565)
@@ -135,7 +135,7 @@ ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
                            aData.mCbCrStride,
                            aStride,
                            yuvtype);
-    } else // aDestFormat != gfxImageFormat::RGB16_565
+    } else // aDestFormat != SurfaceFormat::R5G6B5_UINT16
 #endif
       ConvertYCbCrToRGB32(aData.mYChannel, //
                           aData.mCbChannel,
@@ -148,7 +148,8 @@ ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
                           aData.mYStride,
                           aData.mCbCrStride,
                           aStride,
-                          yuvtype);
+                          yuvtype,
+                          aData.mYUVColorSpace);
   }
 }
 

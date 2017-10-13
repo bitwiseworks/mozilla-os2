@@ -8,7 +8,9 @@
 
 #include "GLContext.h"                  // for fast inlines of glUniform*
 #include "gfxTypes.h"
+#include "ImageTypes.h"
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/Pair.h"               // for Pair
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/gfx/Rect.h"           // for Rect
@@ -37,10 +39,10 @@ enum ShaderFeatures {
   ENABLE_OPACITY=0x100,
   ENABLE_BLUR=0x200,
   ENABLE_COLOR_MATRIX=0x400,
-  ENABLE_MASK_2D=0x800,
-  ENABLE_MASK_3D=0x1000,
-  ENABLE_PREMULTIPLY=0x2000,
-  ENABLE_DEAA=0x4000
+  ENABLE_MASK=0x800,
+  ENABLE_NO_PREMUL_ALPHA=0x1000,
+  ENABLE_DEAA=0x2000,
+  ENABLE_DYNAMIC_GEOMETRY=0x4000
 };
 
 class KnownUniform {
@@ -52,6 +54,7 @@ public:
     LayerTransform = 0,
     LayerTransformInverse,
     MaskTransform,
+    BackdropTransform,
     LayerRects,
     MatrixProj,
     TextureTransform,
@@ -65,6 +68,7 @@ public:
     BlackTexture,
     WhiteTexture,
     MaskTexture,
+    BackdropTexture,
     RenderColor,
     TexCoordMultiplier,
     CbCrTexCoordMultiplier,
@@ -78,6 +82,7 @@ public:
     SSEdges,
     ViewportSize,
     VisibleCenter,
+    YuvColorMatrix,
 
     KnownUniformCount
   };
@@ -143,6 +148,7 @@ public:
     case 2:
     case 3:
     case 4:
+    case 9:
     case 16:
       if (memcmp(mValue.f16v, fp, sizeof(float) * cnt) != 0) {
         memcpy(mValue.f16v, fp, sizeof(float) * cnt);
@@ -151,7 +157,7 @@ public:
       return false;
     }
 
-    NS_NOTREACHED("cnt must be 1 2 3 4 or 16");
+    NS_NOTREACHED("cnt must be 1 2 3 4 9 or 16");
     return false;
   }
 
@@ -207,7 +213,9 @@ class ShaderConfigOGL
 {
 public:
   ShaderConfigOGL() :
-    mFeatures(0) {}
+    mFeatures(0),
+    mCompositionOp(gfx::CompositionOp::OP_OVER)
+  {}
 
   void SetRenderColor(bool aEnabled);
   void SetTextureTarget(GLenum aTarget);
@@ -219,13 +227,16 @@ public:
   void SetComponentAlpha(bool aEnabled);
   void SetColorMatrix(bool aEnabled);
   void SetBlur(bool aEnabled);
-  void SetMask2D(bool aEnabled);
-  void SetMask3D(bool aEnabled);
-  void SetPremultiply(bool aEnabled);
+  void SetMask(bool aEnabled);
   void SetDEAA(bool aEnabled);
+  void SetCompositionOp(gfx::CompositionOp aOp);
+  void SetNoPremultipliedAlpha();
+  void SetDynamicGeometry(bool aEnabled);
 
   bool operator< (const ShaderConfigOGL& other) const {
-    return mFeatures < other.mFeatures;
+    return mFeatures < other.mFeatures ||
+           (mFeatures == other.mFeatures &&
+            (int)mCompositionOp < (int)other.mCompositionOp);
   }
 
 public:
@@ -237,6 +248,7 @@ public:
   }
 
   int mFeatures;
+  gfx::CompositionOp mCompositionOp;
 };
 
 static inline ShaderConfigOGL
@@ -271,6 +283,9 @@ struct ProgramProfileOGL
   std::string mVertexShaderString;
   std::string mFragmentShaderString;
 
+  // the vertex attributes
+  nsTArray<Pair<nsCString, GLuint>> mAttributes;
+
   KnownUniform mUniforms[KnownUniform::KnownUniformCount];
   nsTArray<const char *> mDefines;
   size_t mTextureCount;
@@ -278,6 +293,9 @@ struct ProgramProfileOGL
   ProgramProfileOGL() :
     mTextureCount(0)
   {}
+
+ private:
+  static void BuildMixBlender(const ShaderConfigOGL& aConfig, std::ostringstream& fs);
 };
 
 
@@ -340,6 +358,10 @@ public:
 
   void SetMaskLayerTransform(const gfx::Matrix4x4& aMatrix) {
     SetMatrixUniform(KnownUniform::MaskTransform, aMatrix);
+  }
+
+  void SetBackdropTransform(const gfx::Matrix4x4& aMatrix) {
+    SetMatrixUniform(KnownUniform::BackdropTransform, aMatrix);
   }
 
   void SetDEAAEdges(const gfx::Point3D* aEdges) {
@@ -433,6 +455,10 @@ public:
     SetUniform(KnownUniform::MaskTexture, aUnit);
   }
 
+  void SetBackdropTextureUnit(GLint aUnit) {
+    SetUniform(KnownUniform::BackdropTexture, aUnit);
+  }
+
   void SetRenderColor(const gfx::Color& aColor) {
     SetUniform(KnownUniform::RenderColor, aColor);
   }
@@ -452,6 +478,8 @@ public:
     float f[] = {aWidth, aHeight};
     SetUniform(KnownUniform::CbCrTexCoordMultiplier, 2, f);
   }
+
+  void SetYUVColorSpace(YUVColorSpace aYUVColorSpace);
 
   // Set whether we want the component alpha shader to return the color
   // vector (pass 1, false) or the alpha vector (pass2, true). With support
@@ -569,6 +597,16 @@ protected:
     KnownUniform& ku(mProfile.mUniforms[aKnownUniform]);
     if (ku.UpdateUniform(16, aFloatValues)) {
       mGL->fUniformMatrix4fv(ku.mLocation, 1, false, ku.mValue.f16v);
+    }
+  }
+
+  void SetMatrix3fvUniform(KnownUniform::KnownUniformName aKnownUniform, const float *aFloatValues) {
+    ASSERT_THIS_PROGRAM;
+    NS_ASSERTION(aKnownUniform >= 0 && aKnownUniform < KnownUniform::KnownUniformCount, "Invalid known uniform");
+
+    KnownUniform& ku(mProfile.mUniforms[aKnownUniform]);
+    if (ku.UpdateUniform(9, aFloatValues)) {
+      mGL->fUniformMatrix3fv(ku.mLocation, 1, false, ku.mValue.f16v);
     }
   }
 

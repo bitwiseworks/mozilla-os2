@@ -1,16 +1,24 @@
 [
 {
-"size": 357533004,
+"version": "Android NDK r11c",
+"size": 138388708,
 "visibility": "internal",
-"digest": "9b24b6db45ca4f6418d18119e3d2dd48e2a352e977ebf4fd0b2a8c4103fd0735eacb0f7360ff3a2eda6777fdd1029325ca23b8a4c34542b3b1fa487ff633647c",
+"digest": "2dc605644e84fadf399a4e5cb60dfb3b42518803f80de15ef310ead4d0084a01dce3052bbf7d9dfb8bbe027019250235afe0a1e4ffdc87babc0f2bdbf2403232",
 "algorithm": "sha512",
 "filename": "android-ndk.tar.bz2",
 "unpack": true
 },
 {
-"size": 535625068,
+"versions": [
+  "Android SDK 6.0 / API 23",
+  "Android tools r24.4",
+  "Android build tools 23.0.3",
+  "Android Support Repository (Support Library 23.0.1)",
+  "Google Support Repository (Google Play Services 8.1.0)"
+],
+"size": 573952124,
 "visibility": "internal", 
-"digest": "0627515046a23c1d109e2782865b1b3b546c1d552955e4156317f76cbb195eb630aa25feea3f4edd1c685f129da0c2a5169d4d6349c1c31d8a95158a4569a478",
+"digest": "1d495d7a7386af3f27b14982e0ff7b0963fd1a63a08040b9b1db0e94c9681fa3704c195ba8be23b5f73e15101b2b767293bc8f96e0584e17867ef13b074e5038",
 "algorithm": "sha512",
 "filename": "android-sdk-linux.tar.xz",
 "unpack": true
@@ -23,13 +31,6 @@
 "unpack": true
 },
 {
-"size": 7920445,
-"digest": "e28b7a12fbbef02ad742958df8dd356ea2adb8ef79e95cd8eb8dbc953eb4cc11888969dac7d636187fd3ace9c63d9a6bc3d7795021c1d811a843e413fe5e52c9",
-"algorithm": "sha512",
-"filename": "apache-ant.tar.bz2",
-"unpack": true
-},
-{
 "size": 4906080,
 "digest": "d735544e039da89382c53b2302b7408d4610247b4f8b5cdc5a4d5a8ec5470947b19e8ea7f7a37e78222e661347e394e0030d81f41534138b527b14e9c4e55634",
 "algorithm": "sha512",
@@ -37,10 +38,35 @@
 "unpack": true
 },
 {
-"size": 80458572,
-"digest": "e5101f9dee1e462f6cbd3897ea57eede41d23981825c7b20d91d23ab461875d54d3dfc24999aa58a31e8b01f49fb3140e05ffe5af2957ef1d1afb89fd0dfe1ad",
+"version": "gcc 4.8.5 + PR64905",
+"size": 80160264,
+"digest": "c1a9dc9da289b8528874d16300b9d13a997cec99195bb0bc46ff665216d8535d6d6cb5af6b4b1f2749af6815dab12e703fdb3849014e5c23a70eff351a0baf4e",
 "algorithm": "sha512",
 "filename": "gcc.tar.xz",
+"unpack": true
+},
+{
+"algorithm": "sha512",
+"visibility": "public",
+"filename": "jcentral.tar.xz",
+"unpack": true,
+"digest": "8e50f0993e129d3447b228d7da77d661d4ae3d490d791630dabb73e7d8021920f765317a258fd6e819aca48daaa8d0d86ec07cb6c30736199bbf2c4f92270cb5",
+"size": 47164284
+},
+{
+"algorithm": "sha512",
+"visibility": "public",
+"filename": "gradle-dist.tar.xz",
+"unpack": true,
+"digest": "e3cfe7f8259ad97722243d4e873d5a05c014bfc24d637427f89d804bf5073290229c778ea303142cf06c2dc79e0492f23521f57d3a73825f55b8db587317646f",
+"size": 51753660
+},
+{
+"size": 30899096,
+"visibility": "public",
+"digest": "ac9f5f95d11580d3dbeff87e80a585fe4d324b270dabb91b1165686acab47d99fa6651074ab0be09420239a5d6af38bb2c539506962a7b44e0ed4d080bba2953",
+"algorithm": "sha512",
+"filename": "java_home-1.7.0-openjdk-1.7.0.85.x86_64.tar.xz",
 "unpack": true
 }
 ]

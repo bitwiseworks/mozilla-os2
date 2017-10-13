@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Tests that Toolbox#viewSourceInScratchpad works.
@@ -7,8 +9,8 @@
 
 var URL = `${URL_ROOT}doc_viewsource.html`;
 
-function *viewSource() {
-  let toolbox = yield loadToolbox(URL);
+function* viewSource() {
+  let toolbox = yield openNewTabAndToolbox(URL);
   let win = yield openScratchpadWindow();
   let { Scratchpad: scratchpad } = win;
 
@@ -25,11 +27,11 @@ function *viewSource() {
     "The correct line is highlighted in scratchpad's editor.");
 
   win.close();
-  yield unloadToolbox(toolbox);
+  yield closeToolboxAndTab(toolbox);
   finish();
 }
 
-function test () {
+function test() {
   Task.spawn(viewSource).then(finish, (aError) => {
     ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
     finish();

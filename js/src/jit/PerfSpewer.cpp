@@ -7,8 +7,9 @@
 #include "jit/PerfSpewer.h"
 
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/SizePrintfMacros.h"
 
-#if defined(__linux__)
+#ifdef XP_UNIX
 # include <unistd.h>
 #endif
 
@@ -19,7 +20,7 @@
 # include "jit/MIRGraph.h"
 #endif
 
-#include "jslock.h"
+#include "vm/MutexIDs.h"
 
 // perf expects its data to be in a file /tmp/perf-PID.map, but for Android
 // and B2G the map files are written to /data/local/tmp/perf-PID.map
@@ -51,7 +52,7 @@ static bool PerfChecked = false;
 
 static FILE* PerfFilePtr = nullptr;
 
-static PRLock* PerfMutex;
+static js::Mutex* PerfMutex;
 
 static bool
 openPerfMap(const char* dir)
@@ -95,9 +96,9 @@ js::jit::CheckPerf() {
         }
 
         if (PerfMode != PERF_MODE_NONE) {
-            PerfMutex = PR_NewLock();
+            PerfMutex = js_new<js::Mutex>(mutexid::PerfSpewer);
             if (!PerfMutex)
-                MOZ_CRASH();
+                MOZ_CRASH("failed to allocate PerfMutex");
 
             if (openPerfMap(PERF_SPEW_DIR)) {
                 PerfChecked = true;
@@ -135,7 +136,7 @@ lockPerfMap(void)
     if (!PerfEnabled())
         return false;
 
-    PR_Lock(PerfMutex);
+    PerfMutex->lock();
 
     MOZ_ASSERT(PerfFilePtr);
     return true;
@@ -146,7 +147,7 @@ unlockPerfMap()
 {
     MOZ_ASSERT(PerfFilePtr);
     fflush(PerfFilePtr);
-    PR_Unlock(PerfMutex);
+    PerfMutex->unlock();
 }
 
 uint32_t PerfSpewer::nextFunctionIndex = 0;
@@ -320,7 +321,7 @@ js::jit::writePerfSpewerJitCodeProfile(JitCode* code, const char* msg)
 }
 
 void
-js::jit::writePerfSpewerAsmJSFunctionMap(uintptr_t base, uintptr_t size,
+js::jit::writePerfSpewerWasmFunctionMap(uintptr_t base, uintptr_t size,
                                          const char* filename, unsigned lineno, unsigned colIndex,
                                          const char* funcName)
 {

@@ -29,14 +29,14 @@ Script B (ril_consts.js) not.
 The above merge way ensures the correct scope of 'strict mode.'
 """
 
-
-from marionette.marionette_test import MarionetteTestCase
 import bisect
 import inspect
 import os
 import os.path
 import re
 import unicodedata
+
+from marionette_harness import MarionetteTestCase
 
 
 class StringUtility:
@@ -118,7 +118,7 @@ class ResourceUriFileReader:
                                      null,      // aLoadingNode
                                      secMan.getSystemPrincipal(),
                                      null,      // aTriggeringPrincipal
-                                     Ci.nsILoadInfo.SEC_NORMAL,
+                                     Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                                      Ci.nsIContentPolicy.TYPE_OTHER);
     '''
 

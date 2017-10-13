@@ -8,7 +8,10 @@
 
 #include "MediaStreamGraph.h"
 #include "mozilla/dom/AudioNodeBinding.h"
+#include "nsAutoPtr.h"
+#include "AlignedTArray.h"
 #include "AudioBlock.h"
+#include "AudioSegment.h"
 
 namespace mozilla {
 
@@ -20,6 +23,8 @@ class AudioContext;
 
 class ThreadSharedFloatArrayBufferList;
 class AudioNodeEngine;
+
+typedef AlignedAutoTArray<float, GUESS_AUDIO_CHANNELS*WEBAUDIO_BLOCK_SIZE, 16> DownmixBufferType;
 
 /**
  * An AudioNodeStream produces one audio track with ID AUDIO_TRACK.
@@ -41,7 +46,7 @@ public:
 
   enum { AUDIO_TRACK = 1 };
 
-  typedef nsAutoTArray<AudioBlock, 1> OutputChunks;
+  typedef AutoTArray<AudioBlock, 1> OutputChunks;
 
   // Flags re main thread updates and stream output.
   typedef unsigned Flags;
@@ -57,13 +62,12 @@ public:
   /**
    * Create a stream that will process audio for an AudioNode.
    * Takes ownership of aEngine.
-   * If aGraph is non-null, use that as the MediaStreamGraph, otherwise use
-   * aCtx's graph. aGraph is only non-null when called for AudioDestinationNode
-   * since the context's graph hasn't been set up in that case.
+   * aGraph is required and equals the graph of aCtx in most cases. An exception
+   * is AudioDestinationNode where the context's graph hasn't been set up yet.
    */
   static already_AddRefed<AudioNodeStream>
   Create(AudioContext* aCtx, AudioNodeEngine* aEngine, Flags aKind,
-         MediaStreamGraph* aGraph = nullptr);
+         MediaStreamGraph* aGraph);
 
 protected:
   /**
@@ -114,9 +118,9 @@ public:
    */
   void AdvanceAndResume(StreamTime aAdvance);
 
-  virtual AudioNodeStream* AsAudioNodeStream() override { return this; }
-  virtual void AddInput(MediaInputPort* aPort) override;
-  virtual void RemoveInput(MediaInputPort* aPort) override;
+  AudioNodeStream* AsAudioNodeStream() override { return this; }
+  void AddInput(MediaInputPort* aPort) override;
+  void RemoveInput(MediaInputPort* aPort) override;
 
   // Graph thread only
   void SetStreamTimeParameterImpl(uint32_t aIndex, MediaStream* aRelativeToStream,
@@ -124,7 +128,7 @@ public:
   void SetChannelMixingParametersImpl(uint32_t aNumberOfChannels,
                                       ChannelCountMode aChannelCountMoe,
                                       ChannelInterpretation aChannelInterpretation);
-  virtual void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) override;
+  void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) override;
   /**
    * Produce the next block of output, before input is provided.
    * ProcessInput() will be called later, and it then should not change
@@ -140,7 +144,7 @@ public:
   {
     return mLastChunks;
   }
-  virtual bool MainThreadNeedsUpdates() const override
+  bool MainThreadNeedsUpdates() const override
   {
     return ((mFlags & NEED_MAIN_THREAD_FINISHED) && mFinished) ||
       (mFlags & NEED_MAIN_THREAD_CURRENT_TIME);
@@ -175,7 +179,7 @@ protected:
   class AdvanceAndResumeMessage;
   class CheckForInactiveMessage;
 
-  virtual void DestroyImpl() override;
+  void DestroyImpl() override;
 
   /*
    * CheckForInactive() is called when the engine transitions from active to
@@ -190,10 +194,10 @@ protected:
   void FinishOutput();
   void AccumulateInputChunk(uint32_t aInputIndex, const AudioBlock& aChunk,
                             AudioBlock* aBlock,
-                            nsTArray<float>* aDownmixBuffer);
+                            DownmixBufferType* aDownmixBuffer);
   void UpMixDownMixChunk(const AudioBlock* aChunk, uint32_t aOutputChannelCount,
                          nsTArray<const float*>& aOutputChannels,
-                         nsTArray<float>& aDownmixBuffer);
+                         DownmixBufferType& aDownmixBuffer);
 
   uint32_t ComputedNumberOfChannels(uint32_t aInputChannelCount);
   void ObtainInputBlock(AudioBlock& aTmpChunk, uint32_t aPortIndex);

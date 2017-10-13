@@ -1,26 +1,31 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests for exporting POST data into HAR format.
  */
-add_task(function*() {
-  let [ aTab, aDebuggee, aMonitor ] = yield initNetMonitor(
+add_task(function* () {
+  let { tab, monitor } = yield initNetMonitor(
     HAR_EXAMPLE_URL + "html_har_post-data-test-page.html");
 
   info("Starting test... ");
 
-  let { NetMonitorView } = aMonitor.panelWin;
+  let { NetMonitorView } = monitor.panelWin;
   let { RequestsMenu } = NetMonitorView;
 
   RequestsMenu.lazyUpdate = false;
 
   // Execute one POST request on the page and wait till its done.
-  aDebuggee.executeTest();
-  yield waitForNetworkEvents(aMonitor, 0, 1);
+  let wait = waitForNetworkEvents(monitor, 0, 1);
+  yield ContentTask.spawn(tab.linkedBrowser, {}, function* () {
+    content.wrappedJSObject.executeTest();
+  });
+  yield wait;
 
   // Copy HAR into the clipboard (asynchronous).
-  let jsonString = yield RequestsMenu.copyAllAsHar();
+  let jsonString = yield RequestsMenu.contextMenu.copyAllAsHar();
   let har = JSON.parse(jsonString);
 
   // Check out the HAR log.
@@ -35,5 +40,5 @@ add_task(function*() {
     "Check post data payload");
 
   // Clean up
-  teardown(aMonitor).then(finish);
+  return teardown(monitor);
 });

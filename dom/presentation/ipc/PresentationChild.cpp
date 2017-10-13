@@ -4,7 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "DCPresentationChannelDescription.h"
 #include "mozilla/StaticPtr.h"
+#include "PresentationBuilderChild.h"
 #include "PresentationChild.h"
 #include "PresentationIPCService.h"
 #include "nsThreadUtils.h"
@@ -57,31 +59,70 @@ PresentationChild::DeallocPPresentationRequestChild(PPresentationRequestChild* a
   return true;
 }
 
+bool PresentationChild::RecvPPresentationBuilderConstructor(
+  PPresentationBuilderChild* aActor,
+  const nsString& aSessionId,
+  const uint8_t& aRole)
+{
+  // Child will build the session transport
+  PresentationBuilderChild* actor = static_cast<PresentationBuilderChild*>(aActor);
+  return NS_WARN_IF(NS_FAILED(actor->Init())) ? false : true;
+}
+
+PPresentationBuilderChild*
+PresentationChild::AllocPPresentationBuilderChild(const nsString& aSessionId,
+                                                  const uint8_t& aRole)
+{
+  RefPtr<PresentationBuilderChild> actor
+    = new PresentationBuilderChild(aSessionId, aRole);
+
+  return actor.forget().take();
+}
+
 bool
-PresentationChild::RecvNotifyAvailableChange(const bool& aAvailable)
+PresentationChild::DeallocPPresentationBuilderChild(PPresentationBuilderChild* aActor)
+{
+  RefPtr<PresentationBuilderChild> actor =
+    dont_AddRef(static_cast<PresentationBuilderChild*>(aActor));
+  return true;
+}
+
+
+bool
+PresentationChild::RecvNotifyAvailableChange(
+                                        nsTArray<nsString>&& aAvailabilityUrls,
+                                        const bool& aAvailable)
 {
   if (mService) {
-    NS_WARN_IF(NS_FAILED(mService->NotifyAvailableChange(aAvailable)));
+    Unused <<
+      NS_WARN_IF(NS_FAILED(mService->NotifyAvailableChange(aAvailabilityUrls,
+                                                           aAvailable)));
   }
   return true;
 }
 
 bool
 PresentationChild::RecvNotifySessionStateChange(const nsString& aSessionId,
-                                                const uint16_t& aState)
+                                                const uint16_t& aState,
+                                                const nsresult& aReason)
 {
   if (mService) {
-    NS_WARN_IF(NS_FAILED(mService->NotifySessionStateChange(aSessionId, aState)));
+    Unused << NS_WARN_IF(NS_FAILED(mService->NotifySessionStateChange(aSessionId,
+                                                                      aState,
+                                                                      aReason)));
   }
   return true;
 }
 
 bool
 PresentationChild::RecvNotifyMessage(const nsString& aSessionId,
-                                     const nsCString& aData)
+                                     const nsCString& aData,
+                                     const bool& aIsBinary)
 {
   if (mService) {
-    NS_WARN_IF(NS_FAILED(mService->NotifyMessage(aSessionId, aData)));
+    Unused << NS_WARN_IF(NS_FAILED(mService->NotifyMessage(aSessionId,
+                                                           aData,
+                                                           aIsBinary)));
   }
   return true;
 }
@@ -91,7 +132,19 @@ PresentationChild::RecvNotifySessionConnect(const uint64_t& aWindowId,
                                             const nsString& aSessionId)
 {
   if (mService) {
-    NS_WARN_IF(NS_FAILED(mService->NotifySessionConnect(aWindowId, aSessionId)));
+    Unused << NS_WARN_IF(NS_FAILED(mService->NotifySessionConnect(aWindowId, aSessionId)));
+  }
+  return true;
+}
+
+bool
+PresentationChild::RecvNotifyCloseSessionTransport(const nsString& aSessionId,
+                                                   const uint8_t& aRole,
+                                                   const nsresult& aReason)
+{
+  if (mService) {
+    Unused << NS_WARN_IF(NS_FAILED(
+      mService->CloseContentSessionTransport(aSessionId, aRole, aReason)));
   }
   return true;
 }
@@ -129,12 +182,17 @@ PresentationRequestChild::Recv__delete__(const nsresult& aResult)
   }
 
   if (mCallback) {
-    if (NS_SUCCEEDED(aResult)) {
-      NS_WARN_IF(NS_FAILED(mCallback->NotifySuccess()));
-    } else {
-      NS_WARN_IF(NS_FAILED(mCallback->NotifyError(aResult)));
+    if (NS_FAILED(aResult)) {
+      Unused << NS_WARN_IF(NS_FAILED(mCallback->NotifyError(aResult)));
     }
   }
 
+  return true;
+}
+
+bool
+PresentationRequestChild::RecvNotifyRequestUrlSelected(const nsString& aUrl)
+{
+  Unused << NS_WARN_IF(NS_FAILED(mCallback->NotifySuccess(aUrl)));
   return true;
 }

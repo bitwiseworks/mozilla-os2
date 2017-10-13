@@ -130,45 +130,45 @@ var testcases = [ {
     protocolChange: true,
   }, {
     input: "1.2.3",
-    fixedURI: "http://1.2.3/",
+    fixedURI: "http://1.2.0.3/",
     protocolChange: true,
   }, {
     input: "1.2.3/",
-    fixedURI: "http://1.2.3/",
+    fixedURI: "http://1.2.0.3/",
     protocolChange: true,
   }, {
     input: "1.2.3/foo",
-    fixedURI: "http://1.2.3/foo",
+    fixedURI: "http://1.2.0.3/foo",
     protocolChange: true,
   }, {
     input: "1.2.3/123",
-    fixedURI: "http://1.2.3/123",
+    fixedURI: "http://1.2.0.3/123",
     protocolChange: true,
   }, {
     input: "1.2.3:8000",
-    fixedURI: "http://1.2.3:8000/",
+    fixedURI: "http://1.2.0.3:8000/",
     protocolChange: true,
   }, {
     input: "1.2.3:8000/",
-    fixedURI: "http://1.2.3:8000/",
+    fixedURI: "http://1.2.0.3:8000/",
     protocolChange: true,
   }, {
     input: "1.2.3:8000/foo",
-    fixedURI: "http://1.2.3:8000/foo",
+    fixedURI: "http://1.2.0.3:8000/foo",
     protocolChange: true,
   }, {
     input: "1.2.3:8000/123",
-    fixedURI: "http://1.2.3:8000/123",
+    fixedURI: "http://1.2.0.3:8000/123",
     protocolChange: true,
   }, {
     input: "http://1.2.3",
-    fixedURI: "http://1.2.3/",
+    fixedURI: "http://1.2.0.3/",
   }, {
     input: "http://1.2.3/",
-    fixedURI: "http://1.2.3/",
+    fixedURI: "http://1.2.0.3/",
   }, {
     input: "http://1.2.3/foo",
-    fixedURI: "http://1.2.3/foo",
+    fixedURI: "http://1.2.0.3/foo",
   }, {
     input: "[::1]",
     fixedURI: "http://[::1]/",
@@ -222,8 +222,7 @@ var testcases = [ {
     protocolChange: true
   }, {
     input: "1234",
-    fixedURI: "http://1234/",
-    alternateURI: "http://www.1234.com/",
+    fixedURI: "http://0.0.4.210/",
     keywordLookup: true,
     protocolChange: true,
     affectedByDNSForSingleHosts: true,
@@ -362,8 +361,7 @@ var testcases = [ {
     affectedByDNSForSingleHosts: true,
   }, {
     input: "32.7",
-    fixedURI: "http://32.7/",
-    alternateURI: "http://www.32.7/",
+    fixedURI: "http://32.0.0.7/",
     keywordLookup: true,
     protocolChange: true,
     affectedByDNSForSingleHosts: true,
@@ -376,8 +374,7 @@ var testcases = [ {
     affectedByDNSForSingleHosts: true,
   }, {
     input: "5/2",
-    fixedURI: "http://5/2",
-    alternateURI: "http://www.5.com/2",
+    fixedURI: "http://0.0.0.5/2",
     keywordLookup: true,
     protocolChange: true,
     affectedByDNSForSingleHosts: true,
@@ -471,6 +468,13 @@ var testcases = [ {
     fixedURI: "http://mozilla/foo",
     alternateURI: "http://www.mozilla.com/foo",
     protocolChange: true,
+  }, {
+    input: "mozilla\\",
+    fixedURI: "http://mozilla/",
+    alternateURI: "http://www.mozilla.com/",
+    keywordLookup: true,
+    protocolChange: true,
+    affectedByDNSForSingleHosts: true,
   }];
 
 if (Services.appinfo.OS.toLowerCase().startsWith("win")) {
@@ -485,12 +489,6 @@ if (Services.appinfo.OS.toLowerCase().startsWith("win")) {
     alternateURI: "http://www.mozilla.com/",
     protocolChange: true,
   });
-  testcases.push({
-    input: "mozilla\\",
-    fixedURI: "http://mozilla/",
-    alternateURI: "http://www.mozilla.com/",
-    protocolChange: true,
-  });
 } else {
   testcases.push({
     input: "/some/file.txt",
@@ -501,15 +499,6 @@ if (Services.appinfo.OS.toLowerCase().startsWith("win")) {
     input: "//mozilla",
     fixedURI: "file:////mozilla",
     protocolChange: true,
-  });
-  // \ is an invalid character in the hostname until bug 652186 is implemented
-  testcases.push({
-    input: "mozilla\\",
-    // fixedURI: "http://mozilla\\/",
-    // alternateURI: "http://www.mozilla/",
-    keywordLookup: true,
-    protocolChange: true,
-    // affectedByDNSForSingleHosts: true,
   });
 }
 

@@ -1,5 +1,4 @@
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 
 var h2Port;
@@ -56,6 +55,7 @@ function run_test() {
 
   h1Foo = new HttpServer();
   h1Foo.registerPathHandler("/altsvc-test", h1Server);
+  h1Foo.registerPathHandler("/.well-known/http-opportunistic", h1ServerWK);
   h1Foo.start(-1);
   h1Foo.identity.setPrimary("http", "foo.example.com", h1Foo.identity.primaryPort);
 
@@ -98,6 +98,19 @@ function h1Server(metadata, response) {
   response.bodyOutputStream.write(body, body.length);
 }
 
+function h1ServerWK(metadata, response) {
+  response.setStatusLine(metadata.httpVersion, 200, "OK");
+  response.setHeader("Content-Type", "application/json", false);
+  response.setHeader("Connection", "close", false);
+  response.setHeader("Cache-Control", "no-cache", false);
+  response.setHeader("Access-Control-Allow-Origin", "*", false);
+  response.setHeader("Access-Control-Allow-Method", "GET", false);
+  response.setHeader("Access-Control-Allow-Headers", "x-altsvc", false);
+
+  var body = '{"http://foo.example.com:' + h1Foo.identity.primaryPort + '": { "tls-ports": [' + h2Port + '] }}';
+  response.bodyOutputStream.write(body, body.length);
+}
+
 function resetPrefs() {
   prefs.setBoolPref("network.http.spdy.enabled", spdypref);
   prefs.setBoolPref("network.http.spdy.enabled.http2", http2pref);
@@ -123,23 +136,16 @@ function addCertFromFile(certdb, filename, trustString) {
 }
 
 function makeChan(origin) {
-  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-  var chan = ios.newChannel2(origin + "altsvc-test",
-                             null,
-                             null,
-                             null,      // aLoadingNode
-                             Services.scriptSecurityManager.getSystemPrincipal(),
-                             null,      // aTriggeringPrincipal
-                             Ci.nsILoadInfo.SEC_NORMAL,
-                             Ci.nsIContentPolicy.TYPE_OTHER).QueryInterface(Ci.nsIHttpChannel);
-
-  return chan;
+  return NetUtil.newChannel({
+    uri: origin + "altsvc-test",
+    loadUsingSystemPrincipal: true
+  }).QueryInterface(Ci.nsIHttpChannel);
 }
 
 var origin;
 var xaltsvc;
 var retryCounter = 0;
-var loadWithoutAltSvc = false;
+var loadWithoutClearingMappings = false;
 var nextTest;
 var expectPass = true;
 var waitFor = 0;
@@ -169,10 +175,12 @@ Listener.prototype = {
       routed = request.getRequestHeader("Alt-Used");
     } catch (e) {}
     dump("routed is " + routed + "\n");
+    do_check_eq(Components.isSuccessCode(status), expectPass);
 
     if (waitFor != 0) {
       do_check_eq(routed, "");
       do_test_pending();
+      loadWithoutClearingMappings = true;
       do_timeout(waitFor, doTest);
       waitFor = 0;
       xaltsvc = "NA";
@@ -185,6 +193,7 @@ Listener.prototype = {
     } else {
       dump ("poll later for alt svc mapping\n");
       do_test_pending();
+      loadWithoutClearingMappings = true;
       do_timeout(500, doTest);
     }
 
@@ -210,9 +219,14 @@ function doTest()
   if (xaltsvc != "NA") {
     chan.setRequestHeader("x-altsvc", xaltsvc, false);
   }
-  chan.loadFlags = Ci.nsIRequest.LOAD_FRESH_CONNECTION |
-	           Ci.nsIChannel.LOAD_INITIAL_DOCUMENT_URI;
-  chan.asyncOpen(listener, null);
+  if (loadWithoutClearingMappings) {
+    chan.loadFlags = Ci.nsIChannel.LOAD_INITIAL_DOCUMENT_URI;
+  } else {
+    chan.loadFlags = Ci.nsIRequest.LOAD_FRESH_CONNECTION |
+                     Ci.nsIChannel.LOAD_INITIAL_DOCUMENT_URI;
+  }
+  loadWithoutClearingMappings = false;
+  chan.asyncOpen2(listener);
 }
 
 // xaltsvc is overloaded to do two things..
@@ -306,23 +320,29 @@ function doTest7()
 }
 
 // http://bar via h2 on bar
+// should not use TLS/h2 because h2BarRoute is not auth'd for bar
+// however the test ought to PASS (i.e. get a 200) because fallback
+// to plaintext happens.. thus the timeout
 function doTest8()
 {
   dump("doTest8()\n");
   origin = httpBarOrigin;
   xaltsvc = h2BarRoute;
   expectPass = true;
+  waitFor = 500;
   nextTest = doTest9;
   do_test_pending();
   doTest();
 }
 
-// http://bar served from h2=:port
+// http://bar served from h2=:port, which is like the bar route in 8
 function doTest9()
 {
   dump("doTest9()\n");
   origin = httpBarOrigin;
   xaltsvc = h2Route;
+  expectPass = true;
+  waitFor = 500;
   nextTest = doTest10;
   do_test_pending();
   doTest();
@@ -350,7 +370,7 @@ function doTest11()
   origin = httpBarOrigin;
   xaltsvc = h2FooRoute;
   expectPass = true;
-  waitFor = 1000;
+  waitFor = 500;
   nextTest = testsDone;
   do_test_pending();
   doTest();

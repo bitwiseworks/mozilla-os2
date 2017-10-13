@@ -126,7 +126,6 @@ static void SetOptionsKeyUint32(const nsCString& aValue,
 #define QUERYKEY_NOTANNOTATION "!annotation"
 #define QUERYKEY_ANNOTATION "annotation"
 #define QUERYKEY_URI "uri"
-#define QUERYKEY_URIISPREFIX "uriIsPrefix"
 #define QUERYKEY_SEPARATOR "OR"
 #define QUERYKEY_GROUP "group"
 #define QUERYKEY_SORT "sort"
@@ -175,7 +174,8 @@ namespace PlacesFolderConversion {
   #define TAGS_FOLDER "TAGS"
   #define UNFILED_BOOKMARKS_FOLDER "UNFILED_BOOKMARKS"
   #define TOOLBAR_FOLDER "TOOLBAR"
-  
+  #define MOBILE_BOOKMARKS_FOLDER "MOBILE_BOOKMARKS"
+
   /**
    * Converts a folder name to a folder id.
    *
@@ -199,6 +199,8 @@ namespace PlacesFolderConversion {
       (void)bs->GetUnfiledBookmarksFolder(&folderID);
     else if (aName.EqualsLiteral(TOOLBAR_FOLDER))
       (void)bs->GetToolbarFolder(&folderID);
+    else if (aName.EqualsLiteral(MOBILE_BOOKMARKS_FOLDER))
+      (void)bs->GetMobileFolder(&folderID);
 
     return folderID;
   }
@@ -239,6 +241,10 @@ namespace PlacesFolderConversion {
     else if (NS_SUCCEEDED(bs->GetToolbarFolder(&folderID)) &&
              aFolderID == folderID) {
       aQuery.AppendLiteral(TOOLBAR_FOLDER);
+    }
+    else if (NS_SUCCEEDED(bs->GetMobileFolder(&folderID)) &&
+             aFolderID == folderID) {
+      aQuery.AppendLiteral(MOBILE_BOOKMARKS_FOLDER);
     }
     else {
       // It wasn't one of our named constants, so just convert it to a string.
@@ -426,9 +432,6 @@ nsNavHistory::QueriesToQueryString(nsINavHistoryQuery **aQueries,
     // uri
     query->GetHasUri(&hasIt);
     if (hasIt) {
-      AppendBoolKeyValueIfTrue(aQueryString,
-                               NS_LITERAL_CSTRING(QUERYKEY_URIISPREFIX),
-                               query, &nsINavHistoryQuery::GetUriIsPrefix);
       nsCOMPtr<nsIURI> uri;
       query->GetUri(getter_AddRefs(uri));
       NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE); // hasURI should tell is if invalid
@@ -725,10 +728,6 @@ nsNavHistory::TokensToQueries(const nsTArray<QueryKeyValuePair>& aTokens,
       rv = query->SetUri(uri);
       NS_ENSURE_SUCCESS(rv, rv);
 
-    // URI is prefix
-    } else if (kvp.key.EqualsLiteral(QUERYKEY_URIISPREFIX)) {
-      SetQueryKeyBool(kvp.value, query, &nsINavHistoryQuery::SetUriIsPrefix);
-
     // not annotation
     } else if (kvp.key.EqualsLiteral(QUERYKEY_NOTANNOTATION)) {
       nsAutoCString unescaped(kvp.value);
@@ -901,7 +900,7 @@ nsNavHistoryQuery::nsNavHistoryQuery()
     mBeginTimeReference(TIME_RELATIVE_EPOCH),
     mEndTime(0), mEndTimeReference(TIME_RELATIVE_EPOCH),
     mOnlyBookmarked(false),
-    mDomainIsHost(false), mUriIsPrefix(false),
+    mDomainIsHost(false),
     mAnnotationIsNot(false),
     mTagsAreNot(false)
 {
@@ -916,7 +915,7 @@ nsNavHistoryQuery::nsNavHistoryQuery(const nsNavHistoryQuery& aOther)
     mEndTime(aOther.mEndTime), mEndTimeReference(aOther.mEndTimeReference),
     mSearchTerms(aOther.mSearchTerms), mOnlyBookmarked(aOther.mOnlyBookmarked),
     mDomainIsHost(aOther.mDomainIsHost), mDomain(aOther.mDomain),
-    mUriIsPrefix(aOther.mUriIsPrefix), mUri(aOther.mUri),
+    mUri(aOther.mUri),
     mAnnotationIsNot(aOther.mAnnotationIsNot),
     mAnnotation(aOther.mAnnotation), mTags(aOther.mTags),
     mTagsAreNot(aOther.mTagsAreNot), mTransitions(aOther.mTransitions)
@@ -1070,17 +1069,6 @@ NS_IMETHODIMP nsNavHistoryQuery::GetHasDomain(bool* _retval)
 {
   // note that empty but not void is still a valid query (local files)
   *_retval = (! mDomain.IsVoid());
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsNavHistoryQuery::GetUriIsPrefix(bool* aIsPrefix)
-{
-  *aIsPrefix = mUriIsPrefix;
-  return NS_OK;
-}
-NS_IMETHODIMP nsNavHistoryQuery::SetUriIsPrefix(bool aIsPrefix)
-{
-  mUriIsPrefix = aIsPrefix;
   return NS_OK;
 }
 
@@ -1525,8 +1513,6 @@ nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
 {
   *aResult = nullptr;
   nsNavHistoryQueryOptions *result = new nsNavHistoryQueryOptions();
-  if (! result)
-    return NS_ERROR_OUT_OF_MEMORY;
 
   RefPtr<nsNavHistoryQueryOptions> resultHolder(result);
   result->mSort = mSort;
@@ -1539,7 +1525,7 @@ nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
   result->mParentAnnotationToExclude = mParentAnnotationToExclude;
   result->mAsyncEnabled = mAsyncEnabled;
 
-  resultHolder.swap(*aResult);
+  resultHolder.forget(aResult);
   return NS_OK;
 }
 

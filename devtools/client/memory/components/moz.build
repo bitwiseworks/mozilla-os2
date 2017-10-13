@@ -3,11 +3,23 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+DIRS += [
+    'tree-map',
+]
+
 DevToolsModules(
-    'frame.js',
+    'census-header.js',
+    'census-tree-item.js',
+    'census.js',
+    'dominator-tree-header.js',
+    'dominator-tree-item.js',
+    'dominator-tree.js',
     'heap.js',
+    'individuals-header.js',
+    'individuals.js',
     'list.js',
+    'shortest-paths.js',
     'snapshot-list-item.js',
     'toolbar.js',
-    'tree-item.js',
+    'tree-map.js',
 )

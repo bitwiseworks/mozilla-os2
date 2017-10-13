@@ -17,6 +17,8 @@
 #include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/HTMLShadowElement.h"
 #include "nsXBLPrototypeBinding.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -130,7 +132,7 @@ ShadowRoot::StyleSheetChanged()
 }
 
 void
-ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
+ShadowRoot::InsertSheet(StyleSheet* aSheet,
                         nsIContent* aLinkingContent)
 {
   nsCOMPtr<nsIStyleSheetLinkingElement>
@@ -148,8 +150,8 @@ ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
       break;
     }
 
-    nsINode* sheetOwnerNode = mProtoBinding->StyleSheetAt(i)->GetOwnerNode();
-    if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwnerNode)) {
+    nsINode* sheetOwningNode = mProtoBinding->StyleSheetAt(i)->GetOwnerNode();
+    if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwningNode)) {
       mProtoBinding->InsertStyleSheetAt(i, aSheet);
       break;
     }
@@ -161,7 +163,7 @@ ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
 }
 
 void
-ShadowRoot::RemoveSheet(CSSStyleSheet* aSheet)
+ShadowRoot::RemoveSheet(StyleSheet* aSheet)
 {
   mProtoBinding->RemoveStyleSheet(aSheet);
 
@@ -219,7 +221,7 @@ ShadowRoot::RemoveFromIdTable(Element* aElement, nsIAtom* aId)
   if (entry) {
     entry->RemoveIdElement(aElement);
     if (entry->IsEmpty()) {
-      mIdentifierMap.RawRemoveEntry(entry);
+      mIdentifierMap.RemoveEntry(entry);
     }
   }
 }
@@ -560,11 +562,12 @@ ShadowRoot::ChangePoolHost(nsIContent* aNewHost)
 bool
 ShadowRoot::IsShadowInsertionPoint(nsIContent* aContent)
 {
-  if (aContent && aContent->IsHTMLElement(nsGkAtoms::shadow)) {
-    HTMLShadowElement* shadowElem = static_cast<HTMLShadowElement*>(aContent);
-    return shadowElem->IsInsertionPoint();
+  if (!aContent) {
+    return false;
   }
-  return false;
+
+  HTMLShadowElement* shadowElem = HTMLShadowElement::FromContent(aContent);
+  return shadowElem && shadowElem->IsInsertionPoint();
 }
 
 /**
@@ -592,10 +595,11 @@ ShadowRoot::IsPooledNode(nsIContent* aContent, nsIContent* aContainer,
     return true;
   }
 
-  if (aContainer && aContainer->IsHTMLElement(nsGkAtoms::content)) {
+  if (aContainer) {
     // Fallback content will end up in pool if its parent is a child of the host.
-    HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
-    return content->IsInsertionPoint() && content->MatchedNodes().IsEmpty() &&
+    HTMLContentElement* content = HTMLContentElement::FromContent(aContainer);
+    return content && content->IsInsertionPoint() &&
+           content->MatchedNodes().IsEmpty() &&
            aContainer->GetParentNode() == aHost;
   }
 
@@ -637,7 +641,7 @@ ShadowRoot::ContentAppended(nsIDocument* aDocument,
   while (currentChild) {
     // Add insertion point to destination insertion points of fallback content.
     if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-      HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
+      HTMLContentElement* content = HTMLContentElement::FromContent(aContainer);
       if (content->MatchedNodes().IsEmpty()) {
         currentChild->DestInsertionPoints().AppendElement(aContainer);
       }
@@ -668,7 +672,7 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
   if (IsPooledNode(aChild, aContainer, mPoolHost)) {
     // Add insertion point to destination insertion points of fallback content.
     if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-      HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
+      HTMLContentElement* content = HTMLContentElement::FromContent(aContainer);
       if (content->MatchedNodes().IsEmpty()) {
         aChild->DestInsertionPoints().AppendElement(aContainer);
       }
@@ -694,7 +698,7 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
   // Clear destination insertion points for removed
   // fallback content.
   if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-    HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
+    HTMLContentElement* content = HTMLContentElement::FromContent(aContainer);
     if (content->MatchedNodes().IsEmpty()) {
       aChild->DestInsertionPoints().Clear();
     }
@@ -743,15 +747,13 @@ ShadowRootStyleSheetList::~ShadowRootStyleSheetList()
   MOZ_COUNT_DTOR(ShadowRootStyleSheetList);
 }
 
-CSSStyleSheet*
+StyleSheet*
 ShadowRootStyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   aFound = aIndex < mShadowRoot->mProtoBinding->SheetCount();
-
   if (!aFound) {
     return nullptr;
   }
-
   return mShadowRoot->mProtoBinding->StyleSheetAt(aIndex);
 }
 

@@ -10,7 +10,7 @@
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/process.h"               // for ProcessId
 #include "base/task.h"                  // for CancelableTask, DeleteTask, etc
-#include "base/tracked.h"               // for FROM_HERE
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/gfx/Point.h"                   // for IntSize
 #include "mozilla/Hal.h"                // for hal::SetCurrentThreadPriority()
 #include "mozilla/HalTypes.h"           // for hal::THREAD_PRIORITY_COMPOSITOR
@@ -19,7 +19,6 @@
 #include "mozilla/ipc/Transport.h"      // for Transport
 #include "mozilla/media/MediaSystemResourceManagerParent.h" // for MediaSystemResourceManagerParent
 #include "mozilla/layers/CompositableTransactionParent.h"
-#include "mozilla/layers/CompositorParent.h"  // for CompositorParent
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/LayersMessages.h"  // for EditReply
 #include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferParent
@@ -27,9 +26,9 @@
 #include "mozilla/layers/PImageBridgeParent.h"
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/Compositor.h"
+#include "mozilla/Monitor.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "mozilla/unused.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/Unused.h"
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
 #include "nsISupportsImpl.h"            // for ImageBridgeParent::Release, etc
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
@@ -47,57 +46,97 @@ using namespace mozilla::media;
 
 std::map<base::ProcessId, ImageBridgeParent*> ImageBridgeParent::sImageBridges;
 
-MessageLoop* ImageBridgeParent::sMainLoop = nullptr;
+StaticAutoPtr<mozilla::Monitor> sImageBridgesLock;
 
-// defined in CompositorParent.cpp
+// defined in CompositorBridgeParent.cpp
 CompositorThreadHolder* GetCompositorThreadHolder();
 
-ImageBridgeParent::ImageBridgeParent(MessageLoop* aLoop,
-                                     Transport* aTransport,
-                                     ProcessId aChildProcessId)
-  : mMessageLoop(aLoop)
-  , mTransport(aTransport)
-  , mSetChildThreadPriority(false)
-  , mStopped(false)
+/* static */ void
+ImageBridgeParent::Setup()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  sMainLoop = MessageLoop::current();
+  if (!sImageBridgesLock) {
+    sImageBridgesLock = new Monitor("ImageBridges");
+    mozilla::ClearOnShutdown(&sImageBridgesLock);
+  }
+}
 
-  // top-level actors must be destroyed on the main thread.
-  SetMessageLoopToPostDestructionTo(sMainLoop);
+ImageBridgeParent::ImageBridgeParent(MessageLoop* aLoop,
+                                     ProcessId aChildProcessId)
+  : mMessageLoop(aLoop)
+  , mSetChildThreadPriority(false)
+  , mClosed(false)
+{
+  MOZ_ASSERT(NS_IsMainThread());
 
   // creates the map only if it has not been created already, so it is safe
   // with several bridges
   CompositableMap::Create();
-  sImageBridges[aChildProcessId] = this;
+  {
+    MonitorAutoLock lock(*sImageBridgesLock);
+    sImageBridges[aChildProcessId] = this;
+  }
   SetOtherProcessId(aChildProcessId);
 }
 
 ImageBridgeParent::~ImageBridgeParent()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (mTransport) {
-    MOZ_ASSERT(XRE_GetIOMessageLoop());
-    XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                     new DeleteTask<Transport>(mTransport));
-  }
-
   nsTArray<PImageContainerParent*> parents;
   ManagedPImageContainerParent(parents);
   for (PImageContainerParent* p : parents) {
     delete p;
   }
+}
 
-  sImageBridges.erase(OtherPid());
+static StaticRefPtr<ImageBridgeParent> sImageBridgeParentSingleton;
+
+void ReleaseImageBridgeParentSingleton() {
+  sImageBridgeParentSingleton = nullptr;
+}
+
+/* static */ ImageBridgeParent*
+ImageBridgeParent::CreateSameProcess()
+{
+  RefPtr<ImageBridgeParent> parent =
+    new ImageBridgeParent(CompositorThreadHolder::Loop(), base::GetCurrentProcId());
+  parent->mSelfRef = parent;
+
+  sImageBridgeParentSingleton = parent;
+  return parent;
+}
+
+/* static */ bool
+ImageBridgeParent::CreateForGPUProcess(Endpoint<PImageBridgeParent>&& aEndpoint)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_GPU);
+
+  MessageLoop* loop = CompositorThreadHolder::Loop();
+  RefPtr<ImageBridgeParent> parent = new ImageBridgeParent(loop, aEndpoint.OtherPid());
+
+  loop->PostTask(NewRunnableMethod<Endpoint<PImageBridgeParent>&&>(
+    parent, &ImageBridgeParent::Bind, Move(aEndpoint)));
+
+  sImageBridgeParentSingleton = parent;
+  return true;
 }
 
 void
 ImageBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
 {
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ImageBridgeParent::DeferredDestroy));
+  // Can't alloc/dealloc shmems from now on.
+  mClosed = true;
+  {
+    MonitorAutoLock lock(*sImageBridgesLock);
+    sImageBridges.erase(OtherPid());
+  }
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ImageBridgeParent::DeferredDestroy));
+
+  // It is very important that this method gets called at shutdown (be it a clean
+  // or an abnormal shutdown), because DeferredDestroy is what clears mSelfRef.
+  // If mSelfRef is not null and ActorDestroy is not called, the ImageBridgeParent
+  // is leaked which causes the CompositorThreadHolder to be leaked and
+  // CompsoitorParent's shutdown ends up spinning the event loop forever, waiting
+  // for the compositor thread to terminate.
 }
 
 bool
@@ -108,30 +147,43 @@ ImageBridgeParent::RecvImageBridgeThreadId(const PlatformThreadId& aThreadId)
     return false;
   }
   mSetChildThreadPriority = true;
-#ifdef MOZ_WIDGET_GONK
-  hal::SetThreadPriority(aThreadId, hal::THREAD_PRIORITY_COMPOSITOR);
-#endif
   return true;
 }
 
 class MOZ_STACK_CLASS AutoImageBridgeParentAsyncMessageSender
 {
 public:
-  explicit AutoImageBridgeParentAsyncMessageSender(ImageBridgeParent* aImageBridge)
-    : mImageBridge(aImageBridge) {}
+  explicit AutoImageBridgeParentAsyncMessageSender(ImageBridgeParent* aImageBridge,
+                                                   InfallibleTArray<OpDestroy>* aToDestroy = nullptr)
+    : mImageBridge(aImageBridge)
+    , mToDestroy(aToDestroy)
+  {
+    mImageBridge->SetAboutToSendAsyncMessages();
+  }
 
   ~AutoImageBridgeParentAsyncMessageSender()
   {
     mImageBridge->SendPendingAsyncMessages();
+    if (mToDestroy) {
+      for (const auto& op : *mToDestroy) {
+        mImageBridge->DestroyActor(op);
+      }
+    }
   }
 private:
   ImageBridgeParent* mImageBridge;
+  InfallibleTArray<OpDestroy>* mToDestroy;
 };
 
 bool
-ImageBridgeParent::RecvUpdate(EditArray&& aEdits, EditReplyArray* aReply)
+ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                              const uint64_t& aFwdTransactionId,
+                              EditReplyArray* aReply)
 {
-  AutoImageBridgeParentAsyncMessageSender autoAsyncMessageSender(this);
+  // This ensures that destroy operations are always processed. It is not safe
+  // to early-return from RecvUpdate without doing so.
+  AutoImageBridgeParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
+  UpdateFwdTransactionId(aFwdTransactionId);
 
   EditReplyVector replyv;
   for (EditArray::index_type i = 0; i < aEdits.Length(); ++i) {
@@ -156,35 +208,36 @@ ImageBridgeParent::RecvUpdate(EditArray&& aEdits, EditReplyArray* aReply)
 }
 
 bool
-ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits)
+ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                                    const uint64_t& aFwdTransactionId)
 {
   InfallibleTArray<EditReply> noReplies;
-  bool success = RecvUpdate(Move(aEdits), &noReplies);
+  bool success = RecvUpdate(Move(aEdits), Move(aToDestroy), aFwdTransactionId, &noReplies);
   MOZ_ASSERT(noReplies.Length() == 0, "RecvUpdateNoSwap requires a sync Update to carry Edits");
   return success;
 }
 
-static void
-ConnectImageBridgeInParentProcess(ImageBridgeParent* aBridge,
-                                  Transport* aTransport,
-                                  base::ProcessId aOtherPid)
+/* static */ bool
+ImageBridgeParent::CreateForContent(Endpoint<PImageBridgeParent>&& aEndpoint)
 {
-  aBridge->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop(), ipc::ParentSide);
+  MessageLoop* loop = CompositorThreadHolder::Loop();
+
+  RefPtr<ImageBridgeParent> bridge = new ImageBridgeParent(loop, aEndpoint.OtherPid());
+  loop->PostTask(NewRunnableMethod<Endpoint<PImageBridgeParent>&&>(
+    bridge, &ImageBridgeParent::Bind, Move(aEndpoint)));
+
+  return true;
 }
 
-/*static*/ PImageBridgeParent*
-ImageBridgeParent::Create(Transport* aTransport, ProcessId aChildProcessId)
+void
+ImageBridgeParent::Bind(Endpoint<PImageBridgeParent>&& aEndpoint)
 {
-  MessageLoop* loop = CompositorParent::CompositorLoop();
-  RefPtr<ImageBridgeParent> bridge = new ImageBridgeParent(loop, aTransport, aChildProcessId);
-  bridge->mSelfRef = bridge;
-  loop->PostTask(FROM_HERE,
-                 NewRunnableFunction(ConnectImageBridgeInParentProcess,
-                                     bridge.get(), aTransport, aChildProcessId));
-  return bridge.get();
+  if (!aEndpoint.Bind(this))
+    return;
+  mSelfRef = this;
 }
 
-bool ImageBridgeParent::RecvWillStop()
+bool ImageBridgeParent::RecvWillClose()
 {
   // If there is any texture still alive we have to force it to deallocate the
   // device data (GL textures, etc.) now because shortly after SenStop() returns
@@ -196,31 +249,6 @@ bool ImageBridgeParent::RecvWillStop()
     RefPtr<TextureHost> tex = TextureHost::AsTextureHost(textures[i]);
     tex->DeallocateDeviceData();
   }
-  return true;
-}
-
-static void
-ReleaseImageBridgeParent(ImageBridgeParent* aImageBridgeParent)
-{
-  RELEASE_MANUALLY(aImageBridgeParent);
-}
-
-bool ImageBridgeParent::RecvStop()
-{
-  // This message mostly serves as synchronization between the
-  // child and parent threads during shutdown.
-
-  // Can't alloc/dealloc shmems from now on.
-  mStopped = true;
-
-  // There is one thing that we need to do here: temporarily addref, so that
-  // the handling of this sync message can't race with the destruction of
-  // the ImageBridgeParent, which would trigger the dreaded "mismatched CxxStackFrames"
-  // assertion of MessageChannel.
-  ADDREF_MANUALLY(this);
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableFunction(&ReleaseImageBridgeParent, this));
   return true;
 }
 
@@ -249,9 +277,10 @@ bool ImageBridgeParent::DeallocPCompositableParent(PCompositableParent* aActor)
 PTextureParent*
 ImageBridgeParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                        const LayersBackend& aLayersBackend,
-                                       const TextureFlags& aFlags)
+                                       const TextureFlags& aFlags,
+                                       const uint64_t& aSerial)
 {
-  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags);
+  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags, aSerial);
 }
 
 bool
@@ -293,12 +322,6 @@ ImageBridgeParent::SendAsyncMessage(const InfallibleTArray<AsyncParentMessageDat
   mozilla::Unused << SendParentAsyncMessages(aMessage);
 }
 
-bool
-ImageBridgeParent::RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessageData>&& aMessages)
-{
-  return true;
-}
-
 class ProcessIdComparator
 {
 public:
@@ -323,7 +346,7 @@ ImageBridgeParent::NotifyImageComposites(nsTArray<ImageCompositeNotification>& a
   uint32_t i = 0;
   bool ok = true;
   while (i < aNotifications.Length()) {
-    nsAutoTArray<ImageCompositeNotification,1> notifications;
+    AutoTArray<ImageCompositeNotification,1> notifications;
     notifications.AppendElement(aNotifications[i]);
     uint32_t end = i + 1;
     MOZ_ASSERT(aNotifications[i].imageContainerParent());
@@ -333,6 +356,7 @@ ImageBridgeParent::NotifyImageComposites(nsTArray<ImageCompositeNotification>& a
       notifications.AppendElement(aNotifications[end]);
       ++end;
     }
+    GetInstance(pid)->SendPendingAsyncMessages();
     if (!GetInstance(pid)->SendDidComposite(notifications)) {
       ok = false;
     }
@@ -341,44 +365,20 @@ ImageBridgeParent::NotifyImageComposites(nsTArray<ImageCompositeNotification>& a
   return ok;
 }
 
-MessageLoop * ImageBridgeParent::GetMessageLoop() const {
-  return mMessageLoop;
-}
-
 void
 ImageBridgeParent::DeferredDestroy()
 {
-  MOZ_ASSERT(mCompositorThreadHolder);
   mCompositorThreadHolder = nullptr;
-  mSelfRef = nullptr;
+  mSelfRef = nullptr; // "this" ImageBridge may get deleted here.
 }
 
-ImageBridgeParent*
+RefPtr<ImageBridgeParent>
 ImageBridgeParent::GetInstance(ProcessId aId)
 {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  MonitorAutoLock lock(*sImageBridgesLock);
   NS_ASSERTION(sImageBridges.count(aId) == 1, "ImageBridgeParent for the process");
   return sImageBridges[aId];
-}
-
-IToplevelProtocol*
-ImageBridgeParent::CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
-                                 base::ProcessHandle aPeerProcess,
-                                 mozilla::ipc::ProtocolCloneContext* aCtx)
-{
-  for (unsigned int i = 0; i < aFds.Length(); i++) {
-    if (aFds[i].protocolId() == unsigned(GetProtocolId())) {
-      Transport* transport = OpenDescriptor(aFds[i].fd(),
-                                            Transport::MODE_SERVER);
-      PImageBridgeParent* bridge = Create(transport, base::GetProcId(aPeerProcess));
-      bridge->CloneManagees(this, aCtx);
-      bridge->IToplevelProtocol::SetTransport(transport);
-      // The reference to the compositor thread is held in OnChannelConnected().
-      // We need to do this for cloned actors, too.
-      bridge->OnChannelConnected(base::GetProcId(aPeerProcess));
-      return bridge;
-    }
-  }
-  return nullptr;
 }
 
 void
@@ -390,10 +390,10 @@ ImageBridgeParent::OnChannelConnected(int32_t aPid)
 
 bool
 ImageBridgeParent::AllocShmem(size_t aSize,
-                ipc::SharedMemory::SharedMemoryType aType,
-                ipc::Shmem* aShmem)
+                      ipc::SharedMemory::SharedMemoryType aType,
+                      ipc::Shmem* aShmem)
 {
-  if (mStopped) {
+  if (mClosed) {
     return false;
   }
   return PImageBridgeParent::AllocShmem(aSize, aType, aShmem);
@@ -404,7 +404,7 @@ ImageBridgeParent::AllocUnsafeShmem(size_t aSize,
                       ipc::SharedMemory::SharedMemoryType aType,
                       ipc::Shmem* aShmem)
 {
-  if (mStopped) {
+  if (mClosed) {
     return false;
   }
   return PImageBridgeParent::AllocUnsafeShmem(aSize, aType, aShmem);
@@ -413,7 +413,7 @@ ImageBridgeParent::AllocUnsafeShmem(size_t aSize,
 void
 ImageBridgeParent::DeallocShmem(ipc::Shmem& aShmem)
 {
-  if (mStopped) {
+  if (mClosed) {
     return;
   }
   PImageBridgeParent::DeallocShmem(aShmem);
@@ -425,103 +425,24 @@ bool ImageBridgeParent::IsSameProcess() const
 }
 
 void
-ImageBridgeParent::ReplyRemoveTexture(const OpReplyRemoveTexture& aReply)
-{
-  mPendingAsyncMessage.push_back(aReply);
-}
-
-/*static*/ void
-ImageBridgeParent::ReplyRemoveTexture(base::ProcessId aChildProcessId,
-                                      const OpReplyRemoveTexture& aReply)
-{
-  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
-  if (!imageBridge) {
-    return;
-  }
-  imageBridge->ReplyRemoveTexture(aReply);
-}
-
-void
-ImageBridgeParent::SendFenceHandleIfPresent(PTextureParent* aTexture,
-                                            CompositableHost* aCompositableHost)
+ImageBridgeParent::NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId)
 {
   RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
   if (!texture) {
     return;
   }
 
-  // Send a ReleaseFence of CompositorOGL.
-  if (aCompositableHost && aCompositableHost->GetCompositor()) {
-    FenceHandle fence = aCompositableHost->GetCompositor()->GetReleaseFence();
-    if (fence.IsValid()) {
-      mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                    fence));
-    }
-  }
-
-  // Send a ReleaseFence that is set by HwcComposer2D.
-  FenceHandle fence = texture->GetAndResetReleaseFenceHandle();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                  fence));
-  }
-}
-
-void
-ImageBridgeParent::AppendDeliverFenceMessage(uint64_t aDestHolderId,
-                                             uint64_t aTransactionId,
-                                             PTextureParent* aTexture,
-                                             CompositableHost* aCompositableHost)
-{
-  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture) {
+  if (!(texture->GetFlags() & TextureFlags::RECYCLE)) {
     return;
   }
 
-  // Send a ReleaseFence of CompositorOGL.
-  if (aCompositableHost && aCompositableHost->GetCompositor()) {
-    FenceHandle fence = aCompositableHost->GetCompositor()->GetReleaseFence();
-    if (fence.IsValid()) {
-      mPendingAsyncMessage.push_back(OpDeliverFenceToTracker(aDestHolderId,
-                                                             aTransactionId,
-                                                             fence));
-    }
-  }
+  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
+  mPendingAsyncMessage.push_back(
+    OpNotifyNotUsed(textureId, aTransactionId));
 
-  // Send a ReleaseFence that is set by HwcComposer2D.
-  FenceHandle fence = texture->GetAndResetReleaseFenceHandle();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFenceToTracker(aDestHolderId,
-                                                           aTransactionId,
-                                                           fence));
+  if (!IsAboutToSendAsyncMessages()) {
+    SendPendingAsyncMessages();
   }
-}
-
-/*static*/ void
-ImageBridgeParent::AppendDeliverFenceMessage(base::ProcessId aChildProcessId,
-                                             uint64_t aDestHolderId,
-                                             uint64_t aTransactionId,
-                                             PTextureParent* aTexture,
-                                             CompositableHost* aCompositableHost)
-{
-  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
-  if (!imageBridge) {
-    return;
-  }
-  imageBridge->AppendDeliverFenceMessage(aDestHolderId,
-                                         aTransactionId,
-                                         aTexture,
-                                         aCompositableHost);
-}
-
-/*static*/ void
-ImageBridgeParent::SendPendingAsyncMessages(base::ProcessId aChildProcessId)
-{
-  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
-  if (!imageBridge) {
-    return;
-  }
-  imageBridge->SendPendingAsyncMessages();
 }
 
 } // namespace layers

@@ -362,9 +362,8 @@ nsMathMLmoFrame::ProcessOperatorData()
       // Cache the default values of lspace and rspace.
       // since these values are relative to the 'em' unit, convert to twips now
       nscoord em;
-      RefPtr<nsFontMetrics> fm;
-      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                            fontSizeInflation);
+      RefPtr<nsFontMetrics> fm =
+        nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
       GetEmHeight(fm, em);
 
       mEmbellishData.leadingSpace = NSToCoordRound(lspace * em);
@@ -604,10 +603,10 @@ GetStretchHint(nsOperatorFlags aFlags, nsPresentationData aPresentationData,
 //       On input  - it contains our current size
 //       On output - the same size or the new size that we want
 NS_IMETHODIMP
-nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
+nsMathMLmoFrame::Stretch(DrawTarget*          aDrawTarget,
                          nsStretchDirection   aStretchDirection,
                          nsBoundingMetrics&   aContainerSize,
-                         nsHTMLReflowMetrics& aDesiredStretchSize)
+                         ReflowOutput& aDesiredStretchSize)
 {
   if (NS_MATHML_STRETCH_WAS_DONE(mPresentationData.flags)) {
     NS_WARNING("it is wrong to fire stretch more than once on a frame");
@@ -619,11 +618,10 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
 
   // get the axis height;
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
-  RefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                        fontSizeInflation);
+  RefPtr<nsFontMetrics> fm =
+    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
   nscoord axisHeight, height;
-  GetAxisHeight(aRenderingContext, fm, axisHeight);
+  GetAxisHeight(aDrawTarget, fm, axisHeight);
 
   // get the leading to be left at the top and the bottom of the stretched char
   // this seems more reliable than using fm->GetLeading() on suspicious fonts
@@ -748,7 +746,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
     }
 
     // let the MathMLChar stretch itself...
-    nsresult res = mMathMLChar.Stretch(PresContext(), aRenderingContext,
+    nsresult res = mMathMLChar.Stretch(PresContext(), aDrawTarget,
                                        fontSizeInflation,
                                        aStretchDirection, container, charSize,
                                        stretchHint,
@@ -763,7 +761,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
 
   // Place our children using the default method
   // This will allow our child text frame to get its DidReflow()
-  nsresult rv = Place(aRenderingContext, true, aDesiredStretchSize);
+  nsresult rv = Place(aDrawTarget, true, aDesiredStretchSize);
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags) || NS_FAILED(rv)) {
     // Make sure the child frames get their DidReflow() calls.
     DidReflowChildren(mFrames.FirstChild());
@@ -946,8 +944,8 @@ nsMathMLmoFrame::SetInitialChildList(ChildListID     aListID,
 
 void
 nsMathMLmoFrame::Reflow(nsPresContext*          aPresContext,
-                        nsHTMLReflowMetrics&     aDesiredSize,
-                        const nsHTMLReflowState& aReflowState,
+                        ReflowOutput&     aDesiredSize,
+                        const ReflowInput& aReflowInput,
                         nsReflowStatus&          aStatus)
 {
   // certain values use units that depend on our style context, so
@@ -955,16 +953,15 @@ nsMathMLmoFrame::Reflow(nsPresContext*          aPresContext,
   ProcessOperatorData();
 
   nsMathMLTokenFrame::Reflow(aPresContext, aDesiredSize,
-                             aReflowState, aStatus);
+                             aReflowInput, aStatus);
 }
 
 nsresult
-nsMathMLmoFrame::Place(nsRenderingContext&  aRenderingContext,
+nsMathMLmoFrame::Place(DrawTarget*          aDrawTarget,
                        bool                 aPlaceOrigin,
-                       nsHTMLReflowMetrics& aDesiredSize)
+                       ReflowOutput& aDesiredSize)
 {
-  nsresult rv = nsMathMLTokenFrame::Place(aRenderingContext, aPlaceOrigin,
-                                          aDesiredSize);
+  nsresult rv = nsMathMLTokenFrame::Place(aDrawTarget, aPlaceOrigin, aDesiredSize);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -985,11 +982,11 @@ nsMathMLmoFrame::Place(nsRenderingContext&  aRenderingContext,
       StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK &&
       NS_MATHML_OPERATOR_IS_LARGEOP(mFlags) && UseMathMLChar()) {
     nsBoundingMetrics newMetrics;
-    rv = mMathMLChar.Stretch(PresContext(), aRenderingContext,
-                                      nsLayoutUtils::FontSizeInflationFor(this),
-                                      NS_STRETCH_DIRECTION_VERTICAL,
-                                      aDesiredSize.mBoundingMetrics, newMetrics,
-                                      NS_STRETCH_LARGEOP, StyleVisibility()->mDirection);
+    rv = mMathMLChar.Stretch(PresContext(), aDrawTarget,
+                             nsLayoutUtils::FontSizeInflationFor(this),
+                             NS_STRETCH_DIRECTION_VERTICAL,
+                             aDesiredSize.mBoundingMetrics, newMetrics,
+                             NS_STRETCH_LARGEOP, StyleVisibility()->mDirection);
 
     if (NS_FAILED(rv)) {
       // Just use the initial size
@@ -1039,14 +1036,14 @@ nsMathMLmoFrame::MarkIntrinsicISizesDirty()
 
 /* virtual */ void
 nsMathMLmoFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext,
-                                          nsHTMLReflowMetrics& aDesiredSize)
+                                          ReflowOutput& aDesiredSize)
 {
   ProcessOperatorData();
   if (UseMathMLChar()) {
     uint32_t stretchHint = GetStretchHint(mFlags, mPresentationData, true,
                                           StyleFont());
     aDesiredSize.Width() = mMathMLChar.
-      GetMaxWidth(PresContext(), *aRenderingContext,
+      GetMaxWidth(PresContext(), aRenderingContext->GetDrawTarget(),
                   nsLayoutUtils::FontSizeInflationFor(this),
                   stretchHint);
   }

@@ -63,16 +63,12 @@
 #include "libui/InputReader.h"
 #include "libui/InputDispatcher.h"
 
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
-
 #include "mozilla/Preferences.h"
 #include "GeckoProfiler.h"
 
 // Defines kKeyMapping and GetKeyNameIndex()
 #include "GonkKeyMapping.h"
-#include "mozilla/layers/CompositorParent.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
 #include "GeckoTouchDispatcher.h"
 
 #undef LOG
@@ -301,21 +297,21 @@ KeyEventDispatcher::DispatchKeyEventInternal(EventMessage aEventMessage)
     if (aEventMessage == eKeyPress) {
         // XXX If the charCode is not a printable character, the charCode
         //     should be computed without Ctrl/Alt/Meta modifiers.
-        event.charCode = static_cast<uint32_t>(mChar);
+        event.mCharCode = static_cast<uint32_t>(mChar);
     }
-    if (!event.charCode) {
-        event.keyCode = mDOMKeyCode;
+    if (!event.mCharCode) {
+        event.mKeyCode = mDOMKeyCode;
     }
-    event.isChar = !!event.charCode;
+    event.mIsChar = !!event.mCharCode;
     event.mIsRepeat = IsRepeat();
     event.mKeyNameIndex = mDOMKeyNameIndex;
     if (mDOMPrintableKeyValue) {
         event.mKeyValue = mDOMPrintableKeyValue;
     }
     event.mCodeNameIndex = mDOMCodeNameIndex;
-    event.modifiers = getDOMModifiers(mData.metaState);
-    event.location = mDOMKeyLocation;
-    event.time = mData.timeMs;
+    event.mModifiers = getDOMModifiers(mData.metaState);
+    event.mLocation = mDOMKeyLocation;
+    event.mTime = mData.timeMs;
     return nsWindow::DispatchKeyInput(event);
 }
 
@@ -354,12 +350,12 @@ KeyEventDispatcher::DispatchKeyUpEvent()
     DispatchKeyEventInternal(eKeyUp);
 }
 
-class SwitchEventRunnable : public nsRunnable {
+class SwitchEventRunnable : public mozilla::Runnable {
 public:
     SwitchEventRunnable(hal::SwitchEvent& aEvent) : mEvent(aEvent)
     {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         hal::NotifySwitchStateFromInputDevice(mEvent.device(),
           mEvent.status());
@@ -714,8 +710,8 @@ addMultiTouch(MultiTouchInput& aMultiTouch,
       radiusY = coords.getAxisValue(AMOTION_EVENT_AXIS_TOUCH_MINOR) / 2;
     }
 
-    ScreenIntPoint point(floor(coords.getX() + 0.5),
-                         floor(coords.getY() + 0.5));
+    ScreenIntPoint point = ScreenIntPoint::Round(coords.getX(),
+                                                 coords.getY());
 
     SingleTouchData touchData(id, point, ScreenSize(radiusX, radiusY),
                               rotationAngle, force);
@@ -893,9 +889,6 @@ nsAppShell::Init()
         printf("*** This is stdout. Most of the useful output will be in logcat.\n");
         printf("***\n");
         printf("*****************************************************************\n");
-#if ANDROID_VERSION >= 18 && (defined(MOZ_OMX_DECODER) || defined(MOZ_B2G_CAMERA))
-        android::FakeSurfaceComposer::instantiate();
-#endif
         GonkPermissionService::instantiate();
 
         // Causes the kernel timezone to be set, which in turn causes the
@@ -908,11 +901,6 @@ nsAppShell::Init()
         obsServ->AddObserver(this, "browser-ui-startup-complete", false);
         obsServ->AddObserver(this, "network-connection-state-changed", false);
     }
-
-#ifdef MOZ_NUWA_PROCESS
-    // Make sure main thread was woken up after Nuwa fork.
-    NuwaAddConstructor((void (*)(void *))&NotifyEvent, nullptr);
-#endif
 
     // Delay initializing input devices until the screen has been
     // initialized (and we know the resolution).

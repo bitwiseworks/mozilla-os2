@@ -19,7 +19,7 @@ using namespace mozilla::a11y;
 void
 nsEventShell::FireEvent(AccEvent* aEvent)
 {
-  if (!aEvent)
+  if (!aEvent || aEvent->mEventRule == AccEvent::eDoNotEmit)
     return;
 
   Accessible* accessible = aEvent->GetAccessible();
@@ -31,7 +31,19 @@ nsEventShell::FireEvent(AccEvent* aEvent)
     sEventFromUserInput = aEvent->IsFromUserInput();
   }
 
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eEvents)) {
+    logging::MsgBegin("EVENTS", "events fired");
+    nsAutoString type;
+    GetAccService()->GetStringEventType(aEvent->GetEventType(), type);
+    logging::MsgEntry("type: %s", NS_ConvertUTF16toUTF8(type).get());
+    logging::AccessibleInfo("target", aEvent->GetAccessible());
+    logging::MsgEnd();
+  }
+#endif
+
   accessible->HandleAccEvent(aEvent);
+  aEvent->mEventRule = AccEvent::eDoNotEmit;
 
   sEventTargetNode = nullptr;
 }

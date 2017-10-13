@@ -32,16 +32,17 @@ ADTSDecoder::CreateStateMachine()
 /* static */ bool
 ADTSDecoder::IsEnabled()
 {
-  PDMFactory::Init();
   RefPtr<PDMFactory> platform = new PDMFactory();
-  return platform->SupportsMimeType(NS_LITERAL_CSTRING("audio/mp4a-latm"));
+  return platform->SupportsMimeType(NS_LITERAL_CSTRING("audio/mp4a-latm"),
+                                    /* DecoderDoctorDiagnostics* */ nullptr);
 }
 
 /* static */ bool
 ADTSDecoder::CanHandleMediaType(const nsACString& aType,
                                 const nsAString& aCodecs)
 {
-  if (aType.EqualsASCII("audio/aac") || aType.EqualsASCII("audio/aacp")) {
+  if (aType.EqualsASCII("audio/aac") || aType.EqualsASCII("audio/aacp") ||
+      aType.EqualsASCII("audio/x-aac")) {
     return IsEnabled() && (aCodecs.IsEmpty() || aCodecs.EqualsASCII("aac"));
   }
 

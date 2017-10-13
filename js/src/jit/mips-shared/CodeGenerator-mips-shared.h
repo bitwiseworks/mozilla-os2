@@ -26,8 +26,15 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
   protected:
     NonAssertingLabel deoptLabel_;
 
-    inline Address ToAddress(const LAllocation& a);
-    inline Address ToAddress(const LAllocation* a);
+    Operand ToOperand(const LAllocation& a);
+    Operand ToOperand(const LAllocation* a);
+    Operand ToOperand(const LDefinition* def);
+
+#ifdef JS_PUNBOX64
+    Operand ToOperandOrRegister64(const LInt64Allocation input);
+#else
+    Register64 ToOperandOrRegister64(const LInt64Allocation input);
+#endif
 
     MoveOperand toMoveOperand(LAllocation a) const;
 
@@ -36,15 +43,6 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
         Label bail;
         masm.branch32(c, lhs, rhs, &bail);
         bailoutFrom(&bail, snapshot);
-    }
-    template<typename T>
-    void bailoutCmp32(Assembler::Condition c, Operand lhs, T rhs, LSnapshot* snapshot) {
-        if (lhs.getTag() == Operand::REG)
-            bailoutCmp32(c, lhs.toReg(), rhs, snapshot);
-        else if (lhs.getTag() == Operand::MEM)
-            bailoutCmp32(c, lhs.toAddress(), rhs, snapshot);
-        else
-            MOZ_CRASH("Invalid operand tag.");
     }
     template<typename T>
     void bailoutTest32(Assembler::Condition c, Register lhs, T rhs, LSnapshot* snapshot) {
@@ -121,6 +119,11 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
         emitBranch(reg, Imm32(0), cond, ifTrue, ifFalse);
     }
 
+    template <typename T>
+    void emitWasmLoad(T* ins);
+    template <typename T>
+    void emitWasmStore(T* ins);
+
   public:
     // Instruction visitors.
     virtual void visitMinMaxD(LMinMaxD* ins);
@@ -130,11 +133,15 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     virtual void visitSqrtD(LSqrtD* ins);
     virtual void visitSqrtF(LSqrtF* ins);
     virtual void visitAddI(LAddI* ins);
+    virtual void visitAddI64(LAddI64* ins);
     virtual void visitSubI(LSubI* ins);
+    virtual void visitSubI64(LSubI64* ins);
     virtual void visitBitNotI(LBitNotI* ins);
     virtual void visitBitOpI(LBitOpI* ins);
+    virtual void visitBitOpI64(LBitOpI64* ins);
 
     virtual void visitMulI(LMulI* ins);
+    virtual void visitMulI64(LMulI64* ins);
 
     virtual void visitDivI(LDivI* ins);
     virtual void visitDivPowTwoI(LDivPowTwoI* ins);
@@ -143,9 +150,14 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     virtual void visitModMaskI(LModMaskI* ins);
     virtual void visitPowHalfD(LPowHalfD* ins);
     virtual void visitShiftI(LShiftI* ins);
+    virtual void visitShiftI64(LShiftI64* ins);
+    virtual void visitRotateI64(LRotateI64* lir);
     virtual void visitUrshD(LUrshD* ins);
 
     virtual void visitClzI(LClzI* ins);
+    virtual void visitCtzI(LCtzI* ins);
+    virtual void visitPopcntI(LPopcntI* ins);
+    virtual void visitPopcntI64(LPopcntI64* lir);
 
     virtual void visitTestIAndBranch(LTestIAndBranch* test);
     virtual void visitCompare(LCompare* comp);
@@ -157,8 +169,8 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     virtual void visitCompareDAndBranch(LCompareDAndBranch* comp);
     virtual void visitCompareFAndBranch(LCompareFAndBranch* comp);
     virtual void visitBitAndAndBranch(LBitAndAndBranch* lir);
-    virtual void visitAsmJSUInt32ToDouble(LAsmJSUInt32ToDouble* lir);
-    virtual void visitAsmJSUInt32ToFloat32(LAsmJSUInt32ToFloat32* lir);
+    virtual void visitWasmUint32ToDouble(LWasmUint32ToDouble* lir);
+    virtual void visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir);
     virtual void visitNotI(LNotI* ins);
     virtual void visitNotD(LNotD* ins);
     virtual void visitNotF(LNotF* ins);
@@ -174,11 +186,18 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     virtual void visitTruncateDToInt32(LTruncateDToInt32* ins);
     virtual void visitTruncateFToInt32(LTruncateFToInt32* ins);
 
+    void visitWasmTruncateToInt32(LWasmTruncateToInt32* lir);
+    void visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins);
+    void visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins);
+
     // Out of line visitors.
     virtual void visitOutOfLineBailout(OutOfLineBailout* ool) = 0;
+    void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
+    void visitCopySignD(LCopySignD* ins);
+    void visitCopySignF(LCopySignF* ins);
+
   protected:
     virtual ValueOperand ToOutValue(LInstruction* ins) = 0;
-    void memoryBarrier(MemoryBarrierBits barrier);
 
   public:
     CodeGeneratorMIPSShared(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm);
@@ -196,19 +215,24 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     void visitNegF(LNegF* lir);
     void visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic* ins);
     void visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins);
-    void visitAsmJSCall(LAsmJSCall* ins);
+    void visitWasmCall(LWasmCall* ins);
+    void visitWasmCallI64(LWasmCallI64* ins);
+    void visitWasmLoad(LWasmLoad* ins);
+    void visitWasmUnalignedLoad(LWasmUnalignedLoad* ins);
+    void visitWasmStore(LWasmStore* ins);
+    void visitWasmUnalignedStore(LWasmUnalignedStore* ins);
+    void visitWasmAddOffset(LWasmAddOffset* ins);
     void visitAsmJSLoadHeap(LAsmJSLoadHeap* ins);
     void visitAsmJSStoreHeap(LAsmJSStoreHeap* ins);
     void visitAsmJSCompareExchangeHeap(LAsmJSCompareExchangeHeap* ins);
     void visitAsmJSAtomicExchangeHeap(LAsmJSAtomicExchangeHeap* ins);
     void visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins);
     void visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEffect* ins);
-    void visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins);
-    void visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins);
-    void visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins);
-    void visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins);
 
-    void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    void visitWasmStackArg(LWasmStackArg* ins);
+    void visitWasmStackArgI64(LWasmStackArgI64* ins);
+    void visitWasmSelect(LWasmSelect* ins);
+    void visitWasmReinterpret(LWasmReinterpret* ins);
 
     void visitMemoryBarrier(LMemoryBarrier* ins);
     void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
@@ -238,17 +262,16 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
   public:
     // Unimplemented SIMD instructions
     void visitSimdSplatX4(LSimdSplatX4* lir) { MOZ_CRASH("NYI"); }
-    void visitInt32x4(LInt32x4* ins) { MOZ_CRASH("NYI"); }
-    void visitFloat32x4(LFloat32x4* ins) { MOZ_CRASH("NYI"); }
+    void visitSimd128Int(LSimd128Int* ins) { MOZ_CRASH("NYI"); }
+    void visitSimd128Float(LSimd128Float* ins) { MOZ_CRASH("NYI"); }
     void visitSimdReinterpretCast(LSimdReinterpretCast* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementI(LSimdExtractElementI* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementF(LSimdExtractElementF* ins) { MOZ_CRASH("NYI"); }
-    void visitSimdSignMaskX4(LSimdSignMaskX4* ins) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryCompIx4(LSimdBinaryCompIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir) { MOZ_CRASH("NYI"); }
-    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir) { MOZ_CRASH("NYI"); }
+    void visitSimdBinaryBitwise(LSimdBinaryBitwise* lir) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleI(LSimdGeneralShuffleI* lir) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleF(LSimdGeneralShuffleF* lir) { MOZ_CRASH("NYI"); }
 };

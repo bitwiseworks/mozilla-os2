@@ -7,22 +7,21 @@
 #define __NS_SVGINNERSVGFRAME_H__
 
 #include "mozilla/Attributes.h"
+#include "nsAutoPtr.h"
 #include "nsSVGContainerFrame.h"
 #include "nsISVGSVGFrame.h"
 
 class gfxContext;
 
-typedef nsSVGDisplayContainerFrame nsSVGInnerSVGFrameBase;
-
-class nsSVGInnerSVGFrame : public nsSVGInnerSVGFrameBase,
-                           public nsISVGSVGFrame
+class nsSVGInnerSVGFrame : public nsSVGDisplayContainerFrame
+                         , public nsISVGSVGFrame
 {
   friend nsIFrame*
   NS_NewSVGInnerSVGFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  explicit nsSVGInnerSVGFrame(nsStyleContext* aContext) :
-    nsSVGInnerSVGFrameBase(aContext) {}
-  
+  explicit nsSVGInnerSVGFrame(nsStyleContext* aContext)
+    : nsSVGDisplayContainerFrame(aContext) {}
+
 public:
   NS_DECL_QUERYFRAME_TARGET(nsSVGInnerSVGFrame)
   NS_DECL_QUERYFRAME
@@ -53,9 +52,9 @@ public:
                                      int32_t         aModType) override;
 
   // nsISVGChildFrame interface:
-  virtual nsresult PaintSVG(gfxContext& aContext,
-                            const gfxMatrix& aTransform,
-                            const nsIntRect *aDirtyRect = nullptr) override;
+  virtual DrawResult PaintSVG(gfxContext& aContext,
+                              const gfxMatrix& aTransform,
+                              const nsIntRect *aDirtyRect = nullptr) override;
   virtual nsRect GetCoveredRegion() override;
   virtual void ReflowSVG() override;
   virtual void NotifySVGChanged(uint32_t aFlags) override;

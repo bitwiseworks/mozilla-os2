@@ -6,7 +6,6 @@
 package org.mozilla.gecko.home;
 
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.home.HomeConfig.AuthConfig;
 import org.mozilla.gecko.home.HomeConfig.PanelConfig;
@@ -45,7 +44,7 @@ class PanelAuthLayout extends LinearLayout {
         buttonView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HomePanels:Authenticate", panelId));
+                GeckoAppShell.notifyObservers("HomePanels:Authenticate", panelId);
             }
         });
 

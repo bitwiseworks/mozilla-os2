@@ -22,12 +22,15 @@ import mozcrash
 import talosconfig
 import shutil
 import mozfile
-import logging
+
+from mozlog import get_proxy_logger
 
 from talos.utils import TalosCrash, TalosRegression
 from talos.talos_process import run_browser
 from talos.ffsetup import FFSetup
 from talos.cmanager import CounterManagement
+
+LOG = get_proxy_logger()
 
 
 class TTest(object):
@@ -56,7 +59,13 @@ class TTest(object):
 
         """
 
-        logging.debug("operating with platform_type : %s", self.platform_type)
+        LOG.debug("operating with platform_type : %s" % self.platform_type)
+
+        # Bug 1262954: winxp + e10s, disable hwaccel
+        if self.platform_type == "win_" and browser_config['e10s']:
+            prefs = browser_config['preferences']
+            prefs['layers.acceleration.disabled'] = True
+
         with FFSetup(browser_config, test_config) as setup:
             return self._runTest(browser_config, test_config, setup)
 
@@ -88,9 +97,8 @@ class TTest(object):
         if test_config['shutdown']:
             global_counters['shutdown'] = []
         if test_config.get('responsiveness') and \
-                platform.system() != "Linux":
-            # ignore responsiveness tests on linux until we fix
-            # Bug 710296
+           platform.system() != "Darwin":
+            # ignore osx for now as per bug 1245793
             setup.env['MOZ_INSTRUMENT_EVENT_LOOP'] = '1'
             setup.env['MOZ_INSTRUMENT_EVENT_LOOP_THRESHOLD'] = '20'
             setup.env['MOZ_INSTRUMENT_EVENT_LOOP_INTERVAL'] = '10'
@@ -99,12 +107,13 @@ class TTest(object):
         # instantiate an object to hold test results
         test_results = results.TestResults(
             test_config,
-            global_counters
+            global_counters,
+            browser_config.get('framework')
         )
 
         for i in range(test_config['cycles']):
-            logging.info("Running cycle %d/%d for %s test...",
-                         i+1, test_config['cycles'], test_config['name'])
+            LOG.info("Running cycle %d/%d for %s test..."
+                     % (i+1, test_config['cycles'], test_config['name']))
 
             # remove the browser  error file
             mozfile.remove(browser_config['error_filename'])
@@ -116,8 +125,8 @@ class TTest(object):
                     origin = os.path.join(test_config['profile_path'],
                                           keep)
                     dest = os.path.join(setup.profile_dir, keep)
-                    logging.debug("Reinstalling %s on top of %s", origin,
-                                  dest)
+                    LOG.debug("Reinstalling %s on top of %s"
+                              % (origin, dest))
                     shutil.copy(origin, dest)
 
             # Run the test
@@ -146,14 +155,6 @@ class TTest(object):
                     ['python'] + test_config['setup'].split(),
                 )
 
-            mm_httpd = None
-
-            if test_config['name'] == 'media_tests':
-                from startup_test.media import media_manager
-                mm_httpd = media_manager.run_server(
-                    os.path.dirname(os.path.realpath(__file__))
-                )
-
             counter_management = None
             if counters:
                 counter_management = CounterManagement(
@@ -175,8 +176,6 @@ class TTest(object):
             finally:
                 if counter_management:
                     counter_management.stop()
-                if mm_httpd:
-                    mm_httpd.stop()
 
             if test_config['mainthread']:
                 rawlog = os.path.join(here, "mainthread_io.log")
@@ -196,7 +195,7 @@ class TTest(object):
                         if line.strip() == "":
                             continue
 
-                        print line
+                        print(line)
                         mainthread_error_count += 1
                     mozfile.remove(rawlog)
 
@@ -245,7 +244,7 @@ class TTest(object):
         )
         for c in test_results.all_counter_results:
             for key, value in c.items():
-                logging.debug("COUNTER %r: %s", key, value)
+                LOG.debug("COUNTER %r: %s" % (key, value))
 
         # return results
         return test_results

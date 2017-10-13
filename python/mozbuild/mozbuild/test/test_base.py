@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 
+from cStringIO import StringIO
 from mozfile.mozfile import NamedTemporaryFile
 
 from mozunit import main
@@ -28,6 +29,7 @@ from mozbuild.base import (
 
 from mozbuild.backend.configenvironment import ConfigEnvironment
 from buildconfig import topsrcdir, topobjdir
+import mozpack.path as mozpath
 
 
 curdir = os.path.dirname(__file__)
@@ -40,6 +42,7 @@ class TestMozbuildObject(unittest.TestCase):
         self._old_env = dict(os.environ)
         os.environ.pop('MOZCONFIG', None)
         os.environ.pop('MOZ_OBJDIR', None)
+        os.environ.pop('MOZ_CURRENT_PROJECT', None)
 
     def tearDown(self):
         os.chdir(self._old_cwd)
@@ -57,9 +60,10 @@ class TestMozbuildObject(unittest.TestCase):
 
             self.assertIsNotNone(base.topobjdir)
             self.assertEqual(len(base.topobjdir.split()), 1)
-            self.assertTrue(base.topobjdir.endswith(base._config_guess))
+            config_guess = base.resolve_config_guess()
+            self.assertTrue(base.topobjdir.endswith(config_guess))
             self.assertTrue(os.path.isabs(base.topobjdir))
-            self.assertTrue(base.topobjdir.startswith(topsrcdir))
+            self.assertTrue(base.topobjdir.startswith(base.topsrcdir))
 
     def test_objdir_trailing_slash(self):
         """Trailing slashes in topobjdir should be removed."""
@@ -70,7 +74,7 @@ class TestMozbuildObject(unittest.TestCase):
             mozconfig.flush()
             os.environ[b'MOZCONFIG'] = mozconfig.name
 
-            self.assertEqual(base.topobjdir, os.path.join(base.topsrcdir,
+            self.assertEqual(base.topobjdir, mozpath.join(base.topsrcdir,
                 'foo'))
             self.assertTrue(base.topobjdir.endswith('foo'))
 
@@ -113,7 +117,7 @@ class TestMozbuildObject(unittest.TestCase):
             obj = MozbuildObject.from_environment(
                 detect_virtualenv_mozinfo=False)
 
-            self.assertEqual(obj.topobjdir, topobjdir)
+            self.assertEqual(obj.topobjdir, mozpath.normsep(topobjdir))
         finally:
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
@@ -126,7 +130,7 @@ class TestMozbuildObject(unittest.TestCase):
             with open(mozconfig, 'wt') as fh:
                 fh.write('mk_add_options MOZ_OBJDIR=./objdir')
 
-            topobjdir = os.path.join(d, 'objdir')
+            topobjdir = mozpath.join(d, 'objdir')
             os.mkdir(topobjdir)
 
             mozinfo = os.path.join(topobjdir, 'mozinfo.json')
@@ -216,8 +220,8 @@ class TestMozbuildObject(unittest.TestCase):
 
             o = MachCommandBase(context)
 
-            self.assertEqual(o.topobjdir, topobjdir)
-            self.assertEqual(o.topsrcdir, topsrcdir)
+            self.assertEqual(o.topobjdir, mozpath.normsep(topobjdir))
+            self.assertEqual(o.topsrcdir, mozpath.normsep(topsrcdir))
 
         finally:
             os.chdir(self._old_cwd)
@@ -270,21 +274,30 @@ class TestMozbuildObject(unittest.TestCase):
 
             os.chdir(topobjdir)
 
-            with self.assertRaises(ObjdirMismatchException):
-                MozbuildObject.from_environment(detect_virtualenv_mozinfo=False)
+            class MockMachContext(object):
+                pass
+
+            context = MockMachContext()
+            context.cwd = topobjdir
+            context.topdir = topsrcdir
+            context.settings = None
+            context.log_manager = None
+            context.detect_virtualenv_mozinfo=False
+
+            stdout = sys.stdout
+            sys.stdout = StringIO()
+            try:
+                with self.assertRaises(SystemExit):
+                    MachCommandBase(context)
+
+                self.assertTrue(sys.stdout.getvalue().startswith(
+                    'Ambiguous object directory detected.'))
+            finally:
+                sys.stdout = stdout
 
         finally:
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
-
-    def test_config_guess(self):
-        # It's difficult to test for exact values from the output of
-        # config.guess because they vary depending on platform.
-        base = self.get_base()
-        result = base._config_guess
-
-        self.assertIsNotNone(result)
-        self.assertGreater(len(result), 0)
 
     def test_config_environment(self):
         base = self.get_base(topobjdir=topobjdir)

@@ -34,7 +34,7 @@ X11TextureData::X11TextureData(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
 }
 
 bool
-X11TextureData::Lock(OpenMode aMode, FenceHandle*)
+X11TextureData::Lock(OpenMode aMode)
 {
   return true;
 }
@@ -47,6 +47,16 @@ X11TextureData::Unlock()
   }
 }
 
+void
+X11TextureData::FillInfo(TextureData::Info& aInfo) const
+{
+  aInfo.size = mSize;
+  aInfo.format = mFormat;
+  aInfo.supportsMoz2D = true;
+  aInfo.hasIntermediateBuffer = false;
+  aInfo.hasSynchronization = false;
+  aInfo.canExposeMappedData = false;
+}
 
 bool
 X11TextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
@@ -96,13 +106,14 @@ X11TextureData::UpdateFromSurface(gfx::SourceSurface* aSurface)
 }
 
 void
-X11TextureData::Deallocate(ISurfaceAllocator*)
+X11TextureData::Deallocate(LayersIPCChannel*)
 {
   mSurface = nullptr;
 }
 
 TextureData*
-X11TextureData::CreateSimilar(ISurfaceAllocator* aAllocator,
+X11TextureData::CreateSimilar(LayersIPCChannel* aAllocator,
+                              LayersBackend aLayersBackend,
                               TextureFlags aFlags,
                               TextureAllocationFlags aAllocFlags) const
 {
@@ -111,7 +122,7 @@ X11TextureData::CreateSimilar(ISurfaceAllocator* aAllocator,
 
 X11TextureData*
 X11TextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                       TextureFlags aFlags, ISurfaceAllocator* aAllocator)
+                       TextureFlags aFlags, LayersIPCChannel* aAllocator)
 {
   MOZ_ASSERT(aSize.width >= 0 && aSize.height >= 0);
   if (aSize.width <= 0 || aSize.height <= 0 ||

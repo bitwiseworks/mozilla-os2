@@ -4,7 +4,6 @@
 
 #include "mozilla/ModuleUtils.h"
 #include "nsAuth.h"
-#include "nsAutoPtr.h"
 
 //-----------------------------------------------------------------------------
 
@@ -220,13 +219,12 @@ static const mozilla::Module::ContractIDEntry kAuthContracts[] = {
 };
 
 //-----------------------------------------------------------------------------
-PRLogModuleInfo *gNegotiateLog;
+mozilla::LazyLogModule gNegotiateLog("negotiateauth");
 
 // setup nspr logging ...
 static nsresult
 InitNegotiateAuth()
 {
-  gNegotiateLog = PR_NewLogModule("negotiateauth");
   return NS_OK;
 }
 

@@ -6,14 +6,14 @@
 
 // Check the output of getAnimationPlayersForNode
 
-add_task(function*() {
+add_task(function* () {
   let {client, walker, animations} =
     yield initAnimationsFrontForUrl(MAIN_DOMAIN + "animation.html");
 
   yield theRightNumberOfPlayersIsReturned(walker, animations);
   yield playersCanBePausedAndResumed(walker, animations);
 
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });
 

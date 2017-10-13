@@ -6,6 +6,8 @@
 
 #include "vm/GeneratorObject.h"
 
+#include "jsobj.h"
+
 #include "jsatominlines.h"
 #include "jsscriptinlines.h"
 
@@ -24,7 +26,7 @@ GeneratorObject::create(JSContext* cx, AbstractFramePtr frame)
     RootedNativeObject obj(cx);
     if (frame.script()->isStarGenerator()) {
         RootedValue pval(cx);
-        RootedObject fun(cx, frame.fun());
+        RootedObject fun(cx, frame.callee());
         // FIXME: This would be faster if we could avoid doing a lookup to get
         // the prototype for the instance.  Bug 906600.
         if (!GetProperty(cx, fun, fun, cx->names().prototype, &pval))
@@ -49,7 +51,7 @@ GeneratorObject::create(JSContext* cx, AbstractFramePtr frame)
     GeneratorObject* genObj = &obj->as<GeneratorObject>();
     genObj->setCallee(*frame.callee());
     genObj->setNewTarget(frame.newTarget());
-    genObj->setScopeChain(*frame.scopeChain());
+    genObj->setEnvironmentChain(*frame.environmentChain());
     if (frame.script()->needsArgsObj())
         genObj->setArgsObj(frame.argsObj());
     genObj->clearExpressionStack();
@@ -74,7 +76,7 @@ GeneratorObject::suspend(JSContext* cx, HandleObject obj, AbstractFramePtr frame
 
     uint32_t yieldIndex = GET_UINT24(pc);
     genObj->setYieldIndex(yieldIndex);
-    genObj->setScopeChain(*frame.scopeChain());
+    genObj->setEnvironmentChain(*frame.environmentChain());
 
     if (nvalues) {
         ArrayObject* stack = NewDenseCopiedArray(cx, nvalues, vp);
@@ -152,8 +154,8 @@ GeneratorObject::resume(JSContext* cx, InterpreterActivation& activation,
 
     RootedFunction callee(cx, &genObj->callee());
     RootedValue newTarget(cx, genObj->newTarget());
-    RootedObject scopeChain(cx, &genObj->scopeChain());
-    if (!activation.resumeGeneratorFrame(callee, newTarget, scopeChain))
+    RootedObject envChain(cx, &genObj->environmentChain());
+    if (!activation.resumeGeneratorFrame(callee, newTarget, envChain))
         return false;
     activation.regs().fp()->setResumedGenerator();
 
@@ -214,14 +216,10 @@ LegacyGeneratorObject::close(JSContext* cx, HandleObject obj)
     MOZ_ASSERT(closeValue.isObject());
     MOZ_ASSERT(closeValue.toObject().is<JSFunction>());
 
-    InvokeArgs args(cx);
-    if (!args.init(cx, 0))
-        return false;
+    FixedInvokeArgs<0> args(cx);
 
-    args.setCallee(closeValue);
-    args.setThis(ObjectValue(*genObj));
-
-    return Invoke(cx, args);
+    RootedValue v(cx, ObjectValue(*genObj));
+    return Call(cx, closeValue, v, args, &v);
 }
 
 const Class LegacyGeneratorObject::class_ = {
@@ -264,8 +262,8 @@ NewSingletonObjectWithObjectPrototype(JSContext* cx, Handle<GlobalObject*> globa
     return NewObjectWithGivenProto<PlainObject>(cx, proto, SingletonObject);
 }
 
-static JSObject*
-NewSingletonObjectWithFunctionPrototype(JSContext* cx, Handle<GlobalObject*> global)
+JSObject*
+js::NewSingletonObjectWithFunctionPrototype(JSContext* cx, Handle<GlobalObject*> global)
 {
     RootedObject proto(cx, global->getOrCreateFunctionPrototype(cx));
     if (!proto)
@@ -304,14 +302,20 @@ GlobalObject::initStarGenerators(JSContext* cx, Handle<GlobalObject*> global)
                                                                            iteratorProto));
     if (!genObjectProto)
         return false;
-    if (!DefinePropertiesAndFunctions(cx, genObjectProto, nullptr, star_generator_methods))
+    if (!DefinePropertiesAndFunctions(cx, genObjectProto, nullptr, star_generator_methods) ||
+        !DefineToStringTag(cx, genObjectProto, cx->names().Generator))
+    {
         return false;
+    }
 
     RootedObject genFunctionProto(cx, NewSingletonObjectWithFunctionPrototype(cx, global));
     if (!genFunctionProto || !genFunctionProto->setDelegate(cx))
         return false;
-    if (!LinkConstructorAndPrototype(cx, genFunctionProto, genObjectProto))
+    if (!LinkConstructorAndPrototype(cx, genFunctionProto, genObjectProto) ||
+        !DefineToStringTag(cx, genFunctionProto, cx->names().GeneratorFunction))
+    {
         return false;
+    }
 
     RootedValue function(cx, global->getConstructor(JSProto_Function));
     if (!function.toObjectOrNull())
@@ -320,7 +324,8 @@ GlobalObject::initStarGenerators(JSContext* cx, Handle<GlobalObject*> global)
     RootedAtom name(cx, cx->names().GeneratorFunction);
     RootedObject genFunction(cx, NewFunctionWithProto(cx, Generator, 1,
                                                       JSFunction::NATIVE_CTOR, nullptr, name,
-                                                      proto));
+                                                      proto, gc::AllocKind::FUNCTION,
+                                                      SingletonObject));
     if (!genFunction)
         return false;
     if (!LinkConstructorAndPrototype(cx, genFunction, genFunctionProto))
@@ -329,5 +334,34 @@ GlobalObject::initStarGenerators(JSContext* cx, Handle<GlobalObject*> global)
     global->setReservedSlot(STAR_GENERATOR_OBJECT_PROTO, ObjectValue(*genObjectProto));
     global->setReservedSlot(STAR_GENERATOR_FUNCTION, ObjectValue(*genFunction));
     global->setReservedSlot(STAR_GENERATOR_FUNCTION_PROTO, ObjectValue(*genFunctionProto));
+    return true;
+}
+
+MOZ_MUST_USE bool
+js::CheckStarGeneratorResumptionValue(JSContext* cx, HandleValue v)
+{
+    // yield/return value should be an Object.
+    if (!v.isObject())
+        return false;
+
+    JSObject* obj = &v.toObject();
+
+    // It should have `done` data property with boolean value.
+    Value doneVal;
+    if (!GetPropertyPure(cx, obj, NameToId(cx->names().done), &doneVal))
+        return false;
+    if (!doneVal.isBoolean())
+        return false;
+
+    // It should have `value` data property, but the type doesn't matter
+    JSObject* ignored;
+    Shape* shape;
+    if (!LookupPropertyPure(cx, obj, NameToId(cx->names().value), &ignored, &shape))
+        return false;
+    if (!shape)
+        return false;
+    if (!shape->hasDefaultGetter())
+        return false;
+
     return true;
 }

@@ -7,22 +7,22 @@
 // Get bookmark service
 try {
   var bmsvc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].getService(Ci.nsINavBookmarksService);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get nav-bookmarks-service\n");
 }
 
 // Get history service
 try {
   var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].getService(Ci.nsINavHistoryService);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get history service\n");
-} 
+}
 
 // Get tagging service
 try {
   var tagssvc = Cc["@mozilla.org/browser/tagging-service;1"].
                 getService(Ci.nsITaggingService);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get tagging service\n");
 }
 
@@ -61,16 +61,16 @@ function run_test() {
 
   // partial matches are okay
   query.searchTerms = "wal";
-  var result = histsvc.executeQuery(query, options);
-  var rootNode = result.root;
+  result = histsvc.executeQuery(query, options);
+  rootNode = result.root;
   rootNode.containerOpen = true;
   do_check_eq(rootNode.childCount, 1);
   rootNode.containerOpen = false;
 
   // case insensitive search term
   query.searchTerms = "WALRUS";
-  var result = histsvc.executeQuery(query, options);
-  var rootNode = result.root;
+  result = histsvc.executeQuery(query, options);
+  rootNode = result.root;
   rootNode.containerOpen = true;
   do_check_eq(rootNode.childCount, 1);
   do_check_eq(rootNode.getChild(0).itemId, b1);
@@ -78,8 +78,8 @@ function run_test() {
 
   // case insensitive tag
   query.searchTerms = "baboon";
-  var result = histsvc.executeQuery(query, options);
-  var rootNode = result.root;
+  result = histsvc.executeQuery(query, options);
+  rootNode = result.root;
   rootNode.containerOpen = true;
   do_check_eq(rootNode.childCount, 1);
   do_check_eq(rootNode.getChild(0).itemId, b1);

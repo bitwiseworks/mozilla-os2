@@ -303,7 +303,7 @@ FormHistory.prototype = {
 
     entryExists : function entryExists(name, value) {
         this.log("entryExists for " + name + "=" + value);
-        let [id, guid] = this.getExistingEntryID(name, value);
+        let [id] = this.getExistingEntryID(name, value);
         this.log("entryExists: id=" + id);
         return (id != -1);
     },
@@ -408,7 +408,7 @@ FormHistory.prototype = {
 
 
     observe : function observe(subject, topic, data) {
-        switch(topic) {
+        switch (topic) {
         case "nsPref:changed":
             this.updatePrefs();
             break;
@@ -548,7 +548,6 @@ FormHistory.prototype = {
         this.enabled        = Services.prefs.getBoolPref("browser.formfill.enable");
     },
 
-//**************************************************************************//
     // Database Creation & Access
 
     /*

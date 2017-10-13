@@ -19,13 +19,13 @@ public:
     , mShutdownBit(false)
   {}
 
-  virtual MediaDecoder* Clone(MediaDecoderOwner* aOwner) override {
+  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override {
     if (!IsOggEnabled()) {
       return nullptr;
     }
     return new OggDecoder(aOwner);
   }
-  virtual MediaDecoderStateMachine* CreateStateMachine() override;
+  MediaDecoderStateMachine* CreateStateMachine() override;
 
   // For yucky legacy reasons, the ogg decoder needs to do a cross-thread read
   // to check for shutdown while it hogs its own task queue. We don't want to
@@ -36,6 +36,14 @@ public:
     MonitorAutoLock lock(mShutdownBitMonitor);
     return mShutdownBit;
   }
+
+  // Returns true if aMIMEType is a type that we think we can render with the
+  // a platform decoder backend. If aCodecs is non emtpy, it is filled
+  // with a comma-delimited list of codecs to check support for.
+  static bool CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
+                                 const nsAString& aCodecs);
+
+  static bool IsEnabled();
 
 protected:
   void ShutdownBitChanged() override

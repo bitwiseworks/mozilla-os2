@@ -11,7 +11,7 @@ typedef CustomEventInit TestDictionaryTypedef;
 
 interface TestExternalInterface;
 
-[AvailableIn=PrivilegedApps, Pref="xyz"]
+[Pref="xyz"]
 interface TestRenamedInterface {
 };
 
@@ -117,6 +117,8 @@ callback TestOptionalArguments = void(optional DOMString aString,
                                       optional TestInterface? anInterface,
                                       optional TestInterface anotherInterface,
                                       optional long aLong);
+// If you add a new test callback, add it to the forceCallbackGeneration
+// method on TestInterface so it actually gets tested.
 
 TestInterface implements ImplementedInterface;
 
@@ -133,7 +135,6 @@ interface OnlyForUseInConstructor {
  Constructor(ArrayBuffer arrayBuf),
  Constructor(Uint8Array typedArr),
  // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
- AvailableIn=CertifiedApps,
  NamedConstructor=Test,
  NamedConstructor=Test(DOMString str),
  NamedConstructor=Test2(DictForConstructor dict, any any1, object obj1,
@@ -479,8 +480,12 @@ interface TestInterface {
   void passByteString(ByteString arg);
   void passNullableByteString(ByteString? arg);
   void passOptionalByteString(optional ByteString arg);
+  void passOptionalByteStringWithDefaultValue(optional ByteString arg = "abc");
   void passOptionalNullableByteString(optional ByteString? arg);
+  void passOptionalNullableByteStringWithDefaultValue(optional ByteString? arg = null);
   void passVariadicByteString(ByteString... arg);
+  void passOptionalUnionByteString(optional (ByteString or long) arg);
+  void passOptionalUnionByteStringWithDefaultValue(optional (ByteString or long) arg = "abc");
 
   // USVString types
   void passUSVS(USVString arg);
@@ -518,6 +523,33 @@ interface TestInterface {
   void passOptionalNullableTreatAsNullCallbackWithDefaultValue(optional TestTreatAsNullCallback? arg = null);
   attribute TestTreatAsNullCallback treatAsNullCallback;
   attribute TestTreatAsNullCallback? nullableTreatAsNullCallback;
+
+  // Force code generation of the various test callbacks we have.
+  void forceCallbackGeneration(TestIntegerReturn arg1,
+                               TestNullableIntegerReturn arg2,
+                               TestBooleanReturn arg3,
+                               TestFloatReturn arg4,
+                               TestStringReturn arg5,
+                               TestEnumReturn arg6,
+                               TestInterfaceReturn arg7,
+                               TestNullableInterfaceReturn arg8,
+                               TestExternalInterfaceReturn arg9,
+                               TestNullableExternalInterfaceReturn arg10,
+                               TestCallbackInterfaceReturn arg11,
+                               TestNullableCallbackInterfaceReturn arg12,
+                               TestCallbackReturn arg13,
+                               TestNullableCallbackReturn arg14,
+                               TestObjectReturn arg15,
+                               TestNullableObjectReturn arg16,
+                               TestTypedArrayReturn arg17,
+                               TestNullableTypedArrayReturn arg18,
+                               TestSequenceReturn arg19,
+                               TestNullableSequenceReturn arg20,
+                               TestIntegerArguments arg21,
+                               TestInterfaceArguments arg22,
+                               TestStringEnumArguments arg23,
+                               TestObjectArguments arg24,
+                               TestOptionalArguments arg25);
 
   // Any types
   void passAny(any arg);
@@ -612,7 +644,12 @@ interface TestInterface {
   //void passUnionWithSequence((sequence<object> or long) arg);
   void passUnionWithArrayBuffer((ArrayBuffer or long) arg);
   void passUnionWithString((DOMString or object) arg);
-  //void passUnionWithEnum((TestEnum or object) arg);
+  // Using an enum in a union.  Note that we use some enum not declared in our
+  // binding file, because UnionTypes.h will need to include the binding header
+  // for this enum.  Pick an enum from an interface that won't drag in too much
+  // stuff.
+  void passUnionWithEnum((SupportedType or object) arg);
+
   // Trying to use a callback in a union won't include the test
   // headers, unfortunately, so won't compile.
   //void passUnionWithCallback((TestCallback or long) arg);
@@ -632,6 +669,12 @@ interface TestInterface {
   void passUnionWithDefaultValue11(optional (unrestricted float or DOMString) arg = "");
   void passUnionWithDefaultValue12(optional (unrestricted float or DOMString) arg = 1);
   void passUnionWithDefaultValue13(optional (unrestricted float or DOMString) arg = Infinity);
+  void passUnionWithDefaultValue14(optional (double or ByteString) arg = "");
+  void passUnionWithDefaultValue15(optional (double or ByteString) arg = 1);
+  void passUnionWithDefaultValue16(optional (double or ByteString) arg = 1.5);
+  void passUnionWithDefaultValue17(optional (double or SupportedType) arg = "text/html");
+  void passUnionWithDefaultValue18(optional (double or SupportedType) arg = 1);
+  void passUnionWithDefaultValue19(optional (double or SupportedType) arg = 1.5);
 
   void passNullableUnionWithDefaultValue1(optional (double or DOMString)? arg = "");
   void passNullableUnionWithDefaultValue2(optional (double or DOMString)? arg = 1);
@@ -645,6 +688,14 @@ interface TestInterface {
   void passNullableUnionWithDefaultValue10(optional (unrestricted float or DOMString)? arg = "");
   void passNullableUnionWithDefaultValue11(optional (unrestricted float or DOMString)? arg = 1);
   void passNullableUnionWithDefaultValue12(optional (unrestricted float or DOMString)? arg = null);
+  void passNullableUnionWithDefaultValue13(optional (double or ByteString)? arg = "");
+  void passNullableUnionWithDefaultValue14(optional (double or ByteString)? arg = 1);
+  void passNullableUnionWithDefaultValue15(optional (double or ByteString)? arg = 1.5);
+  void passNullableUnionWithDefaultValue16(optional (double or ByteString)? arg = null);
+  void passNullableUnionWithDefaultValue17(optional (double or SupportedType)? arg = "text/html");
+  void passNullableUnionWithDefaultValue18(optional (double or SupportedType)? arg = 1);
+  void passNullableUnionWithDefaultValue19(optional (double or SupportedType)? arg = 1.5);
+  void passNullableUnionWithDefaultValue20(optional (double or SupportedType)? arg = null);
 
   void passSequenceOfUnions(sequence<(CanvasPattern or CanvasGradient)> arg);
   void passSequenceOfUnions2(sequence<(object or long)> arg);
@@ -754,6 +805,9 @@ interface TestInterface {
   static void staticMethod(boolean arg);
   static void staticMethodWithContext(any arg);
 
+  // Testing static method with a reserved C++ keyword as the name
+  static void assert(boolean arg);
+
   // Deprecated static methods and attributes
   [Deprecated="GetAttributeNode"]
   static attribute byte staticDeprecatedAttribute;
@@ -855,14 +909,24 @@ interface TestInterface {
   void prefable19();
   [Pref="abc.def", Func="TestFuncControlledMember", ChromeOnly]
   void prefable20();
-  [Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable21();
-  [Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable22();
-  [Pref="abc.def", Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable23();
-  [Pref="abc.def", Func="TestFuncControlledMember", AvailableIn=PrivilegedApps]
-  void prefable24();
+
+  // Conditionally exposed methods/attributes involving [SecureContext]
+  [SecureContext]
+  readonly attribute boolean conditionalOnSecureContext1;
+  [SecureContext, Pref="abc.def"]
+  readonly attribute boolean conditionalOnSecureContext2;
+  [SecureContext, Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  readonly attribute boolean conditionalOnSecureContext3;
+  [SecureContext, Pref="abc.def", Func="TestFuncControlledMember"]
+  readonly attribute boolean conditionalOnSecureContext4;
+  [SecureContext]
+  void conditionalOnSecureContext5();
+  [SecureContext, Pref="abc.def"]
+  void conditionalOnSecureContext6();
+  [SecureContext, Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  void conditionalOnSecureContext7();
+  [SecureContext, Pref="abc.def", Func="TestFuncControlledMember"]
+  void conditionalOnSecureContext8();
 
   // Miscellania
   [LenientThis] attribute long attrWithLenientThis;
@@ -879,6 +943,10 @@ interface TestInterface {
   [Throws] attribute boolean throwingAttr;
   [GetterThrows] attribute boolean throwingGetterAttr;
   [SetterThrows] attribute boolean throwingSetterAttr;
+  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
   legacycaller short(unsigned long arg1, TestInterface arg2);
   void passArgsWithDefaults(optional long arg1,
                             optional TestInterface? arg2 = null,
@@ -968,6 +1036,9 @@ dictionary Dict : ParentDict {
   DOMString otherStr = "def";
   DOMString? yetAnotherStr = null;
   DOMString template;
+  ByteString byteStr;
+  ByteString emptyByteStr = "";
+  ByteString otherByteStr = "def";
   object someObj;
   boolean prototype;
   object? anotherObj = null;
@@ -1079,6 +1150,15 @@ dictionary DictForConstructor {
   any any1 = null;
 };
 
+dictionary DictWithConditionalMembers {
+  [ChromeOnly]
+  long chromeOnlyMember;
+  [Func="TestFuncControlledMember"]
+  long funcControlledMember;
+  [ChromeOnly, Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  long chromeOnlyFuncControlledMember;
+};
+
 interface TestIndexedGetterInterface {
   getter long item(unsigned long idx);
   readonly attribute unsigned long length;
@@ -1127,16 +1207,6 @@ interface TestIndexedAndNamedGetterAndSetterInterface : TestIndexedSetterInterfa
   readonly attribute unsigned long length;
 };
 
-interface TestIndexedDeleterInterface {
-  deleter void delItem(unsigned long idx);
-  getter long (unsigned long index);
-};
-
-interface TestIndexedDeleterWithRetvalInterface {
-  deleter boolean delItem(unsigned long index);
-  getter long (unsigned long index);
-};
-
 interface TestNamedDeleterInterface {
   deleter void (DOMString name);
   getter long (DOMString name);
@@ -1144,13 +1214,6 @@ interface TestNamedDeleterInterface {
 
 interface TestNamedDeleterWithRetvalInterface {
   deleter boolean delNamedItem(DOMString name);
-  getter long (DOMString name);
-};
-
-interface TestIndexedAndNamedDeleterInterface {
-  deleter void (unsigned long index);
-  getter long (unsigned long index);
-  deleter void delNamedItem(DOMString name);
   getter long (DOMString name);
 };
 
@@ -1168,4 +1231,34 @@ interface TestDeprecatedInterface {
 
 [Constructor(Promise<void> promise)]
 interface TestInterfaceWithPromiseConstructorArg {
+};
+
+namespace TestNamespace {
+  readonly attribute boolean foo;
+  long bar();
+};
+
+partial namespace TestNamespace {
+  void baz();
+};
+
+[ClassString="RenamedNamespaceClassName"]
+namespace TestRenamedNamespace {
+};
+
+[ProtoObjectHack]
+namespace TestProtoObjectHackedNamespace {
+};
+
+[SecureContext]
+interface TestSecureContextInterface {
+  static void alsoSecureContext();
+};
+
+[Exposed=(Window,Worker)]
+interface TestWorkerExposedInterface {
+  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
 };

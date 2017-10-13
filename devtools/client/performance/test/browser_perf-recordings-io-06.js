@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests if the performance tool can import profiler data when Profiler is v2
  * and requires deflating, and has an extra thread that's a string. Not sure
@@ -83,7 +84,7 @@ var PROFILER_DATA = (function () {
   return data;
 })();
 
-var test = Task.async(function*() {
+var test = Task.async(function* () {
   let { target, panel, toolbox } = yield initPerformance(SIMPLE_URL);
   let { $, EVENTS, PerformanceController, DetailsView, JsCallTreeView } = panel.panelWin;
 
@@ -101,7 +102,7 @@ var test = Task.async(function*() {
 
   // Import recording.
 
-  let calltreeRendered = once(JsCallTreeView, EVENTS.JS_CALL_TREE_RENDERED);
+  let calltreeRendered = once(JsCallTreeView, EVENTS.UI_JS_CALL_TREE_RENDERED);
   let imported = once(PerformanceController, EVENTS.RECORDING_IMPORTED);
   yield PerformanceController.importRecording("", file);
 
@@ -138,3 +139,4 @@ function asyncCopy(data, file) {
 
   return deferred.promise;
 }
+/* eslint-enable */

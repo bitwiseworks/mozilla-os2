@@ -7,8 +7,11 @@
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 const BrowserLoaderModule = {};
 Cu.import("resource://devtools/client/shared/browser-loader.js", BrowserLoaderModule);
-const { require } = BrowserLoaderModule.BrowserLoader("resource://devtools/client/memory/", this);
-const { Task } = require("resource://gre/modules/Task.jsm");
+const { require } = BrowserLoaderModule.BrowserLoader({
+  baseURI: "resource://devtools/client/memory/",
+  window
+});
+const { Task } = require("devtools/shared/task");
 const { createFactory, createElement } = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
@@ -24,9 +27,9 @@ var gToolbox, gTarget, gFront, gHeapAnalysesClient;
 /**
  * Variables set by `initialize()`
  */
-var gStore, gRoot, gApp, gProvider, unsubscribe, isHighlighted;
+var gStore, gRoot, gApp, gProvider, unsubscribe, isHighlighted, telemetry;
 
-var initialize = Task.async(function*() {
+var initialize = Task.async(function* () {
   gRoot = document.querySelector("#app");
   gStore = Store();
   gApp = createElement(App, { toolbox: gToolbox, front: gFront, heapWorker: gHeapAnalysesClient });
@@ -35,20 +38,20 @@ var initialize = Task.async(function*() {
   unsubscribe = gStore.subscribe(onStateChange);
 });
 
-var destroy = Task.async(function*() {
+var destroy = Task.async(function* () {
   const ok = ReactDOM.unmountComponentAtNode(gRoot);
   assert(ok, "Should successfully unmount the memory tool's top level React component");
 
   unsubscribe();
 
-  gStore, gRoot, gApp, gProvider, unsubscribe, isHighlighted = null;
+  gStore, gRoot, gApp, gProvider, unsubscribe, isHighlighted;
 });
 
 /**
  * Fired on any state change, currently only handles toggling
  * the highlighting of the tool when recording allocations.
  */
-function onStateChange () {
+function onStateChange() {
   let isRecording = gStore.getState().allocations.recording;
   if (isRecording === isHighlighted) {
     return;

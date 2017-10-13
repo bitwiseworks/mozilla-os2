@@ -9,6 +9,7 @@
 #define SkLumaColorFilter_DEFINED
 
 #include "SkColorFilter.h"
+#include "SkRefCnt.h"
 
 /**
  *  Luminance-to-alpha color filter, as defined in
@@ -23,20 +24,23 @@
  */
 class SK_API SkLumaColorFilter : public SkColorFilter {
 public:
-    static SkColorFilter* Create();
+    static sk_sp<SkColorFilter> Make();
 
-    virtual void filterSpan(const SkPMColor src[], int count, SkPMColor[]) const SK_OVERRIDE;
+#ifdef SK_SUPPORT_LEGACY_COLORFILTER_PTR
+    static SkColorFilter* Create() { return Make().release(); }
+#endif
+
+    void filterSpan(const SkPMColor src[], int count, SkPMColor[]) const override;
 
 #if SK_SUPPORT_GPU
-    virtual GrEffect* asNewEffect(GrContext*) const SK_OVERRIDE;
+    sk_sp<GrFragmentProcessor> asFragmentProcessor(GrContext*) const override;
 #endif
 
     SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkLumaColorFilter)
 
 protected:
-    SkLumaColorFilter(SkReadBuffer& buffer);
-    virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer&) const override;
 
 private:
     SkLumaColorFilter();

@@ -9,6 +9,7 @@
 
 #include "GrTypes.h"
 #include "SkGeometry.h"
+#include "SkMathPriv.h"
 
 SkScalar GrPathUtils::scaleToleranceToSrc(SkScalar devTol,
                                           const SkMatrix& viewM,
@@ -29,8 +30,7 @@ SkScalar GrPathUtils::scaleToleranceToSrc(SkScalar devTol,
             stretch = SkMaxScalar(stretch, mat.mapRadius(SK_Scalar1));
         }
     }
-    srcTol = SkScalarDiv(srcTol, stretch);
-    return srcTol;
+    return srcTol / stretch;
 }
 
 static const int MAX_POINTS_PER_CURVE = 1 << 10;
@@ -44,22 +44,29 @@ uint32_t GrPathUtils::quadraticPointCount(const SkPoint points[],
     SkASSERT(tol > 0);
 
     SkScalar d = points[1].distanceToLineSegmentBetween(points[0], points[2]);
-    if (d <= tol) {
+    if (!SkScalarIsFinite(d)) {
+        return MAX_POINTS_PER_CURVE;
+    } else if (d <= tol) {
         return 1;
     } else {
         // Each time we subdivide, d should be cut in 4. So we need to
         // subdivide x = log4(d/tol) times. x subdivisions creates 2^(x)
         // points.
         // 2^(log4(x)) = sqrt(x);
-        int temp = SkScalarCeilToInt(SkScalarSqrt(SkScalarDiv(d, tol)));
-        int pow2 = GrNextPow2(temp);
-        // Because of NaNs & INFs we can wind up with a degenerate temp
-        // such that pow2 comes out negative. Also, our point generator
-        // will always output at least one pt.
-        if (pow2 < 1) {
-            pow2 = 1;
+        SkScalar divSqrt = SkScalarSqrt(d / tol);
+        if (((SkScalar)SK_MaxS32) <= divSqrt) {
+            return MAX_POINTS_PER_CURVE;
+        } else {
+            int temp = SkScalarCeilToInt(divSqrt);
+            int pow2 = GrNextPow2(temp);
+            // Because of NaNs & INFs we can wind up with a degenerate temp
+            // such that pow2 comes out negative. Also, our point generator
+            // will always output at least one pt.
+            if (pow2 < 1) {
+                pow2 = 1;
+            }
+            return SkTMin(pow2, MAX_POINTS_PER_CURVE);
         }
-        return SkTMin(pow2, MAX_POINTS_PER_CURVE);
     }
 }
 
@@ -99,18 +106,25 @@ uint32_t GrPathUtils::cubicPointCount(const SkPoint points[],
         points[1].distanceToLineSegmentBetweenSqd(points[0], points[3]),
         points[2].distanceToLineSegmentBetweenSqd(points[0], points[3]));
     d = SkScalarSqrt(d);
-    if (d <= tol) {
+    if (!SkScalarIsFinite(d)) {
+        return MAX_POINTS_PER_CURVE;
+    } else if (d <= tol) {
         return 1;
     } else {
-        int temp = SkScalarCeilToInt(SkScalarSqrt(SkScalarDiv(d, tol)));
-        int pow2 = GrNextPow2(temp);
-        // Because of NaNs & INFs we can wind up with a degenerate temp
-        // such that pow2 comes out negative. Also, our point generator
-        // will always output at least one pt.
-        if (pow2 < 1) {
-            pow2 = 1;
+        SkScalar divSqrt = SkScalarSqrt(d / tol);
+        if (((SkScalar)SK_MaxS32) <= divSqrt) {
+            return MAX_POINTS_PER_CURVE;
+        } else {
+            int temp = SkScalarCeilToInt(SkScalarSqrt(d / tol));
+            int pow2 = GrNextPow2(temp);
+            // Because of NaNs & INFs we can wind up with a degenerate temp
+            // such that pow2 comes out negative. Also, our point generator
+            // will always output at least one pt.
+            if (pow2 < 1) {
+                pow2 = 1;
+            }
+            return SkTMin(pow2, MAX_POINTS_PER_CURVE);
         }
-        return SkTMin(pow2, MAX_POINTS_PER_CURVE);
     }
 }
 
@@ -124,10 +138,10 @@ uint32_t GrPathUtils::generateCubicPoints(const SkPoint& p0,
     if (pointsLeft < 2 ||
         (p1.distanceToLineSegmentBetweenSqd(p0, p3) < tolSqd &&
          p2.distanceToLineSegmentBetweenSqd(p0, p3) < tolSqd)) {
-            (*points)[0] = p3;
-            *points += 1;
-            return 1;
-        }
+        (*points)[0] = p3;
+        *points += 1;
+        return 1;
+    }
     SkPoint q[] = {
         { SkScalarAve(p0.fX, p1.fX), SkScalarAve(p0.fY, p1.fY) },
         { SkScalarAve(p1.fX, p2.fX), SkScalarAve(p1.fY, p2.fY) },
@@ -166,6 +180,14 @@ int GrPathUtils::worstCasePointCount(const SkPath& path, int* subpaths,
             case SkPath::kLine_Verb:
                 pointCount += 1;
                 break;
+            case SkPath::kConic_Verb: {
+                SkScalar weight = iter.conicWeight();
+                SkAutoConicToQuads converter;
+                const SkPoint* quadPts = converter.computeQuads(pts, weight, 0.25f);
+                for (int i = 0; i < converter.countQuads(); ++i) {
+                    pointCount += quadraticPointCount(quadPts + 2*i, tol);
+                }
+            }
             case SkPath::kQuad_Verb:
                 pointCount += quadraticPointCount(pts, tol);
                 break;
@@ -231,7 +253,6 @@ void GrPathUtils::QuadUVMatrix::set(const SkPoint qPts[3]) {
             // distances to be to the left. This matches the non-degenerate
             // case.
             lineVec.setOrthog(lineVec, SkPoint::kLeft_Side);
-            lineVec.dot(qPts[0]);
             // first row
             fM[0] = 0;
             fM[1] = 0;
@@ -250,9 +271,7 @@ void GrPathUtils::QuadUVMatrix::set(const SkPoint qPts[3]) {
         double scale = 1.0/det;
 
         // compute adjugate matrix
-        double a0, a1, a2, a3, a4, a5, a6, a7, a8;
-        a0 = y1-y2;
-        a1 = x2-x1;
+        double a2, a3, a4, a5, a6, a7, a8;
         a2 = x1*y2-x2*y1;
 
         a3 = y2-y0;
@@ -273,14 +292,10 @@ void GrPathUtils::QuadUVMatrix::set(const SkPoint qPts[3]) {
         m[SkMatrix::kMScaleY] = (float)(a7*scale);
         m[SkMatrix::kMTransY] = (float)(a8*scale);
 
-        m[SkMatrix::kMPersp0] = (float)((a0 + a3 + a6)*scale);
-        m[SkMatrix::kMPersp1] = (float)((a1 + a4 + a7)*scale);
+        // kMPersp0 & kMPersp1 should algebraically be zero
+        m[SkMatrix::kMPersp0] = 0.0f;
+        m[SkMatrix::kMPersp1] = 0.0f;
         m[SkMatrix::kMPersp2] = (float)((a2 + a5 + a8)*scale);
-
-        // The matrix should not have perspective.
-        SkDEBUGCODE(static const SkScalar gTOL = 1.f / 100.f);
-        SkASSERT(SkScalarAbs(m.get(SkMatrix::kMPersp0)) < gTOL);
-        SkASSERT(SkScalarAbs(m.get(SkMatrix::kMPersp1)) < gTOL);
 
         // It may not be normalized to have 1.0 in the bottom right
         float m33 = m.get(SkMatrix::kMPersp2);
@@ -348,16 +363,16 @@ bool is_point_within_cubic_tangents(const SkPoint& a,
                                     const SkVector& ab,
                                     const SkVector& dc,
                                     const SkPoint& d,
-                                    SkPath::Direction dir,
+                                    SkPathPriv::FirstDirection dir,
                                     const SkPoint p) {
     SkVector ap = p - a;
     SkScalar apXab = ap.cross(ab);
-    if (SkPath::kCW_Direction == dir) {
+    if (SkPathPriv::kCW_FirstDirection == dir) {
         if (apXab > 0) {
             return false;
         }
     } else {
-        SkASSERT(SkPath::kCCW_Direction == dir);
+        SkASSERT(SkPathPriv::kCCW_FirstDirection == dir);
         if (apXab < 0) {
             return false;
         }
@@ -365,12 +380,12 @@ bool is_point_within_cubic_tangents(const SkPoint& a,
 
     SkVector dp = p - d;
     SkScalar dpXdc = dp.cross(dc);
-    if (SkPath::kCW_Direction == dir) {
+    if (SkPathPriv::kCW_FirstDirection == dir) {
         if (dpXdc < 0) {
             return false;
         }
     } else {
-        SkASSERT(SkPath::kCCW_Direction == dir);
+        SkASSERT(SkPathPriv::kCCW_FirstDirection == dir);
         if (dpXdc > 0) {
             return false;
         }
@@ -381,7 +396,7 @@ bool is_point_within_cubic_tangents(const SkPoint& a,
 void convert_noninflect_cubic_to_quads(const SkPoint p[4],
                                        SkScalar toleranceSqd,
                                        bool constrainWithinTangents,
-                                       SkPath::Direction dir,
+                                       SkPathPriv::FirstDirection dir,
                                        SkTArray<SkPoint, true>* quads,
                                        int sublevel = 0) {
 
@@ -391,8 +406,8 @@ void convert_noninflect_cubic_to_quads(const SkPoint p[4],
     SkVector ab = p[1] - p[0];
     SkVector dc = p[2] - p[3];
 
-    if (ab.isZero()) {
-        if (dc.isZero()) {
+    if (ab.lengthSqd() < SK_ScalarNearlyZero) {
+        if (dc.lengthSqd() < SK_ScalarNearlyZero) {
             SkPoint* degQuad = quads->push_back_n(3);
             degQuad[0] = p[0];
             degQuad[1] = p[0];
@@ -401,7 +416,7 @@ void convert_noninflect_cubic_to_quads(const SkPoint p[4],
         }
         ab = p[2] - p[0];
     }
-    if (dc.isZero()) {
+    if (dc.lengthSqd() < SK_ScalarNearlyZero) {
         dc = p[1] - p[3];
     }
 
@@ -528,68 +543,36 @@ void convert_noninflect_cubic_to_quads(const SkPoint p[4],
 
 void GrPathUtils::convertCubicToQuads(const SkPoint p[4],
                                       SkScalar tolScale,
-                                      bool constrainWithinTangents,
-                                      SkPath::Direction dir,
                                       SkTArray<SkPoint, true>* quads) {
     SkPoint chopped[10];
     int count = SkChopCubicAtInflections(p, chopped);
 
-    // base tolerance is 1 pixel.
-    static const SkScalar kTolerance = SK_Scalar1;
-    const SkScalar tolSqd = SkScalarSquare(SkScalarMul(tolScale, kTolerance));
+    const SkScalar tolSqd = SkScalarSquare(tolScale);
 
     for (int i = 0; i < count; ++i) {
         SkPoint* cubic = chopped + 3*i;
-        convert_noninflect_cubic_to_quads(cubic, tolSqd, constrainWithinTangents, dir, quads);
+        // The direction param is ignored if the third param is false.
+        convert_noninflect_cubic_to_quads(cubic, tolSqd, false,
+                                          SkPathPriv::kCCW_FirstDirection, quads);
     }
+}
 
+void GrPathUtils::convertCubicToQuadsConstrainToTangents(const SkPoint p[4],
+                                                         SkScalar tolScale,
+                                                         SkPathPriv::FirstDirection dir,
+                                                         SkTArray<SkPoint, true>* quads) {
+    SkPoint chopped[10];
+    int count = SkChopCubicAtInflections(p, chopped);
+
+    const SkScalar tolSqd = SkScalarSquare(tolScale);
+
+    for (int i = 0; i < count; ++i) {
+        SkPoint* cubic = chopped + 3*i;
+        convert_noninflect_cubic_to_quads(cubic, tolSqd, true, dir, quads);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-enum CubicType {
-    kSerpentine_CubicType,
-    kCusp_CubicType,
-    kLoop_CubicType,
-    kQuadratic_CubicType,
-    kLine_CubicType,
-    kPoint_CubicType
-};
-
-// discr(I) = d0^2 * (3*d1^2 - 4*d0*d2)
-// Classification:
-// discr(I) > 0        Serpentine
-// discr(I) = 0        Cusp
-// discr(I) < 0        Loop
-// d0 = d1 = 0         Quadratic
-// d0 = d1 = d2 = 0    Line
-// p0 = p1 = p2 = p3   Point
-static CubicType classify_cubic(const SkPoint p[4], const SkScalar d[3]) {
-    if (p[0] == p[1] && p[0] == p[2] && p[0] == p[3]) {
-        return kPoint_CubicType;
-    }
-    const SkScalar discr = d[0] * d[0] * (3.f * d[1] * d[1] - 4.f * d[0] * d[2]);
-    if (discr > SK_ScalarNearlyZero) {
-        return kSerpentine_CubicType;
-    } else if (discr < -SK_ScalarNearlyZero) {
-        return kLoop_CubicType;
-    } else {
-        if (0.f == d[0] && 0.f == d[1]) {
-            return (0.f == d[2] ? kLine_CubicType : kQuadratic_CubicType);
-        } else {
-            return kCusp_CubicType;
-        }
-    }
-}
-
-// Assumes the third component of points is 1.
-// Calcs p0 . (p1 x p2)
-static SkScalar calc_dot_cross_cubic(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2) {
-    const SkScalar xComp = p0.fX * (p1.fY - p2.fY);
-    const SkScalar yComp = p0.fY * (p2.fX - p1.fX);
-    const SkScalar wComp = p1.fX * p2.fY - p1.fY * p2.fX;
-    return (xComp + yComp + wComp);
-}
 
 // Solves linear system to extract klm
 // P.K = k (similarly for l, m)
@@ -735,34 +718,6 @@ static void set_quadratic_klm(const SkScalar d[3], SkScalar k[4], SkScalar l[4],
     }
 }
 
-// Calc coefficients of I(s,t) where roots of I are inflection points of curve
-// I(s,t) = t*(3*d0*s^2 - 3*d1*s*t + d2*t^2)
-// d0 = a1 - 2*a2+3*a3
-// d1 = -a2 + 3*a3
-// d2 = 3*a3
-// a1 = p0 . (p3 x p2)
-// a2 = p1 . (p0 x p3)
-// a3 = p2 . (p1 x p0)
-// Places the values of d1, d2, d3 in array d passed in
-static void calc_cubic_inflection_func(const SkPoint p[4], SkScalar d[3]) {
-    SkScalar a1 = calc_dot_cross_cubic(p[0], p[3], p[2]);
-    SkScalar a2 = calc_dot_cross_cubic(p[1], p[0], p[3]);
-    SkScalar a3 = calc_dot_cross_cubic(p[2], p[1], p[0]);
-
-    // need to scale a's or values in later calculations will grow to high
-    SkScalar max = SkScalarAbs(a1);
-    max = SkMaxScalar(max, SkScalarAbs(a2));
-    max = SkMaxScalar(max, SkScalarAbs(a3));
-    max = 1.f/max;
-    a1 = a1 * max;
-    a2 = a2 * max;
-    a3 = a3 * max;
-
-    d[2] = 3.f * a3;
-    d[1] = d[2] - a2;
-    d[0] = d[1] - a2 + a1;
-}
-
 int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[10], SkScalar klm[9],
                                              SkScalar klm_rev[3]) {
     // Variable to store the two parametric values at the loop double point
@@ -770,12 +725,10 @@ int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[1
     SkScalar largeS = 0.f;
 
     SkScalar d[3];
-    calc_cubic_inflection_func(src, d);
-
-    CubicType cType = classify_cubic(src, d);
+    SkCubicType cType = SkClassifyCubic(src, d);
 
     int chop_count = 0;
-    if (kLoop_CubicType == cType) {
+    if (kLoop_SkCubicType == cType) {
         SkScalar tempSqrt = SkScalarSqrt(4.f * d[0] * d[2] - 3.f * d[1] * d[1]);
         SkScalar ls = d[1] - tempSqrt;
         SkScalar lt = 2.f * d[0];
@@ -834,14 +787,14 @@ int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[1
         SkScalar controlL[4];
         SkScalar controlM[4];
 
-        if (kSerpentine_CubicType == cType || (kCusp_CubicType == cType && 0.f != d[0])) {
+        if (kSerpentine_SkCubicType == cType || (kCusp_SkCubicType == cType && 0.f != d[0])) {
             set_serp_klm(d, controlK, controlL, controlM);
-        } else if (kLoop_CubicType == cType) {
+        } else if (kLoop_SkCubicType == cType) {
             set_loop_klm(d, controlK, controlL, controlM);
-        } else if (kCusp_CubicType == cType) {
+        } else if (kCusp_SkCubicType == cType) {
             SkASSERT(0.f == d[0]);
             set_cusp_klm(d, controlK, controlL, controlM);
-        } else if (kQuadratic_CubicType == cType) {
+        } else if (kQuadratic_SkCubicType == cType) {
             set_quadratic_klm(d, controlK, controlL, controlM);
         }
 
@@ -852,22 +805,20 @@ int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[1
 
 void GrPathUtils::getCubicKLM(const SkPoint p[4], SkScalar klm[9]) {
     SkScalar d[3];
-    calc_cubic_inflection_func(p, d);
-
-    CubicType cType = classify_cubic(p, d);
+    SkCubicType cType = SkClassifyCubic(p, d);
 
     SkScalar controlK[4];
     SkScalar controlL[4];
     SkScalar controlM[4];
 
-    if (kSerpentine_CubicType == cType || (kCusp_CubicType == cType && 0.f != d[0])) {
+    if (kSerpentine_SkCubicType == cType || (kCusp_SkCubicType == cType && 0.f != d[0])) {
         set_serp_klm(d, controlK, controlL, controlM);
-    } else if (kLoop_CubicType == cType) {
+    } else if (kLoop_SkCubicType == cType) {
         set_loop_klm(d, controlK, controlL, controlM);
-    } else if (kCusp_CubicType == cType) {
+    } else if (kCusp_SkCubicType == cType) {
         SkASSERT(0.f == d[0]);
         set_cusp_klm(d, controlK, controlL, controlM);
-    } else if (kQuadratic_CubicType == cType) {
+    } else if (kQuadratic_SkCubicType == cType) {
         set_quadratic_klm(d, controlK, controlL, controlM);
     }
 
