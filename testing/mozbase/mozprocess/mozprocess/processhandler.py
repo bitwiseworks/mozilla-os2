@@ -22,6 +22,7 @@ MOZPROCESS_DEBUG = os.getenv("MOZPROCESS_DEBUG")
 
 # We dont use mozinfo because it is expensive to import, see bug 933558.
 isWin = os.name == "nt"
+isOs2 = os.name == "os2"
 isPosix = os.name == "posix" or os.name == "os2" # includes MacOS X and OS/2
 
 if isWin:
@@ -739,7 +740,12 @@ falling back to not using job objects for managing child processes"""
 
         if isPosix:
             # Keep track of the initial process group in case the process detaches itself
-            self.proc.pgid = os.getpgid(self.proc.pid)
+            try:
+                self.proc.pgid = os.getpgid(self.proc.pid)
+            except OSError as e:
+                # On OS/2 this is returned if the process exits too early, consume it
+                if not isOs2 or e.errno != 13:
+                    raise
             self.proc.detached_pid = None
 
         self.processOutput(timeout=timeout, outputTimeout=outputTimeout)
@@ -912,12 +918,15 @@ class ProcessReader(object):
         return thread
 
     def _read_stream(self, stream, queue, callback):
-        while True:
-            line = stream.readline()
-            if not line:
-                break
-            queue.put((line, callback))
-        stream.close()
+        # The stream could be already closed by this method in another ProcessReader
+        # invocation (from a previous ProcessHandlerMixin.processOutput call).
+        if not stream.closed:
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                queue.put((line, callback))
+            stream.close()
 
     def start(self, proc):
         queue = Queue()
