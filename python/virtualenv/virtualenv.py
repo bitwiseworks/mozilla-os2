@@ -763,7 +763,7 @@ def call_subprocess(cmd, show_stdout=True,
 
         stdout = proc.stdout
         encoding = sys.getdefaultencoding()
-        fs_encoding = sys.getfilesystemencoding()
+        fs_encoding = sys.getfilesystemencoding() or encoding
         while 1:
             line = stdout.readline()
             try:
@@ -1389,7 +1389,7 @@ def install_python(home_dir, lib_dir, inc_dir, bin_dir, site_packages, clear, sy
     proc_stdout = os.path.normcase(os.path.abspath(proc_stdout))
     norm_home_dir = os.path.normcase(os.path.abspath(home_dir))
     if hasattr(norm_home_dir, 'decode'):
-        norm_home_dir = norm_home_dir.decode(sys.getfilesystemencoding())
+        norm_home_dir = norm_home_dir.decode(sys.getfilesystemencoding() or sys.getdefaultencoding())
     if proc_stdout != norm_home_dir:
         logger.fatal(
             'ERROR: The executable %s is not functioning' % py_executable)
@@ -1458,7 +1458,7 @@ def install_activate(home_dir, bin_dir, prompt=None):
 
 def install_files(home_dir, bin_dir, prompt, files):
     if hasattr(home_dir, 'decode'):
-        home_dir = home_dir.decode(sys.getfilesystemencoding())
+        home_dir = home_dir.decode(sys.getfilesystemencoding() or sys.getdefaultencoding())
     vname = os.path.basename(home_dir)
     for name, content in files.items():
         content = content.replace('__VIRTUAL_PROMPT__', prompt or '')
