@@ -26,6 +26,7 @@
 
 #ifdef XP_OS2
 # define INCL_BASE
+# define INCL_EXAPIS
 # define INCL_PM
 # include <os2.h>
 # undef ADDRESS // used as an identifier somewhere

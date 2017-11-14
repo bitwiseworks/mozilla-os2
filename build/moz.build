@@ -10,7 +10,7 @@ with Files('**'):
 # This cannot be named "build" because of bug 922191.
 SPHINX_TREES['buildsystem'] = 'docs'
 
-if CONFIG['OS_ARCH'] in ('WINNT', 'OS2'):
+if CONFIG['OS_ARCH'] in ('WINNT'):
     DIRS += ['win32']
 else:
     DIRS += ['unix']

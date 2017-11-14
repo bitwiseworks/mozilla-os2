@@ -14,6 +14,8 @@
 #if defined(XP_WIN)
 #include "jswin.h"
 #include <psapi.h>
+#elif defined(XP_OS2)
+// Nothing here
 #elif defined(SOLARIS)
 // This test doesn't apply to Solaris.
 #elif defined(XP_UNIX)
@@ -39,6 +41,8 @@ BEGIN_TEST(testGCAllocator)
 #  else // Various APIs are unavailable. This test is disabled.
     return true;
 #  endif
+#elif defined(XP_OS2)
+    PageSize = 4096; // Always 4K
 #elif defined(SOLARIS)
     return true;
 #elif defined(XP_UNIX)
@@ -301,6 +305,30 @@ void* mapMemory(size_t length) { return nullptr; }
 void unmapPages(void* p, size_t size) { }
 
 #  endif
+#elif defined(XP_OS2)
+
+void*
+mapMemoryAt(void* desired, size_t length)
+{
+    void *tmp = desired;
+    APIRET arc = DosAllocMemEx(&tmp, length, OBJ_LOCATION | OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE);
+    return arc == NO_ERROR ? tmp : nullptr;
+}
+
+void*
+mapMemory(size_t length)
+{
+    void *tmp;
+    APIRET arc = DosAllocMem(&tmp, length, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE);
+    return arc == NO_ERROR ? tmp : nullptr;
+}
+
+void
+unmapPages(void* p, size_t size)
+{
+    MOZ_ALWAYS_TRUE(DosFreeMem(p) == NO_ERROR);
+}
+
 #elif defined(SOLARIS) // This test doesn't apply to Solaris.
 
 void* mapMemoryAt(void* desired, size_t length) { return nullptr; }

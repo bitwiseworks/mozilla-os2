@@ -251,6 +251,12 @@ MakeRegionExecutable(void*)
 #define PAGESIZE 0x1000
 static unsigned long rc = 0;
 
+static inline unsigned long
+PageSize()
+{
+  return PAGESIZE;
+}
+
 char * LastErrMsg()
 {
   char * errmsg = (char *)malloc(16);
@@ -554,26 +560,27 @@ TestPage(const char* aPageLabel, uintptr_t aPageAddr, int aShouldSucceed)
       unsigned char scratch;
       switch (test) {
         case 0: scratch = *(volatile unsigned char *)opaddr; break;
-        case 1: ((void (*)())opaddr)(); break;
+        case 1: JumpTo(opaddr); break;
         case 2: *(volatile unsigned char *)opaddr = 0; break;
         default: abort();
       }
+      (void)scratch;
     }
 
     if (code) {
-      if (should_succeed) {
+      if (aShouldSucceed) {
         printf("TEST-UNEXPECTED-FAIL | %s %s | exception code %x\n",
-               oplabel, pagelabel, code);
+               oplabel, aPageLabel, code);
         failed = true;
       } else {
         printf("TEST-PASS | %s %s | exception code %x\n",
-               oplabel, pagelabel, code);
+               oplabel, aPageLabel, code);
       }
     } else {
-      if (should_succeed) {
-        printf("TEST-PASS | %s %s\n", oplabel, pagelabel);
+      if (aShouldSucceed) {
+        printf("TEST-PASS | %s %s\n", oplabel, aPageLabel);
       } else {
-        printf("TEST-UNEXPECTED-FAIL | %s %s\n", oplabel, pagelabel);
+        printf("TEST-UNEXPECTED-FAIL | %s %s\n", oplabel, aPageLabel);
         failed = true;
       }
       DosUnsetExceptionHandler(&xcpt.regrec);

@@ -58,8 +58,8 @@ static const int MaxLastDitchAttempts = 32;
 #if !defined(XP_OS2)
 static void GetNewChunk(void** aAddress, void** aRetainedAddr, size_t size, size_t alignment);
 static void* MapAlignedPagesSlow(size_t size, size_t alignment);
-static void* MapAlignedPagesLastDitch(size_t size, size_t alignment);
 #endif
+static void* MapAlignedPagesLastDitch(size_t size, size_t alignment);
 
 size_t
 SystemPageSize()
@@ -85,13 +85,11 @@ OffsetFromAligned(void* p, size_t alignment)
     return uintptr_t(p) % alignment;
 }
 
-#if !defined(XP_OS2)
 void*
 TestMapAlignedPagesLastDitch(size_t size, size_t alignment)
 {
     return MapAlignedPagesLastDitch(size, alignment);
 }
-#endif
 
 #if defined(XP_WIN)
 
@@ -471,6 +469,15 @@ MapAlignedPages(size_t size, size_t alignment)
     addr = (addr + (alignment - 1)) & ~(alignment - 1);
 
     return reinterpret_cast<void *>(addr);
+}
+
+static void*
+MapAlignedPagesLastDitch(size_t size, size_t alignment)
+{
+    // TODO: Needed for jsapi-tests/testGCAllocator.cpp so far so make it a
+    // no-op. But we might want to make it work like on other platforms
+    // (together with MapAlignedPagesSlow and friends).
+    return nullptr;
 }
 
 bool

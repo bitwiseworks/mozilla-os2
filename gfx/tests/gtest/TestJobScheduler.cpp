@@ -3,12 +3,17 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
+#if defined(__OS2__)
+#define INCL_DOS
+#include <os2.h>
+#endif
+
 #include "gtest/gtest.h"
 #include "gmock/gmock.h"
 
 #include "mozilla/gfx/JobScheduler.h"
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__OS2__)
 #include <pthread.h>
 #include <sched.h>
 #endif
@@ -27,7 +32,11 @@ void MaybeYieldThread()
 {
 #ifndef WIN32
   if (rand() % 5 == 0) {
+#ifdef __OS2__
+    DosSleep(1);
+#else
     sched_yield();
+#endif
   }
 #endif
 }
