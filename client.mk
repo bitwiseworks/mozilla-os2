@@ -303,7 +303,6 @@ CONFIG_STATUS_DEPS := \
   $(wildcard $(TOPSRCDIR)/*/confvars.sh) \
   $(CONFIGURES) \
   $(TOPSRCDIR)/CLOBBER \
-  $(TOPSRCDIR)/nsprpub/configure \
   $(TOPSRCDIR)/config/milestone.txt \
   $(TOPSRCDIR)/browser/config/version.txt \
   $(TOPSRCDIR)/browser/config/version_display.txt \
