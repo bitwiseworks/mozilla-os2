@@ -99,7 +99,7 @@ def checkMkdir(work, debug=False):
     logging.debug("Testing: checkMkdir")
 
     # On Windows, don't convert paths to POSIX
-    skipposix = sys.platform == "win32"
+    skipposix = sys.platform == "win32" or os.name == "os2"
     if skipposix:
         path = os.path.abspath(__file__)
         dirname_fun = os.path.dirname
