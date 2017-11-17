@@ -316,6 +316,9 @@ class TestMozbuildObject(unittest.TestCase):
         elif sys.platform.startswith(('win32', 'cygwin')):
             substs.append(('OS_ARCH', 'WINNT'))
             substs.append(('BIN_SUFFIX', '.exe'))
+        elif os.name == 'os2':
+            substs.append(('OS_ARCH', 'OS2'))
+            substs.append(('BIN_SUFFIX', '.exe'))
         else:
             substs.append(('OS_ARCH', 'something'))
             substs.append(('BIN_SUFFIX', ''))
@@ -326,7 +329,7 @@ class TestMozbuildObject(unittest.TestCase):
         p = base.get_binary_path('xpcshell', False)
         if platform.startswith('darwin'):
             self.assertTrue(p.endswith('Contents/MacOS/xpcshell'))
-        elif platform.startswith(('win32', 'cygwin')):
+        elif platform.startswith(('win32', 'cygwin')) or os.name == 'os2':
             self.assertTrue(p.endswith('xpcshell.exe'))
         else:
             self.assertTrue(p.endswith('dist/bin/xpcshell'))
@@ -334,7 +337,7 @@ class TestMozbuildObject(unittest.TestCase):
         p = base.get_binary_path(validate_exists=False)
         if platform.startswith('darwin'):
             self.assertTrue(p.endswith('Contents/MacOS/awesomeapp'))
-        elif platform.startswith(('win32', 'cygwin')):
+        elif platform.startswith(('win32', 'cygwin')) or os.name == 'os2':
             self.assertTrue(p.endswith('awesomeapp.exe'))
         else:
             self.assertTrue(p.endswith('dist/bin/awesomeapp'))
@@ -342,15 +345,15 @@ class TestMozbuildObject(unittest.TestCase):
         p = base.get_binary_path(validate_exists=False, where="staged-package")
         if platform.startswith('darwin'):
             self.assertTrue(p.endswith('awesomeapp/Nightly.app/Contents/MacOS/awesomeapp'))
-        elif platform.startswith(('win32', 'cygwin')):
-            self.assertTrue(p.endswith('awesomeapp\\awesomeapp.exe'))
+        elif platform.startswith(('win32', 'cygwin')) or os.name == 'os2':
+            self.assertTrue(p.endswith('awesomeapp%sawesomeapp.exe' % os.sep))
         else:
             self.assertTrue(p.endswith('awesomeapp/awesomeapp'))
 
         self.assertRaises(Exception, base.get_binary_path, where="somewhere")
 
         p = base.get_binary_path('foobar', validate_exists=False)
-        if platform.startswith('win32'):
+        if platform.startswith('win32') or os.name == 'os2':
             self.assertTrue(p.endswith('foobar.exe'))
         else:
             self.assertTrue(p.endswith('foobar'))

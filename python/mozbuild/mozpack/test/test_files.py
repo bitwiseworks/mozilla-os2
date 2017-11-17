@@ -62,6 +62,10 @@ from StringIO import StringIO
 from xpt import Typelib
 
 
+# On OS/2, mtime/atime granularity is 2 sec.
+mtime_inc = 2 if os.name == 'os2' else 1
+
+
 class TestWithTmpDir(unittest.TestCase):
     def setUp(self):
         self.tmpdir = mkdtemp()
@@ -177,7 +181,7 @@ class TestFile(TestWithTmpDir):
             # Ensure the destination file, when it exists, is older than the
             # source
             if os.path.exists(dest):
-                time = os.path.getmtime(src) - 1
+                time = os.path.getmtime(src) - mtime_inc
                 os.utime(dest, (time, time))
             f = File(src)
             f.copy(dest)
@@ -236,7 +240,7 @@ class TestFile(TestWithTmpDir):
 
         # When the source file is newer, but with the same content, no copy
         # should occur
-        time = os.path.getmtime(src) - 1
+        time = os.path.getmtime(src) - mtime_inc
         os.utime(dest, (time, time))
         f.copy(DestNoWrite(dest))
         self.assertEqual('test', open(dest, 'rb').read())
@@ -245,14 +249,14 @@ class TestFile(TestWithTmpDir):
         # different content, no copy should occur.
         with open(src, 'wb') as tmp:
             tmp.write('fooo')
-        time = os.path.getmtime(dest) - 1
+        time = os.path.getmtime(dest) - mtime_inc
         os.utime(src, (time, time))
         f.copy(DestNoWrite(dest))
         self.assertEqual('test', open(dest, 'rb').read())
 
         # Double check that under conditions where a copy occurs, we would get
         # an exception.
-        time = os.path.getmtime(src) - 1
+        time = os.path.getmtime(src) - mtime_inc
         os.utime(dest, (time, time))
         self.assertRaises(RuntimeError, f.copy, DestNoWrite(dest))
 
@@ -394,7 +398,7 @@ class TestPreprocessedFile(TestWithTmpDir):
         # different content, no copy should occur.
         with open(src, 'wb') as tmp:
             tmp.write('#ifdef FOO\nfooo\n#endif')
-        time = os.path.getmtime(dest) - 1
+        time = os.path.getmtime(dest) - mtime_inc
         os.utime(src, (time, time))
         self.assertFalse(f.copy(DestNoWrite(dest)))
         self.assertEqual('test\n', open(dest, 'rb').read())
@@ -425,7 +429,7 @@ class TestPreprocessedFile(TestWithTmpDir):
         # Update the source so it #includes the include file.
         with open(src, 'wb') as tmp:
             tmp.write('#include incl\n')
-        time = os.path.getmtime(dest) + 1
+        time = os.path.getmtime(dest) + mtime_inc
         os.utime(src, (time, time))
         self.assertTrue(f.copy(dest))
         self.assertEqual('foo bar', open(dest, 'rb').read())
@@ -435,7 +439,7 @@ class TestPreprocessedFile(TestWithTmpDir):
         # both files having the same time.
         with open(incl, 'wb') as tmp:
             tmp.write('quux')
-        time = os.path.getmtime(dest) + 1
+        time = os.path.getmtime(dest) + mtime_inc
         os.utime(incl, (time, time))
         self.assertTrue(f.copy(dest))
         self.assertEqual('quux', open(dest, 'rb').read())
@@ -443,7 +447,7 @@ class TestPreprocessedFile(TestWithTmpDir):
         # Perform one final copy to confirm that we don't run the preprocessor
         # again. We update the mtime of the destination so it's newer than the
         # input files. This would "just work" if we weren't changing
-        time = os.path.getmtime(incl) + 1
+        time = os.path.getmtime(incl) + mtime_inc
         os.utime(dest, (time, time))
         self.assertFalse(f.copy(DestNoWrite(dest)))
 

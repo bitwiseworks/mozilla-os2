@@ -185,6 +185,8 @@ class BaseFile(object):
                 shutil.copyfileobj(src, dest)
                 break
         if hasattr(self, 'path') and hasattr(dest, 'path'):
+            # Important to close dest before copystat on platforms like OS/2
+            dest.close()
             shutil.copystat(self.path, dest.path)
         return True
 
