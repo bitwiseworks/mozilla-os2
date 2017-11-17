@@ -349,6 +349,11 @@ class TestAbsoluteSymlinkFile(TestWithTmpDir):
         link = os.readlink(dest)
         self.assertEqual(link, source)
 
+        self.assertTrue(s.copy(dest, relative=True))
+
+        link = os.readlink(dest)
+        self.assertEqual(link, mozpath.relpath(source, mozpath.dirname(dest)))
+
 class TestPreprocessedFile(TestWithTmpDir):
     def test_preprocess(self):
         '''
