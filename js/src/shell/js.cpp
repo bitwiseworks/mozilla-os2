@@ -40,8 +40,8 @@
 # include <unistd.h>
 #endif
 #ifdef XP_OS2
-# include <sys/mman.h>
 # include <process.h>
+# include <sys/mman.h>
 #endif
 
 #include "jsapi.h"
