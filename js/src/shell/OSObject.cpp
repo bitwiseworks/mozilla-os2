@@ -17,6 +17,9 @@
 #else
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef XP_OS2
+#include <ctype.h>
+#endif
 #endif
 
 #include "jsapi.h"
@@ -53,15 +56,21 @@ const char PathSeparator = '\\';
 const char PathSeparator = '/';
 #endif
 
+#ifdef XP_OS2
+#define IsPathSep(ch) ((ch) == (PathSeparator) || (ch) == '\\')
+#else
+#define IsPathSep(ch) ((ch) == (PathSeparator))
+#endif
+
 static bool
 IsAbsolutePath(const JSAutoByteString& filename)
 {
     const char* pathname = filename.ptr();
 
-    if (pathname[0] == PathSeparator)
+    if (IsPathSep(pathname[0]))
         return true;
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     // On Windows there are various forms of absolute paths (see
     // http://msdn.microsoft.com/en-us/library/windows/desktop/aa365247%28v=vs.85%29.aspx
     // for details):
@@ -74,7 +83,7 @@ IsAbsolutePath(const JSAutoByteString& filename)
     // for the last one here.
 
     if ((strlen(pathname) > 3 &&
-        isalpha(pathname[0]) && pathname[1] == ':' && pathname[2] == '\\'))
+        isalpha(pathname[0]) && pathname[1] == ':' && IsPathSep(pathname[2])))
     {
         return true;
     }
