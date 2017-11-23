@@ -411,7 +411,7 @@ class MachCommands(MachCommandBase):
         return 0 if result else 1
 
 def executable_name(name):
-    return name + '.exe' if sys.platform.startswith('win') else name
+    return name + '.exe' if sys.platform.startswith('win') or os.name == 'os2' else name
 
 @CommandProvider
 class CheckSpiderMonkeyCommand(MachCommandBase):

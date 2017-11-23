@@ -19,7 +19,8 @@ MOZPROCESS_DEBUG = os.getenv("MOZPROCESS_DEBUG")
 
 # We dont use mozinfo because it is expensive to import, see bug 933558.
 isWin = os.name == "nt"
-isPosix = os.name == "posix" # includes MacOS X
+isOS2 = os.name == "os2"
+isPosix = os.name == "posix" or os.name == "os2" # includes MacOS X and OS/2
 
 if isWin:
     import ctypes, ctypes.wintypes, msvcrt
@@ -79,7 +80,7 @@ class ProcessHandlerMixin(object):
             # Parameter for whether or not we should attempt to track child processes
             self._ignore_children = ignore_children
 
-            if not self._ignore_children and not isWin:
+            if not self._ignore_children and not isWin and not isOS2:
                 # Set the process group id for linux systems
                 # Sets process group id to the pid of the parent process
                 # NOTE: This prevents you from using preexec_fn and managing
