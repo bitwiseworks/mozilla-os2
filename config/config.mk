@@ -591,7 +591,7 @@ EN_US_OR_L10N_FILE = $(firstword \
 EN_US_OR_L10N_FILES = $(foreach f,$(1),$(call EN_US_OR_L10N_FILE,$(f)))
 
 ifeq (OS2,$(OS_ARCH))
-RUN_TEST_PROGRAM = $(topsrcdir)/build/os2/test_os2.cmd "$(LIBXUL_DIST)"
+RUN_TEST_PROGRAM = $(topsrcdir)/build/os2/test_os2.cmd $(DIST)
 else
 ifneq (WINNT,$(OS_ARCH))
 RUN_TEST_PROGRAM = $(DIST)/bin/run-mozilla.sh

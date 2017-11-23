@@ -4,19 +4,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* Invoke unit tests on OS/2 */
-PARSE ARG dist prog parm
-dist=forwardtoback(dist);
-prog=forwardtoback(prog);
-'set BEGINLIBPATH='dist'\bin;%BEGINLIBPATH%'
-'set LIBPATHSTRICT=T'
-prog parm
-exit
 
-forwardtoback: procedure
-  arg pathname
-  parse var pathname pathname'/'rest
-  do while (rest <> "")
-    pathname = pathname'\'rest
-    parse var pathname pathname'/'rest
-  end
-  return pathname
+/*
+ * NOTE: we have to use a CMD script rather than sh because setting
+ * BEGINLIBPATH and friends isn't supported in dash yet, see
+ * http://trac.netlabs.org/ports/ticket/161 for details. Note that
+ * we have to call sh back from here rather than continue using CMD
+ * because prog may be a symlink (e.g. python in virtualenv).
+ */
+
+parse arg dist prog parm
+dist_d=translate(dist, '\', '/')
+'@set BEGINLIBPATH='dist_d'\bin;%BEGINLIBPATH%'
+'@set LIBPATHSTRICT=T'
+shell = value('SHELL', ,'OS2ENVIRONMENT')
+if shell == '' then shell = 'sh'
+'@'shell '-c "'prog parm'"'
+exit
