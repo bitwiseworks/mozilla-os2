@@ -33,10 +33,21 @@ using namespace js;
 static inline void*
 MapMemory(size_t length, bool commit)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN)
     int prot = (commit ? MEM_COMMIT : MEM_RESERVE);
     int flags = (commit ? PAGE_READWRITE : PAGE_NOACCESS);
     return VirtualAlloc(nullptr, length, prot, flags);
+#elif defined(XP_OS2)
+    void *p = nullptr;
+    ULONG flags = PAG_READ | PAG_WRITE;
+    if (commit)
+      flags |= PAG_COMMIT;
+#if defined(MOZ_OS2_HIGH_MEMORY)
+    if (DosAllocMem(&p, length, flags | OBJ_ANY))
+#endif
+        if (DosAllocMem(&p, length, flags))
+            return nullptr;
+    return p;
 #else
     int prot = (commit ? (PROT_READ | PROT_WRITE) : PROT_NONE);
     void* p = mmap(nullptr, length, prot, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -49,8 +60,10 @@ MapMemory(size_t length, bool commit)
 static inline void
 UnmapMemory(void* addr, size_t len)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN)
     VirtualFree(addr, 0, MEM_RELEASE);
+#elif defined(XP_OS2)
+    DosFreeMem(addr);
 #else
     munmap(addr, len);
 #endif
@@ -59,8 +72,12 @@ UnmapMemory(void* addr, size_t len)
 static inline bool
 MarkValidRegion(void* addr, size_t len)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN)
     if (!VirtualAlloc(addr, len, MEM_COMMIT, PAGE_READWRITE))
+        return false;
+    return true;
+#elif defined(XP_OS2)
+    if (DosSetMem(addr, len, PAG_COMMIT | PAG_DEFAULT))
         return false;
     return true;
 #else
