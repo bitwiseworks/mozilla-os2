@@ -221,7 +221,7 @@ class AutoSetHandlingSignal
 #if defined(XP_WIN)
 # include "jswin.h"
 #elif defined(XP_OS2)
-// nothing
+# include <386/builtin.h>
 #else
 # include <signal.h>
 # include <sys/mman.h>
@@ -823,61 +823,7 @@ AsmJSFaultHandler(LPEXCEPTION_POINTERS exception)
 
 #elif defined(XP_OS2)
 
-static bool
-HandleException(PEXCEPTIONREPORTRECORD pReport,
-                PCONTEXTRECORD pContext)
-{
-    if (pReport->ExceptionNum != XCPT_GUARD_PAGE_VIOLATION)
-        return false;
-
-    if (pReport->cParameters < 2)
-        return false;
-
-    // Don't allow recursive handling of signals, see AutoSetHandlingSignal.
-    JSRuntime* rt = RuntimeForCurrentThread();
-    if (!rt || rt->handlingSignal)
-        return false;
-    AutoSetHandlingSignal handling(rt);
-
-    AsmJSActivation* activation = rt->asmJSActivationStack();
-    if (!activation)
-        return false;
-
-    return true;
-}
-
-static ULONG _System
-AsmJSExceptionHandler(PEXCEPTIONREPORTRECORD pReport,
-                      PEXCEPTIONREGISTRATIONRECORD,
-                      PCONTEXTRECORD pContext,
-                      PVOID)
-{
-    if (HandleException(pReport, pContext))
-        return XCPT_CONTINUE_EXECUTION;
-
-    // No need to worry about calling other handlers, the OS does this for us.
-    return XCPT_CONTINUE_SEARCH;
-}
-
-void
-AsmJSOS2ExceptionHandler::clearCurrentThread()
-{
-    if (!installed())
-        return;
-
-    DosUnsetExceptionHandler(&regrec_);
-    memset(&regrec_, 0, sizeof(regrec_));
-}
-
-bool
-AsmJSOS2ExceptionHandler::setCurrentThread()
-{
-    if (installed())
-        return true;
-
-    regrec_.ExceptionHandler = AsmJSExceptionHandler;
-    return DosSetExceptionHandler(&regrec_) == 0;
-}
+// Defined outside ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB as we need it always.
 
 #elif defined(XP_DARWIN)
 # include <mach/exc.h>
@@ -1242,6 +1188,107 @@ AsmJSFaultHandler(int signum, siginfo_t* info, void* context)
 #endif // defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 
 static void
+RedirectIonBackedgesToInterruptCheck(JSRuntime* rt);
+
+static bool
+RedirectJitCodeToInterruptCheck(JSRuntime* rt, CONTEXT* context);
+
+#if defined(XP_OS2)
+
+// Opcode to generate XCPT_ILLEGAL_INSTRUCTION. This is needed to change
+// registers of the asynchronously interrupted thread.
+#define ILLEGAL_OPCODE 0x0B0F // Undefined instruction (ud2)
+
+/* static */ ULONG _System
+AsmJSOS2ExceptionHandler::Handler(PEXCEPTIONREPORTRECORD pReport,
+                                  PEXCEPTIONREGISTRATIONRECORD pRecord,
+                                  PCONTEXTRECORD pContext,
+                                  PVOID)
+{
+    Data *data = reinterpret_cast<Data *>(pRecord);
+    JSRuntime* rt = RuntimeForCurrentThread();
+
+    // Sanity
+    if (data->regrec.ExceptionHandler == Handler && rt) {
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+        if (pReport->ExceptionNum == XCPT_GUARD_PAGE_VIOLATION) {
+            if (pReport->cParameters < 2)
+                return false;
+
+            // Don't allow recursive handling of signals, see AutoSetHandlingSignal.
+            JSRuntime* rt = RuntimeForCurrentThread();
+            if (rt->handlingSignal)
+                return XCPT_CONTINUE_SEARCH;
+            AutoSetHandlingSignal handling(rt);
+
+            AsmJSActivation* activation = rt->asmJSActivationStack();
+            if (!activation)
+                return XCPT_CONTINUE_SEARCH;
+
+            return XCPT_CONTINUE_EXECUTION;
+        }
+        else
+#endif
+        if (pReport->ExceptionNum == XCPT_ILLEGAL_INSTRUCTION) {
+            PUSHORT popcode = (PUSHORT)pContext->ctx_RegEip;
+            if (data->interrupt && *popcode == ILLEGAL_OPCODE) {
+                // Restore the original opcode reset in InterruptRunningJitCode.
+                *popcode = data->opcode;
+
+                // Do the job.
+                RedirectJitCodeToInterruptCheck(rt, pContext);
+
+                // Clear the interrupt flag
+                __atomic_xchg(&data->interrupt, 0);
+
+                return XCPT_CONTINUE_EXECUTION;
+            }
+        }
+    }
+
+    return XCPT_CONTINUE_SEARCH;
+}
+
+AsmJSOS2ExceptionHandler::AsmJSOS2ExceptionHandler()
+{
+    memset(&data_.regrec, 0, sizeof(data_.regrec));
+    data_.interrupt = false;
+    data_.opcode = 0;
+}
+
+void
+AsmJSOS2ExceptionHandler::uninstall()
+{
+    if (!installed())
+        return;
+
+    DosUnsetExceptionHandler(&data_.regrec);
+    memset(&data_.regrec, 0, sizeof(data_.regrec));
+}
+
+bool
+AsmJSOS2ExceptionHandler::install()
+{
+    MOZ_ASSERT(!installed());
+
+    data_.regrec.ExceptionHandler = Handler;
+    if (DosSetExceptionHandler(&data_.regrec) != NO_ERROR)
+    {
+        memset(&data_.regrec, 0, sizeof(data_.regrec));
+        return false;
+    }
+
+    return true;
+}
+
+bool AsmJSOS2ExceptionHandler::setInterrupt(bool on)
+{
+    return __atomic_xchg(&data_.interrupt, on ? 1 : 0) == 0;
+}
+
+#endif // defined(XP_OS2)
+
+static void
 RedirectIonBackedgesToInterruptCheck(JSRuntime* rt)
 {
     if (jit::JitRuntime* jitRuntime = rt->jitRuntime()) {
@@ -1279,7 +1326,7 @@ RedirectJitCodeToInterruptCheck(JSRuntime* rt, CONTEXT* context)
     return false;
 }
 
-#if !defined(XP_WIN)
+#if !defined(XP_WIN) && !defined(XP_OS2)
 // For the interrupt signal, pick a signal number that:
 //  - is not otherwise used by mozilla or standard libraries
 //  - defaults to nostop and noprint on gdb/lldb so that noone is bothered
@@ -1298,13 +1345,13 @@ JitInterruptHandler(int signum, siginfo_t* info, void* context)
 bool
 js::EnsureSignalHandlersInstalled(JSRuntime* rt)
 {
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) || defined(XP_OS2)
 # if defined(XP_DARWIN)
     // On OSX, each JSRuntime gets its own handler thread.
     if (!rt->asmJSMachExceptionHandler.installed() && !rt->asmJSMachExceptionHandler.install(rt))
         return false;
 # elif defined(XP_OS2)
-    if (!rt->asmJSOS2ExceptionHandler.installed() && !rt->asmJSOS2ExceptionHandler.setCurrentThread())
+    if (!rt->asmJSOS2ExceptionHandler.installed() && !rt->asmJSOS2ExceptionHandler.install())
         return false;
 # endif
 #endif
@@ -1341,6 +1388,8 @@ js::EnsureSignalHandlersInstalled(JSRuntime* rt)
     // thread (see InterruptRunningJitCode).
 #if defined(XP_WIN)
     // Windows uses SuspendThread to stop the main thread from another thread.
+#elif defined(XP_OS2)
+    // OS/2 uses some exception magic to stop the main thread from another thread.
 #else
     struct sigaction interruptHandler;
     interruptHandler.sa_flags = SA_SIGINFO;
@@ -1430,6 +1479,62 @@ js::InterruptRunningJitCode(JSRuntime* rt)
                 SetThreadContext(thread, &context);
         }
         ResumeThread(thread);
+    }
+#elif defined(XP_OS2)
+    // On OS/2, we suspend the thread and interrupt it with an illegal
+    // instruction (see below). This assumes that there is only one thread
+    // executing the code we're about to patch (which is normally the case for
+    // asm.js code). Note that setInterrupt() will allow only one thread to
+    // perform interruption. Although it'd be more convenient to call
+    // setInterrupt() after suspend, we can't do it as nested suspending isn't
+    // supported (multiple suspend will silently succeed but only one resume
+    // will work afterwards). This leaves a small hole when a a new interrupt
+    // may be requested after the exception handler resets it but before it
+    // returns. In this case, a nested exception will happen and we account for
+    // it in AsmJSOS2ExceptionHandler::Handler.
+    if (!rt->asmJSOS2ExceptionHandler.setInterrupt(true))
+        return;
+    bool ok = false;
+    TID thread = (TID)rt->ownerThreadNative();
+    if (DosSuspendThread(thread) == NO_ERROR) {
+        CONTEXTRECORD context;
+        if (DosQueryThreadContext(thread, CONTEXT_CONTROL, &context) == NO_ERROR) {
+            PUSHORT popcode = (PUSHORT)context.ctx_RegEip;
+            ULONG flags = 0, size = sizeof(*popcode);
+            if (DosQueryMem(popcode, &size, &flags) == NO_ERROR && (flags & PAG_WRITE)) {
+                // It's writable memory which means we're in asm.js code. We
+                // need to change PC (see RedirectJitCodeToInterruptCheck) but
+                // given that there is no DosSetThreadContext, we have to use a
+                // trick: put an invalid opcode to cause an excetpion on the
+                // target thread where we will then be able to change EIP. Note
+                // that we can't use DosKillThread here because for asyncronous
+                // exceptions changes to the context are ignored.
+                rt->asmJSOS2ExceptionHandler.saveOpcode(*popcode);
+                DosEnterCritSec();
+                *popcode = ILLEGAL_OPCODE;
+                DosSetPriority(PRTYS_THREAD, PRTYC_TIMECRITICAL, PRTYD_MAXIMUM, thread);
+                DosExitCritSec();
+                ok = true;
+            } else {
+                // If it's non-writable memory, then it's not asm.js but regular
+                // C code. Although we could use DosAliasMem to modify it and do
+                // the above trick,, we don't do it as this code might be shared
+                // across threads and even across processes (if it's a DLL).
+                // Since we dont' need to change registers in such a case (see
+                // RedirectIonBackedgesToInterruptCheck) we could use
+                // DosKillThread to generate XCPT_ASYNC_PROCESS_TERMINATE in the
+                // target thread but this proved to be very unstable, see #253
+                // for more details. So we just do nothing. Luckily, the JS C++
+                // code still does checks for interrupts so it's not needed that
+                // much.
+            }
+        }
+
+        DosResumeThread(thread);
+    }
+    if (!ok) {
+        // Make sure we don't have a wrong state if we fail above.
+        rt->asmJSOS2ExceptionHandler.setInterrupt(false);
     }
 #else
     // On Unix, we instead deliver an async signal to the main thread which

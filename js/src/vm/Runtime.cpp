@@ -263,13 +263,9 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 {
     ownerThread_ = PR_GetCurrentThread();
 
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) && defined(XP_OS2)
-    asmJSOS2ExceptionHandler.setCurrentThread();
-#endif
-
     // Get a platform-native handle for the owner thread, used by
     // js::InterruptRunningJitCode to halt the runtime's main thread.
-#ifdef XP_WIN
+#if defined(XP_WIN)
     size_t openFlags = THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME |
                        THREAD_QUERY_INFORMATION;
     HANDLE self = OpenThread(openFlags, false, GetCurrentThreadId());
@@ -277,6 +273,14 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
         return false;
     static_assert(sizeof(HANDLE) <= sizeof(ownerThreadNative_), "need bigger field");
     ownerThreadNative_ = (size_t)self;
+#elif defined(XP_OS2)
+    {
+        PTIB ptib;
+        if (DosGetInfoBlocks(&ptib, NULL) != NO_ERROR)
+            return false;
+        static_assert(sizeof(ptib->tib_ptib2->tib2_ultid) <= sizeof(ownerThreadNative_), "need bigger field");
+        ownerThreadNative_ = (size_t)ptib->tib_ptib2->tib2_ultid;
+    }
 #else
     static_assert(sizeof(pthread_t) <= sizeof(ownerThreadNative_), "need bigger field");
     ownerThreadNative_ = (size_t)pthread_self();
@@ -429,10 +433,6 @@ JSRuntime::~JSRuntime()
     // Avoid bogus asserts during teardown.
     MOZ_ASSERT(!numExclusiveThreads);
     mainThreadHasExclusiveAccess = true;
-
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) && defined(XP_OS2)
-    asmJSOS2ExceptionHandler.clearCurrentThread();
-#endif
 
     /*
      * Even though all objects in the compartment are dead, we may have keep

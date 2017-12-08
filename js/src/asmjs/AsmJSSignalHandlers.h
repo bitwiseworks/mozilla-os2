@@ -48,7 +48,7 @@ EnsureSignalHandlersInstalled(JSRuntime* rt);
 extern void
 InterruptRunningJitCode(JSRuntime* rt);
 
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) || defined(XP_OS2)
 # if defined(XP_DARWIN)
 // On OSX we are forced to use the lower-level Mach exception mechanism instead
 // of Unix signals. Mach exceptions are not handled on the victim's stack but
@@ -72,16 +72,31 @@ class AsmJSMachExceptionHandler
     bool install(JSRuntime* rt);
 };
 # elif defined(XP_OS2)
+// On OS/2 we use the lower-level system exception mechanism because it gives
+// a better control over the the victim thread's stack.
 class AsmJSOS2ExceptionHandler
 {
-    EXCEPTIONREGISTRATIONRECORD regrec_;
+    struct Data {
+        EXCEPTIONREGISTRATIONRECORD regrec;
+        unsigned interrupt;
+        USHORT opcode;
+    } data_;
+
+    static ULONG _System
+    Handler(PEXCEPTIONREPORTRECORD pReport,
+            PEXCEPTIONREGISTRATIONRECORD,
+            PCONTEXTRECORD pContext,
+            PVOID);
+
+    void uninstall();
 
   public:
-    AsmJSOS2ExceptionHandler() { memset(&regrec_, 0, sizeof(regrec_)); }
-    ~AsmJSOS2ExceptionHandler() { clearCurrentThread(); }
-    bool installed() const { return regrec_.ExceptionHandler != NULL; }
-    void clearCurrentThread();
-    bool setCurrentThread();
+    AsmJSOS2ExceptionHandler();
+    ~AsmJSOS2ExceptionHandler() { uninstall(); }
+    bool installed() const { return data_.regrec.ExceptionHandler != nullptr; }
+    bool install();
+    bool setInterrupt(bool on);
+    void saveOpcode(USHORT opcode) { data_.opcode = opcode; }
 };
 # endif
 #endif
