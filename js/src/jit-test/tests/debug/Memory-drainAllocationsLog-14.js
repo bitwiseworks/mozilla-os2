@@ -34,14 +34,19 @@ for (i = 1; i < allocs.length; ++i) {
     // track the allocTimes entry we've passed, and then after the
     // loop assert that we've seen them all.  We also assert that a
     // non-zero number of allocations has happened since the last seen
-    // increment.
-    while (seenAlloc < allocTimes.length
-           && allocs[i].timestamp >= allocTimes[seenAlloc]) {
-        assertEq(i - lastIndexSeenAllocIncremented > 0, true);
-        lastIndexSeenAllocIncremented = i;
-        ++seenAlloc;
+    // increment.  Note that we can't perform this test on OS/2 since
+    // the granularity of dateNow() is too coarse and all timestamps
+    // are most likely the same.
+    if (platform !== "os2knix") {
+        while (seenAlloc < allocTimes.length
+               && allocs[i].timestamp >= allocTimes[seenAlloc]) {
+            assertEq(i - lastIndexSeenAllocIncremented > 0, true);
+            lastIndexSeenAllocIncremented = i;
+            ++seenAlloc;
+        }
     }
 }
 // There should be one entry left in allocTimes, because we recorded a
 // time after the last possible allocation in the array.
-assertEq(seenAlloc, allocTimes.length -1);
+if (platform !== "os2knix")
+    assertEq(seenAlloc, allocTimes.length -1);
