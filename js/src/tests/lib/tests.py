@@ -60,6 +60,9 @@ def get_environment_overlay(js_shell):
         # Tell the shell to disable crash dialogs on windows.
         'XRE_NO_WINDOWS_CRASH_DIALOG': '1',
     }
+    if os.name == 'os2':
+        # OS/2 has a special DST start/stop format
+        env['TZ'] = 'PST8PDT,3,2,0,7200,11,1,0,7200,3600'
     # Add the binary's directory to the library search path so that we find the
     # nspr and icu we built, instead of the platform supplied ones (or none at
     # all on windows).

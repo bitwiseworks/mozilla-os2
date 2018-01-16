@@ -317,7 +317,11 @@ def run_test_remote(test, device, prefix, options):
 
     env = {}
     if test.tz_pacific:
-        env['TZ'] = 'PST8PDT'
+        if os.name == 'os2':
+            # OS/2 has a special DST start/stop format
+            env['TZ'] = 'PST8PDT,3,2,0,7200,11,1,0,7200,3600'
+        else:
+            env['TZ'] = 'PST8PDT'
 
     env['LD_LIBRARY_PATH'] = options.remote_test_root
 
