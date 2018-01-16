@@ -4,7 +4,7 @@
 from __future__ import print_function, unicode_literals, division
 
 import subprocess
-import sys
+import sys, os
 from datetime import datetime, timedelta
 from progressbar import ProgressBar
 from results import NullTestOutput, TestOutput, escape_cmdline
@@ -37,9 +37,16 @@ def _do_work(qTasks, qResults, qWatch, prefix, run_skipped, timeout, show_cmd):
         if show_cmd:
             print(escape_cmdline(cmd))
         tStart = datetime.now()
-        proc = subprocess.Popen(cmd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        if os.name == 'os2':
+            # OS/2 python brings an extra argument to make it thread-safe
+            proc = subprocess.Popen(cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    threadsafe=True)
+        else:
+            proc = subprocess.Popen(cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
 
         # Push the task to the watchdog -- it will kill the task
         # if it goes over the timeout while we keep its stdout
