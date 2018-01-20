@@ -319,14 +319,14 @@ void*
 mapMemory(size_t length)
 {
     void *tmp;
-    APIRET arc = DosAllocMem(&tmp, length, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE);
+    APIRET arc = DosAllocMemEx(&tmp, length, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE);
     return arc == NO_ERROR ? tmp : nullptr;
 }
 
 void
 unmapPages(void* p, size_t size)
 {
-    MOZ_ALWAYS_TRUE(DosFreeMem(p) == NO_ERROR);
+    MOZ_ALWAYS_TRUE(DosFreeMemEx(p) == NO_ERROR);
 }
 
 #elif defined(SOLARIS) // This test doesn't apply to Solaris.

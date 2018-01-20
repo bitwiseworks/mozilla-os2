@@ -17,6 +17,12 @@
 #include "jswin.h"
 #include <psapi.h>
 
+#elif defined(XP_OS2)
+
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #elif defined(SOLARIS)
 
 #include <sys/mman.h>
@@ -55,10 +61,8 @@ static mozilla::Atomic<int, mozilla::Relaxed> growthDirection(0);
 // so we use a generous limit of 32 unusable chunks to ensure we reach them.
 static const int MaxLastDitchAttempts = 32;
 
-#if !defined(XP_OS2)
 static void GetNewChunk(void** aAddress, void** aRetainedAddr, size_t size, size_t alignment);
 static void* MapAlignedPagesSlow(size_t size, size_t alignment);
-#endif
 static void* MapAlignedPagesLastDitch(size_t size, size_t alignment);
 
 size_t
@@ -91,32 +95,75 @@ TestMapAlignedPagesLastDitch(size_t size, size_t alignment)
     return MapAlignedPagesLastDitch(size, alignment);
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
+
+#if defined(XP_OS2)
+#define HAVE_DESKTOP_API 1
+#else
+#define HAVE_DESKTOP_API WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#endif
 
 void
 InitMemorySubsystem()
 {
     if (pageSize == 0) {
+#if defined(XP_OS2)
+        pageSize = 4096; // always
+        allocGranularity = 64 * 1024; // on OS/2 Warp and up
+#else
         SYSTEM_INFO sysinfo;
         GetSystemInfo(&sysinfo);
         pageSize = sysinfo.dwPageSize;
         allocGranularity = sysinfo.dwAllocationGranularity;
+#endif
     }
 }
 
-#  if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#  if HAVE_DESKTOP_API
+
+enum MapFlags {
+    MapNone,
+    MapCommit,
+    MapReset,
+};
 
 static inline void*
-MapMemoryAt(void* desired, size_t length, int flags, int prot = PAGE_READWRITE)
+MapMemoryAt(void* desired, size_t length, MapFlags flags = MapNone)
 {
-    return VirtualAlloc(desired, length, flags, prot);
+#if defined(XP_OS2)
+    void *tmp = desired;
+    APIRET arc;
+    if (flags == MapReset) {
+        // OS/2 doesn't provide a MAP_RESET/MADV_DONTNEED functionality,
+        // ignore this flag and always succeed.
+        arc = NO_ERROR;
+    } else {
+        ULONG f = PAG_READ | PAG_WRITE;
+        if (flags == MapCommit)
+            f |= PAG_COMMIT;
+        if (desired)
+            f |= OBJ_LOCATION;
+#if defined(MOZ_OS2_HIGH_MEMORY)
+        arc = DosAllocMemEx(&tmp, length, f | OBJ_ANY);
+        if (arc != NO_ERROR)
+#endif
+            arc = DosAllocMemEx(&tmp, length, f);
+    }
+    return arc == NO_ERROR ? tmp : nullptr;
+#else
+    int f = flags == MapReset ? MAP_RESET : MAP_RESERVE;
+    if (flags == MapCommit)
+      f |= MAP_COMMIT;
+    return VirtualAlloc(desired, length, f, PAGE_READWRITE);
+#endif
 }
 
 static inline void*
-MapMemory(size_t length, int flags, int prot = PAGE_READWRITE)
+MapMemory(size_t length, MapFlags flags = MapNone)
 {
-    return VirtualAlloc(nullptr, length, flags, prot);
+    return MapMemoryAt(nullptr, length, flags);
 }
+
 
 void*
 MapAlignedPages(size_t size, size_t alignment)
@@ -126,7 +173,7 @@ MapAlignedPages(size_t size, size_t alignment)
     MOZ_ASSERT(size % pageSize == 0);
     MOZ_ASSERT(alignment % allocGranularity == 0);
 
-    void* p = MapMemory(size, MEM_COMMIT | MEM_RESERVE);
+    void* p = MapMemory(size, MapCommit);
 
     /* Special case: If we want allocation alignment, no further work is needed. */
     if (alignment == allocGranularity)
@@ -173,12 +220,12 @@ MapAlignedPagesSlow(size_t size, size_t alignment)
          * mapping doesn't have to commit pages.
          */
         size_t reserveSize = size + alignment - pageSize;
-        p = MapMemory(reserveSize, MEM_RESERVE);
+        p = MapMemory(reserveSize);
         if (!p)
             return nullptr;
         void* chunkStart = (void*)AlignBytes(uintptr_t(p), alignment);
         UnmapPages(p, reserveSize);
-        p = MapMemoryAt(chunkStart, size, MEM_COMMIT | MEM_RESERVE);
+        p = MapMemoryAt(chunkStart, size, MapCommit);
 
         /* Failure here indicates a race with another thread, so try again. */
     } while (!p);
@@ -199,7 +246,7 @@ MapAlignedPagesLastDitch(size_t size, size_t alignment)
 {
     void* tempMaps[MaxLastDitchAttempts];
     int attempt = 0;
-    void* p = MapMemory(size, MEM_COMMIT | MEM_RESERVE);
+    void* p = MapMemory(size, MapCommit);
     if (OffsetFromAligned(p, alignment) == 0)
         return p;
     for (; attempt < MaxLastDitchAttempts; ++attempt) {
@@ -238,8 +285,8 @@ GetNewChunk(void** aAddress, void** aRetainedAddr, size_t size, size_t alignment
             break;
         UnmapPages(address, size);
         retainedSize = alignment - offset;
-        retainedAddr = MapMemoryAt(address, retainedSize, MEM_RESERVE);
-        address = MapMemory(size, MEM_COMMIT | MEM_RESERVE);
+        retainedAddr = MapMemoryAt(address, retainedSize);
+        address = MapMemory(size, MapCommit);
         /* If retainedAddr is null here, we raced with another thread. */
     } while (!retainedAddr);
     *aAddress = address;
@@ -249,7 +296,11 @@ GetNewChunk(void** aAddress, void** aRetainedAddr, size_t size, size_t alignment
 void
 UnmapPages(void* p, size_t size)
 {
+#if defined(XP_OS2)
+    MOZ_ALWAYS_TRUE(DosFreeMemEx(p) == NO_ERROR);
+#else
     MOZ_ALWAYS_TRUE(VirtualFree(p, 0, MEM_RELEASE));
+#endif
 }
 
 bool
@@ -259,7 +310,7 @@ MarkPagesUnused(void* p, size_t size)
         return true;
 
     MOZ_ASSERT(OffsetFromAligned(p, pageSize) == 0);
-    LPVOID p2 = MapMemoryAt(p, size, MEM_RESET);
+    void* p2 = MapMemoryAt(p, size, MapReset);
     return p2 == p;
 }
 
@@ -276,10 +327,14 @@ MarkPagesInUse(void* p, size_t size)
 size_t
 GetPageFaultCount()
 {
+#if defined(XP_OS2)
+    return 0;
+#else
     PROCESS_MEMORY_COUNTERS pmc;
     if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
         return 0;
     return pmc.PageFaultCount;
+#endif
 }
 
 #  else // Various APIs are unavailable.
@@ -345,179 +400,6 @@ void
 DeallocateMappedContent(void* p, size_t length)
 {
     // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
-}
-
-#elif defined(XP_OS2)
-
-#define INCL_BASE
-#define INCL_PM
-#include <os2.h>
-
-#define JS_GC_HAS_MAP_ALIGN 1
-#define OS2_MAX_RECURSIONS  16
-
-void
-InitMemorySubsystem()
-{
-    if (pageSize == 0) {
-        pageSize = allocGranularity = ArenaSize;
-    }
-}
-
-void
-UnmapPages(void *addr, size_t size)
-{
-    if (!DosFreeMem(addr))
-        return;
-
-    /*
-     * If DosFreeMem() failed, 'addr' is probably part of an "expensive"
-     * allocation, so calculate the base address and try again.
-     */
-    unsigned long cb = 2 * size;
-    unsigned long flags;
-    if (DosQueryMem(addr, &cb, &flags) || cb < size)
-        return;
-
-    uintptr_t base = reinterpret_cast<uintptr_t>(addr) - ((2 * size) - cb);
-    DosFreeMem(reinterpret_cast<void*>(base));
-
-    return;
-}
-
-static void *
-MapAlignedPagesRecursively(size_t size, size_t alignment, int& recursions)
-{
-    if (++recursions >= OS2_MAX_RECURSIONS)
-        return nullptr;
-
-    void *tmp;
-#if defined(MOZ_OS2_HIGH_MEMORY)
-    if (DosAllocMem(&tmp, size,
-                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
-#endif
-    {
-        MOZ_ALWAYS_TRUE(DosAllocMem(&tmp, size,
-                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
-    }
-    size_t offset = reinterpret_cast<uintptr_t>(tmp) & (alignment - 1);
-    if (!offset)
-        return tmp;
-
-    /*
-     * If there are 'filler' bytes of free space above 'tmp', free 'tmp',
-     * then reallocate it as a 'filler'-sized block;  assuming we're not
-     * in a race with another thread, the next recursion should succeed.
-     */
-    size_t filler = size + alignment - offset;
-    unsigned long cb = filler;
-    unsigned long flags = 0;
-    unsigned long rc = DosQueryMem(&(static_cast<char*>(tmp))[size],
-                                   &cb, &flags);
-    if (!rc && (flags & PAG_FREE) && cb >= filler) {
-        UnmapPages(tmp, 0);
-#if defined(MOZ_OS2_HIGH_MEMORY)
-        if (DosAllocMem(&tmp, filler,
-                        OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
-#endif
-        {
-            MOZ_ALWAYS_TRUE(DosAllocMem(&tmp, filler,
-                                        PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
-        }
-    }
-
-    void *p = MapAlignedPagesRecursively(size, alignment, recursions);
-    UnmapPages(tmp, 0);
-
-    return p;
-}
-
-void *
-MapAlignedPages(size_t size, size_t alignment)
-{
-    MOZ_ASSERT(size >= alignment);
-    MOZ_ASSERT(size % alignment == 0);
-    MOZ_ASSERT(size % pageSize == 0);
-    MOZ_ASSERT(alignment % allocGranularity == 0);
-
-    int recursions = -1;
-
-    /*
-     * Make up to OS2_MAX_RECURSIONS attempts to get an aligned block
-     * of the right size by recursively allocating blocks of unaligned
-     * free memory until only an aligned allocation is possible.
-     */
-    void *p = MapAlignedPagesRecursively(size, alignment, recursions);
-    if (p)
-        return p;
-
-    /*
-     * If memory is heavily fragmented, the recursive strategy may fail;
-     * instead, use the "expensive" strategy:  allocate twice as much
-     * as requested and return an aligned address within this block.
-     */
-#if defined(MOZ_OS2_HIGH_MEMORY)
-    if (DosAllocMem(&p, 2 * size,
-                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
-#endif
-    {
-        MOZ_ALWAYS_TRUE(DosAllocMem(&p, 2 * size,
-                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
-    }
-
-    uintptr_t addr = reinterpret_cast<uintptr_t>(p);
-    addr = (addr + (alignment - 1)) & ~(alignment - 1);
-
-    return reinterpret_cast<void *>(addr);
-}
-
-static void*
-MapAlignedPagesLastDitch(size_t size, size_t alignment)
-{
-    // TODO: Needed for jsapi-tests/testGCAllocator.cpp so far so make it a
-    // no-op. But we might want to make it work like on other platforms
-    // (together with MapAlignedPagesSlow and friends).
-    return nullptr;
-}
-
-bool
-MarkPagesUnused(void *p, size_t size)
-{
-    if (!DecommitEnabled())
-        return true;
-
-    MOZ_ASSERT(OffsetFromAligned(p, pageSize) == 0);
-    return true;
-}
-
-bool
-MarkPagesInUse(void *p, size_t size)
-{
-    if (!DecommitEnabled())
-        return true;
-
-    MOZ_ASSERT(OffsetFromAligned(p, pageSize) == 0);
-    return true;
-}
-
-size_t
-GetPageFaultCount()
-{
-    return 0;
-}
-
-void *
-AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
-{
-    // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
-    return nullptr;
-}
-
-// Deallocate mapped memory for object.
-void
-DeallocateMappedContent(void *p, size_t length)
-{
-    // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
 }
 
 #elif defined(SOLARIS)
