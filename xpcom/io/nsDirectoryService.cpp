@@ -198,7 +198,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
     DosQueryModuleName( ppib->pib_hmte, CCHMAXPATH, buffer);
     *strrchr( buffer, '\\') = '\0'; // XXX DBCS misery
     localFile->InitWithNativePath(nsDependentCString(buffer));
-    *aFile = localFile;
+    localFile.forget(aFile);
     return NS_OK;
 
 #endif
