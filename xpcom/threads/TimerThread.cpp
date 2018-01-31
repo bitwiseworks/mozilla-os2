@@ -409,6 +409,14 @@ TimerThread::Run()
 {
   PR_SetCurrentThreadName("Timer");
 
+#ifdef XP_OS2
+  // The timer slack is too big (> 30 ms) with the normal priority, boost it
+  // (PR_PRIORITY_URGENT sets OS/2 priority class to RTYC_TIMECRITICAL and
+  // delta to 0, see https://github.com/bitwiseworks/mozilla-os2/issues/257 for
+  // details).
+  PR_SetThreadPriority(PR_GetCurrentThread(), PR_PRIORITY_URGENT);
+#endif
+
 #ifdef MOZ_NUWA_PROCESS
   if (IsNuwaProcess()) {
     NuwaMarkCurrentThread(nullptr, nullptr);
