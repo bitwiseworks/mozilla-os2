@@ -411,7 +411,8 @@ class MachCommands(MachCommandBase):
         return 0 if result else 1
 
 def executable_name(name):
-    return name + '.exe' if sys.platform.startswith('win') or os.name == 'os2' else name
+    import mozinfo
+    return name + mozinfo.info.get('bin_suffix', '')
 
 @CommandProvider
 class CheckSpiderMonkeyCommand(MachCommandBase):
@@ -462,10 +463,6 @@ class JsapiTestsCommand(MachCommandBase):
 
     def run_jsapitests(self, **params):
         import subprocess
-
-        bin_suffix = ''
-        if sys.platform.startswith('win'):
-            bin_suffix = '.exe'
 
         print('running jsapi-tests')
         jsapi_tests_cmd = [os.path.join(self.bindir, executable_name('jsapi-tests'))]

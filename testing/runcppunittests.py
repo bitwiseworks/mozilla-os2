@@ -211,7 +211,7 @@ def extract_unittests_from_args(args, environ, manifest_path):
     # we skip the existence check here because not all tests are built
     # for all platforms (and it will fail on Windows anyway)
     active_tests = mp.active_tests(exists=False, disabled=False, **environ)
-    suffix = '.exe' if mozinfo.isWin else ''
+    suffix = mozinfo.info.get('bin_suffix', '')
     if binary_path:
         tests.extend([(os.path.join(binary_path, test['relpath'] + suffix), int(test.get('requesttimeoutfactor', 1))) for test in active_tests])
     else:
