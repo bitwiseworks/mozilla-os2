@@ -118,6 +118,9 @@ elif system == "Darwin":
 elif sys.platform in ('solaris', 'sunos5'):
     info['os'] = 'unix'
     os_version = version = sys.platform
+elif os.name == 'os2':
+    info['os'] = 'os2'
+    os_version = version
 else:
     os_version = version = unknown
 
@@ -151,7 +154,7 @@ else:
     info['has_sandbox'] = True
 
 # standard value of choices, for easy inspection
-choices = {'os': ['linux', 'bsd', 'win', 'mac', 'unix'],
+choices = {'os': ['linux', 'bsd', 'win', 'mac', 'unix', 'os2'],
            'bits': [32, 64],
            'processor': ['x86', 'x86_64', 'ppc']}
 
