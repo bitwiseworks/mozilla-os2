@@ -115,6 +115,9 @@ class CPPUnitTests(object):
             pathvar = "DYLD_LIBRARY_PATH"
         elif mozinfo.os == "win":
             pathvar = "PATH"
+        elif mozinfo.os == "os2":
+            pathvar = "BEGINLIBPATH"
+            env["LIBPATHSTRICT"] = "T"
         if pathvar:
             if pathvar in env:
                 env[pathvar] = "%s%s%s" % (libpath, os.pathsep, env[pathvar])

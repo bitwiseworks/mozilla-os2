@@ -916,9 +916,9 @@ class XPCShellTests(object):
         self.buildCoreEnvironment()
         if sys.platform == 'win32':
             self.env["PATH"] = self.env["PATH"] + ";" + self.xrePath
-        elif sys.platform in ('os2emx', 'os2knix'):
-            os.environ["BEGINLIBPATH"] = self.xrePath + ";" + self.env["BEGINLIBPATH"]
-            os.environ["LIBPATHSTRICT"] = "T"
+        elif os.name == 'os2':
+            self.env["BEGINLIBPATH"] = self.xrePath + ";" + self.env.get("BEGINLIBPATH", "")
+            self.env["LIBPATHSTRICT"] = "T"
         elif sys.platform == 'osx' or sys.platform == "darwin":
             self.env["DYLD_LIBRARY_PATH"] = os.path.join(os.path.dirname(self.xrePath), 'MacOS')
         else: # unix or linux?

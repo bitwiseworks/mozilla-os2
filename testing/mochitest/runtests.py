@@ -381,6 +381,9 @@ class MochitestServer(object):
 
         if mozinfo.isWin:
             env["PATH"] = env["PATH"] + ";" + str(self._xrePath)
+        elif mozinfo.isOs2:
+            env["BEGINLIBPATH"] = str(self._xrePath) + ';' + env.get("BEGINLIBPATH", "")
+            env["LIBPATHSTRICT"] = "T"
 
         args = [
             "-g",
