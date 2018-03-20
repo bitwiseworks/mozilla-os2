@@ -517,7 +517,7 @@
                     /*new*/    Type.path);
 
        libc.declareLazyFFI(SysFile,  "rmdir",
-                               "rmdir", ctypes.default_abi,
+                               libc_func("rmdir"), ctypes.default_abi,
                     /*return*/ Type.int,
                     /*path*/   Type.path);
 
@@ -532,7 +532,7 @@
                     /*flags*/  Type.unsigned_int); // Linux/Android-specific
 
        libc.declareLazyFFI(SysFile,  "statfs",
-                               "statfs", ctypes.default_abi,
+                               libc_func("statfs"), ctypes.default_abi,
                     /*return*/ Type.negativeone_or_nothing,
                     /*path*/   Type.path,
                     /*buf*/    Type.statvfs.out_ptr); // Android,B2G
