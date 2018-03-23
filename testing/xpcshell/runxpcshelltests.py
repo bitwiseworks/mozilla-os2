@@ -243,8 +243,12 @@ class XPCShellTestThread(Thread):
             popen_func = psutil.Popen
         else:
             popen_func = Popen
-        proc = popen_func(cmd, stdout=stdout, stderr=stderr,
-                    env=env, cwd=cwd)
+        if os.name == 'os2':
+            proc = popen_func(cmd, stdout=stdout, stderr=stderr,
+                        env=env, cwd=cwd, threadsafe=True)
+        else:
+            proc = popen_func(cmd, stdout=stdout, stderr=stderr,
+                        env=env, cwd=cwd)
         return proc
 
     def checkForCrashes(self,
