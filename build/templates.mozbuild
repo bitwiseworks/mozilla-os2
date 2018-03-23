@@ -70,7 +70,14 @@ def SharedLibrary(name, short_name=None):
 
     FORCE_SHARED_LIB = True
     if short_name:
+        if CONFIG['OS_ARCH'] == 'OS2' and short_name.rindex(short_name[-1]) + 1 > 8:
+            error('Shared library\'s short name is longer than ' +
+                  '8 chars: %s' % (short_name))
         SHORT_LIBNAME = short_name
+    else:
+        if CONFIG['OS_ARCH'] == 'OS2' and name.rindex(name[-1]) + 1 > 8:
+            error('Shared library\'s name is longer than ' +
+                  '8 chars: %s (use short_name)' % (name))
 
     Binary()
 

@@ -10,11 +10,11 @@ SOURCES += [
     'TestComponent.cpp',
 ]
 
-XPCOMBinaryComponent('testcomponent')
+XPCOMBinaryComponent('testcomponent', short_name='testcomp')
 
 DEFINES['LIBRARY_FILENAME'] = '%s%s%s' % (
     CONFIG['DLL_PREFIX'],
-    LIBRARY_NAME,
+    SHORT_LIBNAME or LIBRARY_NAME,
     CONFIG['DLL_SUFFIX']
 )
 

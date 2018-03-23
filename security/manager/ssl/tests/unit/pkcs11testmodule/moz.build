@@ -8,7 +8,7 @@ UNIFIED_SOURCES += [
     'pkcs11testmodule.cpp',
 ]
 
-SharedLibrary('pkcs11testmodule')
+SharedLibrary('pkcs11testmodule', short_name='pkcs11tm')
 
 # C_GetFunctionList needs to be exported. As it turns out, it's much easier to
 # just export all the symbols.

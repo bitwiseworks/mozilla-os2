@@ -11,7 +11,7 @@ SOURCES += [
     'gmp-fake-openh264.cpp',
 ]
 
-SharedLibrary("fakeopenh264")
+SharedLibrary("fakeopenh264", short_name="fakeh264")
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     OS_LIBS += [

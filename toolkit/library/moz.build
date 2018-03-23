@@ -5,14 +5,14 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 @template
-def Libxul(name):
+def Libxul(name, short_name=None):
     if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('cocoa', 'uikit'):
         # This is going to be a framework named "XUL", not an ordinary library named
         # "libxul.dylib"
         GeckoFramework(name, linkage=None)
         SHARED_LIBRARY_NAME = 'XUL'
     else:
-        GeckoSharedLibrary(name, linkage=None)
+        GeckoSharedLibrary(name, short_name, linkage=None)
         SHARED_LIBRARY_NAME = 'xul'
 
     DELAYLOAD_DLLS += [
