@@ -263,17 +263,26 @@
        {
          // Symbol free() is special.
          // We override the definition of free() on several platforms.
-         let default_lib = new SharedAll.Library("default_lib",
-                                                 "a.out");
+
          try {
+           // Not on OS/2, so no point in trying.
+           if (SharedAll.Constants.OS2)
+             throw new Error();
+
            // On platforms for which we override free(), nspr defines
            // a special library name "a.out" that will resolve to the
            // correct implementation free().
 
+           let default_lib = new SharedAll.Library("default_lib",
+                                                   "a.out");
            default_lib.declareLazy(SysFile, "free",
-             libc_func("free"), ctypes.default_abi,
+             "free", ctypes.default_abi,
              /*return*/ ctypes.void_t,
              /*ptr*/    ctypes.voidptr_t);
+
+           // Reference the function NOW to make sure a declare attempt is
+           // made so that catch below works when needed.
+           SysFile["free"];
 
          } catch (ex) {
            // We don't have an a.out library or a.out doesn't contain free.
