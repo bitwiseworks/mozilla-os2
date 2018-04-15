@@ -89,8 +89,8 @@ menucaption > .menu-iconic-text {
 }
 
 .menu-iconic-icon {
-  width: 16px;
-  height: 16px;
+  max-width: 16px;
+  max-height: 16px;
   margin-top: -1px !important;
   margin-bottom: 1px !important;
 }
