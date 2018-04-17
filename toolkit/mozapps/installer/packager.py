@@ -73,12 +73,8 @@ class ToolLauncher(object):
             extra_linker_path = os.path.join(self.tooldir, 'bin')
         env = dict(os.environ)
         if os.name == 'os2':
-            # extra_linker_path has to go to the parent environment since
-            # Popen can't handle this special case so far (in Python 2.7.6)
-            old_beginlibpath = os.environ.get('BEGINLIBPATH', '')
-            old_libpathstrict = os.environ.get('LIBPATHSTRICT', '')
-            os.environ['BEGINLIBPATH'] = extra_linker_path + ';' + old_beginlibpath
-            os.environ['LIBPATHSTRICT'] = 'T'
+            env['BEGINLIBPATH'] = extra_linker_path + ';' + env.get('BEGINLIBPATH', '')
+            env['LIBPATHSTRICT'] = 'T'
         else:
             for p in ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']:
                 if p in env:
@@ -103,11 +99,7 @@ class ToolLauncher(object):
 
         print >>errors.out, 'Executing', ' '.join(cmd)
         errors.out.flush()
-        result = subprocess.call(cmd, env=env)
-        if os.name == 'os2':
-            os.environ['BEGINLIBPATH'] = old_beginlibpath
-            os.environ['LIBPATHSTRICT'] = old_libpathstrict
-        return result
+        return subprocess.call(cmd, env=env)
 
     def can_launch(self):
         return self.tooldir is not None
