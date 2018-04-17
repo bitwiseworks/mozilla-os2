@@ -75,8 +75,8 @@ class ToolLauncher(object):
         if os.name == 'os2':
             # extra_linker_path has to go to the parent environment since
             # Popen can't handle this special case so far (in Python 2.7.6)
-            old_beginlibpath = os.environ['BEGINLIBPATH']
-            old_libpathstrict = os.environ['LIBPATHSTRICT']
+            old_beginlibpath = os.environ.get('BEGINLIBPATH', '')
+            old_libpathstrict = os.environ.get('LIBPATHSTRICT', '')
             os.environ['BEGINLIBPATH'] = extra_linker_path + ';' + old_beginlibpath
             os.environ['LIBPATHSTRICT'] = 'T'
         else:

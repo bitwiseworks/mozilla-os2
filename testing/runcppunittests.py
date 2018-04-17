@@ -120,7 +120,7 @@ class CPPUnitTests(object):
             env["LIBPATHSTRICT"] = "T"
         if pathvar:
             if pathvar in env:
-                env[pathvar] = "%s%s%s" % (libpath, os.pathsep, env[pathvar])
+                env[pathvar] = "%s%s%s" % (libpath, os.pathsep, env.get(pathvar, ''))
             else:
                 env[pathvar] = libpath
 
