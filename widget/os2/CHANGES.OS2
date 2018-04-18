@@ -5,6 +5,30 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 45.9.0 GA1.1 (2018-04-18)
+
+  - Fix SSE3 support in bitmap handling. This may fix potential spontaneious
+    crashes when rendering pages.
+
+  - Use native memory allocation for SharedArrayObjectin JS. This should
+    improve memory footprint when allocating big memory blocks in JavaScript.
+
+  - Implement signal handlers in JIT. This should slightly improve
+    responsiveness of JS code doing heavy tasks.
+
+  - Align JavaScript garbage collector's memory manager to current state. This
+    should reduce the probability of out-of-memory conditions when running
+    heavy JS tasks.
+
+  - Boost XPCOM timer thread priority to increase accuracy. Should slightly
+    improve JavaScript code responsiveness.
+
+  - Fix JavaScrit binding to kLIBC rmdir. This makes sure temporary directories
+    can be removed from JS code.
+
+  - Fix too big radio buttons in menus. This is a regression of Firefox 45 GA.
+
+
 Firefox 45.9.0 GA (2017-10-04)
 
   - Update Firefox to latest version 45.9.0 ESR (including many upstream and
