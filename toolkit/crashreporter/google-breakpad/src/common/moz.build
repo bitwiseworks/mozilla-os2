@@ -16,7 +16,7 @@ UNIFIED_SOURCES += [
     'unique_string.cc',
 ]
 
-if CONFIG['OS_ARCH'] != 'WINNT':
+if CONFIG['OS_ARCH'] not in ('WINNT', 'OS2'):
     UNIFIED_SOURCES += [
         'arm_ex_reader.cc',
         'arm_ex_to_module.cc',
@@ -43,13 +43,13 @@ if CONFIG['OS_ARCH'] == 'Darwin' and CONFIG['HOST_OS_ARCH'] != 'Darwin':
         '-I%s/toolkit/crashreporter/google-breakpad/src/third_party/mac_headers/' % TOPSRCDIR,
     ]
 
-if CONFIG['OS_TARGET'] != 'Android' and CONFIG['OS_ARCH'] != 'WINNT':
+if CONFIG['OS_TARGET'] != 'Android' and CONFIG['OS_ARCH'] not in ('WINNT', 'OS2'):
     UNIFIED_SOURCES += [
         'stabs_reader.cc',
         'stabs_to_module.cc',
     ]
 
-if CONFIG['OS_ARCH'] != 'WINNT' and CONFIG['MOZ_CRASHREPORTER']:
+if CONFIG['OS_ARCH'] not in ('WINNT', 'OS2') and CONFIG['MOZ_CRASHREPORTER']:
     HOST_SOURCES += [
         'arm_ex_reader.cc',
         'arm_ex_to_module.cc',

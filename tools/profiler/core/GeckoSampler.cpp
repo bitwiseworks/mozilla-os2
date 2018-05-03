@@ -1269,7 +1269,7 @@ SyncProfile* GeckoSampler::GetBacktrace()
 #if defined(XP_WIN) || defined(LINUX)
   tickcontext_t context;
   sample.PopulateContext(&context);
-#elif defined(XP_MACOSX)
+#elif defined(XP_MACOSX) || defined(XP_OS2)
   sample.PopulateContext(nullptr);
 #endif
 #endif

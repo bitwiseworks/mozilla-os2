@@ -44,6 +44,11 @@
 #include <pthread.h>
 #endif
 
+#ifdef XP_OS2
+#define INCL_BASE
+#include <os2.h>
+#endif
+
 #include <stdint.h>
 #include <math.h>
 #ifndef SPS_STANDALONE
@@ -220,6 +225,9 @@ class Thread {
 #if defined(XP_MACOSX)
   pthread_t thread_;
 #endif
+#if defined(XP_OS2)
+  tid_t thread_id_;
+#endif
 
   static tid_t GetCurrentId();
 
@@ -246,6 +254,7 @@ class Thread {
     && (defined(SPS_PLAT_amd64_linux) || defined(SPS_PLAT_arm_android) \
         || (defined(MOZ_WIDGET_ANDROID) && defined(__arm__)) \
         || defined(SPS_PLAT_x86_linux) \
+        || defined(SPS_OS_os2) \
         || defined(SPS_OS_windows) \
         || defined(SPS_OS_darwin))
 # define HAVE_NATIVE_UNWIND

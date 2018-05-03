@@ -1781,7 +1781,7 @@ Linux)
         MOZ_ENABLE_PROFILER_SPS=
     esac
     ;;
-WINNT) ;;
+WINNT|OS2) ;;
 Darwin)
     if test -n "$MOZ_IOS"; then
         MOZ_ENABLE_PROFILER_SPS=

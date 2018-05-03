@@ -81,6 +81,11 @@ if CONFIG['MOZ_ENABLE_PROFILER_SPS']:
             'core/platform-win32.cc',
             'core/shared-libraries-win32.cc',
         ]
+    elif CONFIG['OS_TARGET'] == 'OS2':
+        SOURCES += [
+            'core/platform-os2.cc',
+            'core/shared-libraries-os2.cc',
+        ]
 
     LOCAL_INCLUDES += [
         '/docshell/base',

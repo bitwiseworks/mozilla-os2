@@ -28,6 +28,7 @@
 #undef SPS_OS_linux
 #undef SPS_OS_darwin
 #undef SPS_OS_windows
+#undef SPS_OS_os2
 
 #if defined(__linux__) && defined(__x86_64__)
 #  define SPS_PLAT_amd64_linux 1
@@ -68,6 +69,11 @@
 #  define SPS_PLAT_amd64_windows 1
 #  define SPS_ARCH_amd64 1
 #  define SPS_OS_windows 1
+
+#elif defined(__OS2__)
+#  define SPS_PLAT_x86_os2 1
+#  define SPS_ARCH_x86 1
+#  define SPS_OS_os2 1
 
 #else
 #  error "Unsupported platform"

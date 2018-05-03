@@ -20,7 +20,7 @@
 # include "common/linux/dump_symbols.h"
 #elif defined(SPS_PLAT_amd64_darwin) || defined(SPS_PLAT_x86_darwin)
 # include "shim_mac_dump_syms.h"
-#elif defined(SPS_OS_windows)
+#elif defined(SPS_OS_windows) || defined(SPS_OS_os2)
   /* This is all stubbed out anyway, so don't do anything. */
 #else
 # error "Unknown platform"
@@ -189,7 +189,7 @@ LocalDebugInfoSymbolizer::FillSourceLineInfo(const CodeModules* modules,
   }
   frame->module = module;
 
-# if !defined(SPS_OS_windows)
+# if !defined(SPS_OS_windows) && !defined(SPS_OS_os2)
   Module* debug_info_module = NULL;
   SymbolMap::const_iterator it = symbols_.find(module->code_file());
   if (it == symbols_.end()) {
