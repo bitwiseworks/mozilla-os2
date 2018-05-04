@@ -253,7 +253,7 @@ fi
 AC_SUBST([LD_IS_BFD])
 
 if test "$GNU_CC"; then
-    if test -z "$DEVELOPER_OPTIONS" -a test "$OS_TARGET" != "OS2"; then
+    if test -z "$DEVELOPER_OPTIONS" -a "$OS_TARGET" != "OS2"; then
         CFLAGS="$CFLAGS -ffunction-sections -fdata-sections"
         CXXFLAGS="$CXXFLAGS -ffunction-sections -fdata-sections"
     fi
