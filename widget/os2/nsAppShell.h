@@ -19,9 +19,13 @@
 class nsAppShell : public nsBaseAppShell
 {
 public:
-  nsAppShell() : mEventWnd(NULLHANDLE) {}
+  nsAppShell() :
+    mEventWnd(NULLHANDLE),
+    mNativeCallbackPending(false)
+    {}
 
   nsresult Init();
+  void DoProcessMoreGeckoEvents();
 
 protected:
   virtual void ScheduleNativeEventCallback();
@@ -30,6 +34,7 @@ protected:
 
 protected:
   HWND mEventWnd;
+  bool mNativeCallbackPending;
 
 friend MRESULT EXPENTRY EventWindowProc(HWND, ULONG, MPARAM, MPARAM);
 };
