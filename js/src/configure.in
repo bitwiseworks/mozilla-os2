@@ -1944,7 +1944,8 @@ ia64*-hpux*)
     if test "$EMXOMFLD_TYPE" = "WLINK" -o "$EMXOMFLD_TYPE" = "wlink"; then
         LDFLAGS="$LDFLAGS -Zlinker DISABLE\ 1121"
     fi
-    MOZ_OPTIMIZE_FLAGS="-O2"
+    # Deliberately disable SSE/SSE2 (GCC/2 bug, see https://github.com/psmedley/gcc/issues/28)
+    MOZ_OPTIMIZE_FLAGS="-O3 -mno-sse -mno-sse2"
     if test "$EMXOMFLD_TYPE" = "WLINK" -o "$EMXOMFLD_TYPE" = "wlink"; then
         MOZ_OPTIMIZE_LDFLAGS=
     else
