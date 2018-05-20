@@ -506,6 +506,20 @@ posted to other forums may not be seen by the developers.
 -- Known Problems -------------------------------------------------------------
 ===============================================================================
 
+* Minimizing Firefox windows may sometimes cause 100% CPU load depending on
+  the hardware configuration. As a workaround, you may try to use an
+  alternative Firefox theme, e.g. "LavaFox V2" which is avaliable through the
+  Firefox Add-ons repositories and is known to restore CPU load back to normal
+  when Firefox is minimized.
+
+* If you experience unresponsive UI on web-pages with intensive JavaScript
+  usage, you may try to improve the UI response by fine-tuning the
+  "layout.frame_rate" preference (availabie through "about:config") which is
+  set to 0 by default. Chagne it to some high value (like 6000 or 10000) and
+  restart Firefox. You will get a slightly better response time by the cost of
+  losing some smoothness in graphical animation and video playback. You will
+  also get the minimize problem (described above) fixed in this case.
+
 * Printing of complex web pages using the native LASERJET and OMNI printer
   drivers is known to crash the browser in PMMERGE.DLL in some cases.
   As a workaround, please install and use the CUPS printer (based on the
@@ -513,13 +527,6 @@ posted to other forums may not be seen by the developers.
   eComStation installations. In order to install it on older systems please
   refer to:
      http://trac.netlabs.org/ecups.
-
-* Due to bugs in MMPM, the current version of Firefox runs the Flash plugin in
-  "in-process" (traditional) mode instead of the new OOP (out-of-process) mode
-  used on other platforms. This will be fixed in future releases.
-
-* The OpenJDK (Java) plugin works but there are some problems with window
-  updates. This is to be addressed in future releases.
 
 * Mozilla apps will beep when copying more than 64 kB of text to the clipboard.
   This is to alert users that many applications (most notably the system

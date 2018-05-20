@@ -5,6 +5,24 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 45.9.0 GA2 (2018-05-20)
+
+  - Fix Japanese text display (regression of 38.x builds).
+
+  - Fine tune compiler optimization to produce faster JavaScript code and at
+    the same time make XUL.DLL more compact (its size is now 25% less).
+
+  - Prevent possible race conditions that could lead to UI freezes when
+    entering system-provided modal event loops.
+
+  - Restore the maximum time to process native UI events to what it was in
+    version 38.x (20 ms) which improves the overall UI responsiveness on
+    web-pages involving intensive use of JavaScript.
+
+  - Add information about workarounds for unresponsive UI to README.OS2
+    ("Known Problems" section).
+
+
 Firefox 45.9.0 GA1.1 (2018-04-18)
 
   - Fix SSE3 support in bitmap handling. This may fix potential spontaneious
